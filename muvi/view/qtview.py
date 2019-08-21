@@ -29,6 +29,7 @@ from .view import View
 
 GAMMA_CORRECT = 2.2
 
+
 class BoolViewSetting(QCheckBox):
     def __init__(self, gl_display, varname, default, parent=None):
         super().__init__(None, parent)
@@ -49,6 +50,7 @@ class LinearViewSetting(QDoubleSpinBox):
 
         self.valueChanged.connect(lambda val: gl_display.update_view_settings(
             **{varname:val}))
+
 
     def set_from_slider(self, val, slider_max):
         minval = self.minumum()
@@ -153,12 +155,15 @@ class ViewWidget(QOpenGLWidget):
     def minimumSizeHint(self):
         return QSize(300, 300)
 
+
     def sizeHint(self):
         return QSize(800, 600)
 
+
     def initializeGL(self):
-        self.gl = self.context().versionFunctions()
-        self.gl.initializeOpenGLFunctions()
+        # These are not needed, and throw errors on Windows installs
+        # self.gl = self.context().versionFunctions()
+        # self.gl.initializeOpenGLFunctions()
         self.dpr = self.devicePixelRatio()
         try:
             self.view = View(volume=self.volume, width=self.width()*self.dpr,
@@ -177,17 +182,21 @@ class ViewWidget(QOpenGLWidget):
             traceback.print_exc()
             self.parent.close()
 
+
     def resizeGL(self, width, height):
         if hasattr(self, 'view'): self.view.resize(width*self.dpr, height*self.dpr)
+
 
     def mousePressEvent(self, event):
         self.lastPos = event.pos()
         self.view.buttons_pressed = int(event.buttons())
         self.update()
 
+
     def mouseReleaseEvent(self, event):
         self.view.buttons_pressed = int(event.buttons())
         self.update()
+
 
     def mouseMoveEvent(self, event):
         x = event.x()
@@ -199,9 +208,11 @@ class ViewWidget(QOpenGLWidget):
         self.view.mouse_move(x*self.dpr, y*self.dpr, dx*self.dpr, dy*self.dpr)
         self.update()
 
+
     def wheelEvent(self, event):
         self.view.scale *= 1.25**(event.angleDelta().y()/120)
         self.update()
+
 
     def update_view_settings(self, **kwargs):
         self.view.update_view_settings(**kwargs)

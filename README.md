@@ -31,12 +31,20 @@ Python 3.X is supported.
 Assuming you have Anaconda installed, you can get the require packages with:
 
 ```shell
-$ conda install pytables pyqt
+$ conda install pytables pyqt pyopengl
 ```
 
 ### Windows
 
-You should be able to download the package directly from the Git repo and run `setup.py` as above.  More detailed directions coming soon.
+You should be able to download the package directly from the Git repo and run `setup.py` as above.  
+
+Alternatively, if you have Atom () installed, you can use it to clone the repository and install this way.
+To do this, from within atom:
+ - `Ctrl+Shift+P`
+ - Enter `Github: Clone` into the dialog, and hit enter
+ - Add the address of this page (`https://github.com/klecknerlab/muvi.git`)
+ - Select a folder, and navigate there in an Anaconda prompt
+ - Run `setup.py` as above.
 
 ---
 
