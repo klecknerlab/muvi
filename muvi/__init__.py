@@ -19,6 +19,7 @@ import json
 import struct
 import warnings
 import os
+import sys
 
 
 try:
@@ -33,10 +34,40 @@ class VolumetricMovieError(Exception):
     pass
 
 
+class StatusBar(object):
+    def __init__(self, max_count=100, pre_message='', post_message='', length=40):
+        self.max_count = max_count
+        self.length = length
+        self.fmt = "\r" + pre_message +  "[%-" + str(length) + "s] " + post_message + "%s"
+
+    def __enter__(self):
+        self.count = 0
+        self.update(self.count)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.update(self.max_count)
+        sys.stdout.write('\n')
+
+    def update(self, i):
+        # if i < self.max_count:
+        cnt = '%d/%d' % (i, self.max_count)
+        # else:
+        #     cnt = 'done'
+        i = min(self.max_count, i)
+        sys.stdout.write(self.fmt % ('=' * int(i/self.max_count*self.length + 0.5), cnt))
+        sys.stdout.flush()
+
+    def tick(self, n = 1):
+        self.count += 1
+        self.update(self.count)
+
+
 _file_ext = {
     '.h5':'HDF5',
     '.hdf5':'HDF5',
     '.s4d':'S4D',
+    '.cine':'CINE',
 }
 
 class VolumetricMovie(object):
@@ -203,7 +234,7 @@ class VolumetricMovie(object):
             raise StopIteration
 
 
-    def save(self, fn, file_type=None, complevel=5, complib='blosc:lz4', bitshuffle=False, shuffle=False):
+    def save(self, fn, file_type=None, complevel=5, complib='blosc:lz4', bitshuffle=False, shuffle=False, print_status=False, num_vols=None):
         if file_type is None:
             ext = os.path.splitext(fn)[1].lower()
             if ext in _file_ext:
@@ -217,9 +248,21 @@ class VolumetricMovie(object):
 
                 g = f.create_group('/', 'VolumetricMovie')
 
-                for n, vol in enumerate(self):
+                if num_vols is None: num_vols = len(self)
+
+                if print_status:
+                    with StatusBar(num_vols) as stat:
+                        for n in range(num_vols):
+                            f.create_carray(g, 'frame_%08d' % n, obj=self[n], filters=comp_filter)
+                            stat.tick()
+
+                else:
+                    for n in range(num_vols):
+                        f.create_carray(g, 'frame_%08d' % n, obj=self[n], filters=comp_filter)
+
+                # for n, vol in enumerate(self):
                     # print('write ->', n)
-                    f.create_carray(g, 'frame_%08d' % n, obj=vol, filters=comp_filter)
+                    # f.create_carray(g, 'frame_%08d' % n, obj=vol, filters=comp_filter)
 
                 for k, v in self.info.items():
                     f.set_node_attr(g, k, v)
@@ -256,6 +299,53 @@ class SparseMovie(VolumetricMovie):
         return self._sp[i]
 
 
+class CineMovie(VolumetricMovie):
+    def __init__(self, fn, fpv=512, offset=0, fps=None, info=None, clip=80, top=100, gamma=False):
+        from .cine import Cine
+
+        self._f = Cine(fn)
+
+        if fps is None: fps = fpv
+        self.fps = fps
+        self.fpv = fpv
+        self.offset = offset
+        self.clip = clip
+        self.top = top
+        self.gamma = gamma
+
+        self.info = {
+            'Lx': self._f.width,
+            'Ly': self._f.height,
+            'Lz': fps,
+            'gamma': 2 if gamma else 1
+        }
+
+        self.info.update()
+        self.validate_info()
+        self.name = fn
+
+
+    def __len__(self):
+        return len(self._f)//self.fps
+
+    def __getitem__(self, i):
+        i0 = self.offset + i * self.fps
+
+        vol = np.empty((self.fps, self._f.height, self._f.width), dtype='u1')
+
+        for i in range(self.fpv):
+            frame = (np.clip(self._f[i+i0], self.clip, self.clip + self.top) - self.clip).astype('f')
+            frame /= self.top
+            if self.gamma: frame = np.sqrt(frame)
+            vol[i] = (frame*255).astype('u1')
+
+        return vol
+
+
+
+    def close(self):
+        self._f.close()
+
 
 class HDF5Movie(VolumetricMovie):
     def __init__(self, fn, group='/VolumetricMovie'):
@@ -284,6 +374,7 @@ class HDF5Movie(VolumetricMovie):
 _file_types = {
     'HDF5': HDF5Movie,
     'S4D': SparseMovie,
+    'CINE': CineMovie,
 }
 
 def open_4D_movie(fn, file_type=None, *args, **kwargs):

@@ -219,6 +219,73 @@ T64_F_ms = lambda x: '%.3f' % (float(x.rstrip('L')) / 2.**32)
 T64_S = lambda s: lambda t: time.strftime(s, time.localtime(float(t.rstrip('L'))/2.**32))
 
 
+#Processing the data in chunks keeps it in the L2 catch of the processor, increasing speed for large arrays by ~50%
+CHUNK_SIZE = 6 * 10**5 #Should be divisible by 3, 4 and 5!  This seems to be near-optimal.
+
+def ten2sixteen(a):
+    b = np.zeros(a.size//5*4, dtype='u2')
+
+    for j in range(0, len(a), CHUNK_SIZE):
+        (a0, a1, a2, a3, a4) = [a[j+i:j+CHUNK_SIZE:5].astype('u2') for i in range(5)]
+
+        k = j//5 * 4
+        k2 = k + CHUNK_SIZE//5 * 4
+
+        b[k+0:k2:4] = ((a0 & 0b11111111) << 2) + ((a1 & 0b11000000) >> 6)
+        b[k+1:k2:4] = ((a1 & 0b00111111) << 4) + ((a2 & 0b11110000) >> 4)
+        b[k+2:k2:4] = ((a2 & 0b00001111) << 6) + ((a3 & 0b11111100) >> 2)
+        b[k+3:k2:4] = ((a3 & 0b00000011) << 8) + ((a4 & 0b11111111) >> 0)
+
+    return b
+
+def sixteen2ten(b):
+    a = np.zeros(b.size//4*5, dtype='u1')
+
+    for j in range(0, len(a), CHUNK_SIZE):
+        (b0, b1, b2, b3) = [b[j+i:j+CHUNK_SIZE:4] for i in range(4)]
+
+        k = j//4 * 5
+        k2 = k + CHUNK_SIZE//4 * 5
+
+        a[k+0:k2:5] =                              ((b0 & 0b1111111100) >> 2)
+        a[k+1:k2:5] = ((b0 & 0b0000000011) << 6) + ((b1 & 0b1111110000) >> 4)
+        a[k+2:k2:5] = ((b1 & 0b0000001111) << 4) + ((b2 & 0b1111000000) >> 6)
+        a[k+3:k2:5] = ((b2 & 0b0000111111) << 2) + ((b3 & 0b1100000000) >> 8)
+        a[k+4:k2:5] = ((b3 & 0b0011111111) << 0)
+
+    return a
+
+def twelve2sixteen(a):
+    b = np.zeros(a.size//3*2, dtype='u2')
+
+    for j in range(0, len(a), CHUNK_SIZE):
+        (a0, a1, a2) = [a[j+i:j+CHUNK_SIZE:3].astype('u2') for i in range(3)]
+
+        k = j//3 * 2
+        k2 = k + CHUNK_SIZE//3 * 2
+
+        b[k+0:k2:2] = ((a0 & 0xFF) << 4) + ((a1 & 0xF0) >> 4)
+        b[k+1:k2:2] = ((a1 & 0x0F) << 8) + ((a2 & 0xFF) >> 0)
+
+    return b
+
+
+def sixteen2twelve(b):
+    a = np.zeros(b.size//2*3, dtype='u1')
+
+    for j in range(0, len(a), CHUNK_SIZE):
+        (b0, b1) = [b[j+i:j+CHUNK_SIZE:2] for i in range(2)]
+
+        k = j//2 * 3
+        k2 = k + CHUNK_SIZE//2 * 3
+
+        a[k+0:k2:3] =                       ((b0 & 0xFF0) >> 4)
+        a[k+1:k2:3] = ((b0 & 0x00F) << 4) + ((b1 & 0xF00) >> 8)
+        a[k+2:k2:3] = ((b1 & 0x0FF) << 0)
+
+    return a
+
+
 class Cine(object):
     '''Class for reading Vision Research CINE files, e.g. from Phantom cameras.
 
@@ -309,17 +376,18 @@ class Cine(object):
 
         frame = np.frombuffer(self.f.read(image_size), data_type)
 
-        #if (actual_bits == 10):
-        #    frame = packed.ten2sixteen(frame)
-        #elif (actual_bits == 12):
-        #    frame = packed.twelve2sixteen(frame)
-        if (actual_bits % 8):
-            raise ValueError('Data should be byte aligned, packed data not supported' % actual_bits)
+        if (actual_bits == 10):
+           frame = ten2sixteen(frame)
+        elif (actual_bits == 12):
+           frame = twelve2sixteen(frame)
+
+        # if (actual_bits % 8):
+        #     raise ValueError('Data should be byte aligned, packed data not supported' % actual_bits)
 
         frame = frame.reshape(self.height, self.width)[::-1]
 
-        #if actual_bits in (10, 12):
-        #    frame = frame[::-1, :]  # Don't know why it works this way, but it does...
+        if actual_bits in (10, 12):
+           frame = frame[::-1, :]  # Don't know why it works this way, but it does...
 
         self.file_lock.release()
 
