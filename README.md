@@ -1,6 +1,8 @@
-### Setup
+# Setup
 
-> To install the package in developer mode:
+### Mac / Linux
+
+To install the package in developer mode:
 
 ```shell
 $ git clone https://github.com/klecknerlab/muvi
@@ -8,7 +10,7 @@ $ cd muvi
 $ python setup.py develop
 ```
 
-> To install the package in the regular manner (not recommended, code is
+To install the package in the regular manner (not recommended, code is
 under active development!):
 
 ```shell
@@ -26,17 +28,21 @@ This is easiest to do with some sort of package manager; the utilities are being
 developed using Anaconda (https://www.anaconda.com/).  Note that the only
 Python 3.X is supported.
 
-> Assuming you have Anaconda installed, you can get the require packages with:
+Assuming you have Anaconda installed, you can get the require packages with:
 
 ```shell
 $ conda install pytables pyqt
 ```
 
+### Windows
+
+You should be able to download the package directly from the Git repo and run `setup.py` as above.  More detailed directions coming soon.
+
 ---
 
-## Usage
+# Usage
 
-> To create and view an example volume:
+To create and view an example volume:
 
 ```shell
 $ cd [MUVI DIR]/util
@@ -46,14 +52,15 @@ $ python view.py ~/gyroid.h5
 
 ![](gyroid.png)
 
-> To convert a Phantom CINE file to compressed HDF5 volume:
+To convert a Phantom CINE file to compressed HDF5 volume:
 
 ```shell
 $ cd [MUVI DIR]/util
 $ python convert_cine.py [INPUT FILE] -s [FRAMES PER SCAN] -v [LIVE FRAMES PER VOLUME]
 $ python view.py [OUTPUT FILE]
 ```
-> By default, the output filename is the same as the input with an `.h5` extension.  There are also more options in the conversion utility, which you can view with:
+
+By default, the output filename is the same as the input with an `.h5` extension.  There are also more options in the conversion utility, which you can view with:
 
 ```shell
 $ cd [MUVI DIR]/util
@@ -85,12 +92,36 @@ optional arguments:
 ```
 
 
-> It is very likely you will want to specify at least the `clip`  and `max` values.  To test a volume, you can use the `number` option to output a single frame.
+> It is very likely you will want to specify at least the `clip`  and `max` values.  To test a volume, you can use the `number` option to output a single frame first.
 
 ---
 
+# Features
 
-### License
+This project is currently in active development.
+A number of features are currently planned:
+
+- [x] Volume rendering
+- [x] Isosurface viewing
+- [x] HDF5 input format
+- [x] CINE conversion
+- [ ] Conversion GUI
+- [ ] Display perspective correction
+- [ ] Support for perspective in old "S4D" format  
+- [ ] Perspective correction on volumes in memory (for external processing)
+- [ ] Image export (high res)
+- [ ] Movie export
+- [ ] Multithreaded display code (to avoid hang ups)
+- [ ] Labelled axes
+- [ ] Standalone Mac App
+- [ ] Standalone Windows App
+- [ ] Create Wiki with lots of practical examples
+
+
+
+---
+
+# License
 
 Copyright 2019 Dustin Kleckner
 
