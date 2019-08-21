@@ -9,10 +9,10 @@ setup(
     author_email='dkleckner@ucmerced.edu',
     license='Apache 2.0 (http://www.apache.org/licenses/LICENSE-2.0)',
     packages=['muvi'],
-    install_requires=[
+    install_requires=[ #Many of the packages are not in PyPi, so assume the user knows how to isntall them!
         # 'pytables',
-        'numpy',
-        'PyQt5',
+        # 'numpy',
+        # 'PyQt5',
     ],
     zip_safe=False
 )
