@@ -100,7 +100,8 @@ class Texture(object):
 
     def __init__(self, size, format=GL_RGBA, data_type=GL_UNSIGNED_BYTE,
                  mag_filter=GL_LINEAR, min_filter=GL_LINEAR, wrap_s=None,
-                 wrap_t=None, wrap_r=None, wrap=None, target=None, source=None):
+                 wrap_t=None, wrap_r=None, wrap=None, target=None, source=None,
+                 internal_format=None):
 
         # print(size)
         if target is None:
@@ -122,12 +123,16 @@ class Texture(object):
         self.format = format
         self.data_type = data_type
         self.size = size
+        if internal_format is None:
+            self.internal_format = format
+        else:
+            self.internal_format = internal_format
 
         if len(size) == 2:
-            glTexImage2D(self.target, 0, format, size[0], size[1], 0, format,
+            glTexImage2D(self.target, 0, self.internal_format, size[0], size[1], 0, format,
                          data_type, source)
         elif len(size) == 3:
-            glTexImage3D(self.target, 0, format, size[0], size[1], size[2], 0,
+            glTexImage3D(self.target, 0, self.internal_format, size[0], size[1], size[2], 0,
                          format, data_type, source)
         else: raise ValueError('size should have 2 or 3 elements (found %s)' % len(size))
 
@@ -165,11 +170,11 @@ class Texture(object):
             raise ValueError('new array must have same shape as texture!')
 
         if len(self.size) == 2:
-            glTexImage2D(self.target, 0, self.format, self.size[0], self.size[1], 0, self.format,
+            glTexImage2D(self.target, 0, self.internal_format, self.size[0], self.size[1], 0, self.format,
                          self.data_type, arr)
 
         elif len(self.size) == 3:
-            glTexImage3D(self.target, 0, self.format, self.size[0], self.size[1], self.size[2], 0,
+            glTexImage3D(self.target, 0, self.internal_format, self.size[0], self.size[1], self.size[2], 0,
                          self.format, self.data_type, arr)
 
 

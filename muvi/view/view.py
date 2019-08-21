@@ -309,6 +309,8 @@ class View(object):
         self.select_volume_shader()
 
 
+
+
     def units_per_pixel(self):
         '''Returns the viewport scale in image units per pixel.'''
         return 2.0/self.scale
@@ -494,7 +496,8 @@ class View(object):
             #If the viewport has changed, resize things.
             if not hasattr(self, 'fbo'):
                 self.fbo = FrameBufferObject(width=self.width, height=self.height,
-                                             target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT)
+                                             target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
+                                             internal_format=GL_RGBA32F)
             else:
                 self.fbo.resize(self.width, self.height)
             self._oldwidth = self.width
@@ -539,7 +542,7 @@ class View(object):
         #   the back surface.
         self.texture_to_color_shader.bind()
 
-        glClearColor(0.0, 0.0, 0.0, 0.0)
+        glClearColor(0.0, 0.0, 0.0, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         # Only draw back faces!
@@ -572,6 +575,11 @@ class View(object):
         glActiveTexture(GL_TEXTURE1)
         self.fbo.texture.bind()
 
+
+        # glClampColor(GL_CLAMP_READ_COLOR, GL_FALSE);
+        # glClampColor(GL_CLAMP_VERTEX_COLOR, GL_FALSE);
+        # glClampColor(GL_CLAMP_FRAGMENT_COLOR, GL_FALSE)
+
         if self.volume is not None:
             self.current_volume_shader.bind()
             # self.volume_iso_shader.bind()
@@ -579,10 +587,13 @@ class View(object):
             # If we don't have a volume bound, we can draw something neat!
             self.interference_shader.bind()
 
+        # self.interference_shader.bind()
+
         # Draw just the front faces this time.
         glCullFace(GL_BACK)
 
         # Do it!
+
         self._texture_cube()
 
 
