@@ -112,6 +112,7 @@ A number of features are currently planned:
 - [x] Volume rendering
 - [x] Isosurface viewing
 - [x] HDF5 input format
+- [x] Custom "MUVI" format (much faster than HDF5)
 - [x] CINE conversion
 - [ ] Conversion GUI
 - [ ] Display perspective correction

@@ -20,7 +20,7 @@ import struct
 import warnings
 import os
 import sys
-
+import struct, blosc
 
 try:
     import tables
@@ -34,33 +34,97 @@ class VolumetricMovieError(Exception):
     pass
 
 
-class StatusBar(object):
-    def __init__(self, max_count=100, pre_message='', post_message='', length=40):
-        self.max_count = max_count
+# class StatusBar(object):
+#     def __init__(self, max_count=100, pre_message='', post_message='', length=40):
+#         self.max_count = max_count
+#         self.length = length
+#         self.fmt = "\r" + pre_message +  "[%-" + str(length) + "s] " + post_message + "%s"
+#
+#     def __enter__(self):
+#         self.count = 0
+#         self.update(self.count)
+#         return self
+#
+#     def __exit__(self, exc_type, exc_val, exc_tb):
+#         self.update(self.max_count)
+#         sys.stdout.write('\n')
+#
+#     def update(self, i):
+#         # if i < self.max_count:
+#         cnt = '%d/%d' % (i, self.max_count)
+#         # else:
+#         #     cnt = 'done'
+#         i = min(self.max_count, i)
+#         sys.stdout.write(self.fmt % ('=' * int(i/self.max_count*self.length + 0.5), cnt))
+#         sys.stdout.flush()
+#
+#     def tick(self, n = 1):
+#         self.count += 1
+#         self.update(self.count)
+
+
+class stat_range:
+    def __init__(self, start, stop=None, step=1, pre_message='', post_message='', length=40):
+        if stop is None:
+            self.start = 0
+            self.stop = start
+        else:
+            self.start = start
+            self.stop = stop
+
+        self.step = step
         self.length = length
+
+        self.count = 0
+        self.val = 0
+        self.max_count = (self.stop - self.start + self.step - 1) // self.step
         self.fmt = "\r" + pre_message +  "[%-" + str(length) + "s] " + post_message + "%s"
 
-    def __enter__(self):
-        self.count = 0
-        self.update(self.count)
+
+    def __iter__(self):
+        self.update()
+
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.update(self.max_count)
-        sys.stdout.write('\n')
 
-    def update(self, i):
-        # if i < self.max_count:
-        cnt = '%d/%d' % (i, self.max_count)
-        # else:
-        #     cnt = 'done'
-        i = min(self.max_count, i)
-        sys.stdout.write(self.fmt % ('=' * int(i/self.max_count*self.length + 0.5), cnt))
+    def __len__(self):
+        return self.max_count
+
+
+    def get_next(self):
+        ret = self.val
+        self.val += self.step
+        return ret
+
+
+    def __next__(self):
+        if self.count >= self.max_count:
+            self.update()
+            sys.stdout.write('\n')
+            raise StopIteration
+
+        else:
+            ret = self.get_next()
+            self.count += 1
+
+            self.update()
+            return ret
+
+
+    def update(self):
+        cnt = '%d/%d' % (self.count, self.max_count)
+        sys.stdout.write(self.fmt % ('=' * int(min(self.max_count, self.count)/self.max_count*self.length + 0.5), cnt))
         sys.stdout.flush()
 
-    def tick(self, n = 1):
-        self.count += 1
-        self.update(self.count)
+
+class enum_range(stat_range):
+    def __init__(self, obj, **kwargs):
+        super().__init__(len(obj), **kwargs)
+        self.obj = obj
+
+
+    def get_next(self):
+        return (self.count, self.obj[self.count])
 
 
 _file_ext = {
@@ -68,7 +132,12 @@ _file_ext = {
     '.hdf5':'HDF5',
     '.s4d':'S4D',
     '.cine':'CINE',
+    '.muv':'MUVI',
+    '.muvi':'MUVI',
 }
+
+
+
 
 class VolumetricMovie(object):
     '''Generic class for working with volumetric movies.
@@ -216,6 +285,10 @@ class VolumetricMovie(object):
 
 
     def __getitem__(self, i):
+        return self.get_volume(i)
+
+
+    def get_volume(self, i):
         return self.volumes[i]
 
 
@@ -234,7 +307,7 @@ class VolumetricMovie(object):
             raise StopIteration
 
 
-    def save(self, fn, file_type=None, complevel=5, complib='blosc:lz4', bitshuffle=False, shuffle=False, print_status=False, num_vols=None):
+    def save(self, fn, file_type=None, print_status=False, start=0, end=None, skip=1, **kwargs):
         if file_type is None:
             ext = os.path.splitext(fn)[1].lower()
             if ext in _file_ext:
@@ -242,35 +315,126 @@ class VolumetricMovie(object):
             else:
                 raise ValueError('Filename does not contain one of the recognized extensions: %s\n(Found: "%s")' % (str(sorted(self._file_ext.keys())), ext))
 
+        blosc_options = dict(cname='lz4', shuffle=blosc.NOSHUFFLE, typesize=1)
+        blosc_options.update(kwargs)
+
+        if not end: end = len(self)
+
+        if print_status:
+            sfn = fn
+            if len(fn) > 30: sfn = sfn[:27] + '...'
+            enum = stat_range(start, end, skip, post_message='%s:' % sfn)
+        else:
+            enum = range(start, end, skip)
+
         if file_type == "HDF5":
             with tables.open_file(fn, mode='w') as f:
-                comp_filter = tables.Filters(complevel=complevel, complib=complib, shuffle=shuffle, bitshuffle=bitshuffle)
+                comp_filter = tables.Filters(**blosc_options)
 
                 g = f.create_group('/', 'VolumetricMovie')
 
-                if num_vols is None: num_vols = len(self)
-
-                if print_status:
-                    with StatusBar(num_vols) as stat:
-                        for n in range(num_vols):
-                            f.create_carray(g, 'frame_%08d' % n, obj=self[n], filters=comp_filter)
-                            stat.tick()
-
-                else:
-                    for n in range(num_vols):
-                        f.create_carray(g, 'frame_%08d' % n, obj=self[n], filters=comp_filter)
-
-                # for n, vol in enumerate(self):
-                    # print('write ->', n)
-                    # f.create_carray(g, 'frame_%08d' % n, obj=vol, filters=comp_filter)
+                for n in enum:
+                    f.create_carray(g, 'frame_%08d' % n, obj=self[n], filters=comp_filter)
 
                 for k, v in self.info.items():
                     f.set_node_attr(g, k, v)
 
                 f.flush()
 
+        elif file_type == "MUVI":
+
+            info = dict((k, numpy_to_python_val(v)) for (k, v) in self.info.items())
+
+            # Set up header before opening file.
+            json_bytes = bytes('\n' + json.dumps(info, ensure_ascii=False) + '\n', encoding='utf8')
+            header_length = len(json_bytes)
+            offset = max(28 + header_length, 8192)
+            spacer_bytes = offset - (28 + header_length)
+
+            # Get volume info
+            num_volumes = len(enum)
+            vol0 = self[0]
+
+            # Basic volume info
+            shape = vol0.shape
+            dt = vol0.dtype.type
+            if dt not in _NUMPY_TYPES:
+                raise ValueError('Data type %s not supported in MUV file!' % repr(dt))
+            dt = _NUMPY_TYPES[dt]
+
+            # Lets pad the header and align with 1024 bit boundaries
+            bin_header_size = align_bdy(offset + 5*8 + 2 + num_volumes*8, 1024) + 1024
+            next_volume_offset = offset + bin_header_size
+            uc_size = None
+
+            volume_offsets = []
+
+            # Check that this is actually a volume
+            if len(shape) == 3:
+                (depth, height, width) = shape
+                channels = 1
+            elif len(shape) == 4:
+                (depth, height, width, channels) = shape
+            else:
+                raise ValueError('Volumes should have 3 or 4 dimensions, found %d' % (len(shape)))
+
+            if channels not in (1, 2, 3, 4):
+                raise ValueError('Volume should have 1-4 channels only! (found %d)' % channels)
+
+            # Open file
+            with open(fn, 'wb') as f:
+
+                # Write header
+                f.write(b'MUVI')
+                f.write(struct.pack('<QQQ', 1, offset, header_length))
+                f.write(json_bytes)
+
+                # Write preliminary header data; we'll go back later and insert the
+                #   volume offsets.
+                # f.write(bytes(offset - f.tell()))
+                f.seek(offset)
+                f.write(struct.pack('<QQQQQ', num_volumes, depth, height, width, channels))
+                f.write(dt)
+                f.write(struct.pack('<Q', next_volume_offset))
+
+                # Iterate over volumes, writing each
+                for i in enum:
+                    # Convert to bytes
+                    vol = self[i].tostring()
+
+                    # Get uncompressed size of a single volume
+                    if uc_size is None:
+                        uc_size = len(vol)
+                        if uc_size > 2**31:
+                            raise ValueError('The uncompressed size of a single volume is > 2GB; this is currently unsupported by the file writer.')
+
+                    # Check size
+                    if uc_size != len(vol):
+                        raise ValueError('Volume %d (0-indexed) does not have same size as first volume!' % i)
+
+                    # Compress volume
+                    cvol = blosc.compress(vol, **blosc_options)
+
+                    # Jump to volume offset
+                    # f.write(bytes(next_volume_offset - f.tell()))
+                    f.seek(next_volume_offset)
+                    nb = len(cvol)
+                    f.write(struct.pack('<Q', nb))
+                    f.write(cvol)
+
+                    # Keep track of current offset, find next one.
+                    volume_offsets.append(next_volume_offset)
+                    next_volume_offset = align_bdy(next_volume_offset + 8 + nb, 1024)
+
+                # Go back and write offsets
+                f.seek(offset + 5*8 + 2)
+                for n in volume_offsets:
+                    f.write(struct.pack('<Q', n))
+
+                f.close()
+
         else:
-            raise ValueError("Unrecognized file type.  Valid options: ['HDF5']")
+            raise ValueError("Unrecognized file type.  Valid options: ['HDF5', 'MUVI']")
 
 
 class SparseMovie(VolumetricMovie):
@@ -295,7 +459,7 @@ class SparseMovie(VolumetricMovie):
         return len(self._sp)
 
 
-    def __getitem__(self, i):
+    def get_volume(self, i):
         return self._sp[i]
 
 
@@ -328,7 +492,7 @@ class CineMovie(VolumetricMovie):
     def __len__(self):
         return len(self._f)//self.fps
 
-    def __getitem__(self, i):
+    def get_volume(self, i):
         i0 = self.offset + i * self.fps
 
         vol = np.empty((self.fps, self._f.height, self._f.width), dtype='u1')
@@ -341,6 +505,86 @@ class CineMovie(VolumetricMovie):
 
         return vol
 
+
+
+    def close(self):
+        self._f.close()
+
+
+_MUV_TYPES = {
+    b'u1': np.uint8,
+    b'u2': np.uint16,
+    b'u4': np.uint32,
+    b's1': np.int8,
+    b's2': np.int16,
+    b's4': np.int32,
+    b'hf': np.float16,
+    b'ff': np.float32,
+    b'df': np.float64
+}
+
+_NUMPY_TYPES = dict((v, k) for k, v in _MUV_TYPES.items())
+
+def ceil_div(a, b): return -(-a//b)
+def align_bdy(a, b): return ceil_div(a, b) * b
+
+
+def numpy_to_python_val(obj):
+    if np.issubdtype(type(obj), np.integer):
+        return int(obj)
+    elif np.issubdtype(type(obj), np.floating):
+        return float(obj)
+    elif np.issubdtype(type(obj), np.complexfloating):
+        return complex(obj)
+    else:
+        return obj
+
+
+class MuviMovie(VolumetricMovie):
+    def __init__(self, fn, info={}):
+        self._f = open(fn, 'rb')
+        if self._f.read(4) != b'MUVI':
+            raise ValueError('%s does not appear to be a movie file (first 4 bytes are not "MUVI")' % fn)
+
+        (self.version, ) = struct.unpack('<Q', self._f.read(8))
+        if self.version != 1:
+            raise ValueError('Version number of MUVI file is %d; only 1 is supported' % self.version)
+
+        (self.bin_header_offset, self.header_length) = struct.unpack('<QQ', self._f.read(16))
+        header = self._f.read(self.header_length)
+        # print(repr(header))
+        self.info = json.loads(header)
+        self.info.update(info)
+
+        self._f.seek(self.bin_header_offset)
+        self.num_volumes, self.depth, self.height, self.width, self.channels = \
+            struct.unpack('<QQQQQ', self._f.read(40))
+        dt = self._f.read(2)
+        if dt not in _MUV_TYPES:
+            raise ValueError('MUVI file (%s) had data type "%s", which is not supported.' % (fn, dt))
+        self.dt = _MUV_TYPES[dt]
+
+        self.shape = (self.depth, self.height, self.width, self.channels)
+        self.volume_offsets = struct.unpack('<%dQ' % self.num_volumes, self._f.read(8 * self.num_volumes))
+
+        self.validate_info()
+        self.name = fn
+
+
+    def __len__(self):
+        return self.num_volumes
+
+
+    def get_volume(self, i):
+        self._f.seek(self.volume_offsets[i])
+        (nbytes, ) = struct.unpack('<Q', self._f.read(8))
+
+        raw = self._f.read(nbytes)
+        (bbytes, ) = struct.unpack('<L', raw[12:16])
+        if bbytes != nbytes:
+            raise ValueError('Error loading volume %d in "%s"; blosc size does not match expected.\n(May be caused by >2GB volumes, which are not supported by this reader.)' % (i, self.name))
+
+        return np.frombuffer(blosc.decompress(raw), dtype=self.dt).reshape(self.shape)
 
 
     def close(self):
@@ -362,7 +606,7 @@ class HDF5Movie(VolumetricMovie):
         return len(self.frames)
 
 
-    def __getitem__(self, i):
+    def get_volume(self, i):
         return np.asarray(self.movie_node[self.frames[i]])
 
 
@@ -375,6 +619,7 @@ _file_types = {
     'HDF5': HDF5Movie,
     'S4D': SparseMovie,
     'CINE': CineMovie,
+    'MUVI': MuviMovie
 }
 
 def open_4D_movie(fn, file_type=None, *args, **kwargs):
@@ -387,6 +632,7 @@ def open_4D_movie(fn, file_type=None, *args, **kwargs):
         raise ValueError('File extension %s not supported.' % ext)
 
     return _file_types[file_type](fn, *args, **kwargs)
+
 
 # class HDF5Movie(object):
 #     '''Class for storing Volumetric Movies as HDF5 files.

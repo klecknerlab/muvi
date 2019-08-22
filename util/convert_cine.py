@@ -25,7 +25,7 @@ parser.add_argument('-v', '--volume', type=int, help='Number of frames per volum
 parser.add_argument('-s', '--scan', type=int, help='Number of frames per scan', default=None)
 parser.add_argument('-o', '--offset', type=int, help='Offset to first valid frame', default=0)
 parser.add_argument('-c', '--clip', type=int, help='Noise clip value (default: 80; good for 10 bit images)', default=80)
-parser.add_argument('-m', '--max', type=int, help='Max value after clipping (default: use full dynamic range', default=None)
+parser.add_argument('-m', '--max', type=int, help='Max value after clipping (default: use full dynamic range', default=1024-80)
 parser.add_argument('-g', '--gamma', help='If specified, apply 2.0 gamma correction', default=False, action='store_true')
 parser.add_argument('-n', '--number', type=int, help='Number of volumes to output (default: all)', default=None)
 
@@ -36,8 +36,8 @@ ofn = args.outfile
 
 if ofn is None:
     bfn, ext = os.path.splitext(ifn)
-    ofn = bfn + '.h5'
+    ofn = bfn + '.muv'
 
 print(ifn, '=>', ofn)
 vol = muvi.CineMovie(ifn, fpv=args.volume, offset=0, fps=args.scan, info=None, clip=args.clip, top=args.max, gamma=args.gamma)
-vol.save(ofn, print_status=True, num_vols=args.number)
+vol.save(ofn, print_status=True, end=args.number)
