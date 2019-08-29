@@ -37,6 +37,7 @@ from .ooopengl import *
 from string import Template
 import re
 import os
+from PIL import Image
 
 _module_path = os.path.split(os.path.abspath(__file__))[0]
 def in_module_dir(fn):
@@ -253,13 +254,15 @@ class View(object):
     X0 : [3] vector, lower edge of volume view (default: [0, 0, 0]).
     X1 : [3] vector, upper edge of volume view (default: None, set on
             first display to be entire volume)
-    width : float (default: 100), the width of the view
-    height : float (default: 100), the height of the view
+    width : int (default: 100), the width of the view
+    height : int (default: 100), the height of the view
+    os_width : int (default: 1000), the width of the off-screen view (used for screenshots)
+    os_height : int (default: 1000), the height of the off-screen view
     '''
 
     def __init__(self, volume=None, R=np.eye(3), center=None, fov=30,
                  X0=np.zeros(3), X1=None, width=100, height=100,
-                 scale=None):
+                 os_width=1500, os_height=1000, scale=None):
 
         self.R = normalize_basis(R)
         self.center = center
@@ -271,6 +274,11 @@ class View(object):
         self.scale = scale
         self._oldwidth = -1
         self._oldheight = -1
+        self.os_width = os_width
+        self.os_height = os_height
+        self._old_os_width = -1
+        self._old_os_height = -1
+
         self.buttons_pressed = 0
         self.volume_shader = None
         self.render_uniforms = {}
@@ -416,6 +424,10 @@ class View(object):
             if k in kwargs:
                 svs[k] = kwargs.pop(k)
 
+        for k in ("os_width", "os_height"):
+            if k in kwargs:
+                setattr(self, k, kwargs.pop(k))
+
         if svs: self.select_volume_shader(**svs)
         if kwargs: self.update_uniforms(**kwargs)
 
@@ -478,7 +490,7 @@ class View(object):
         return np.tan(self.fov*np.pi/360) if self.fov > 0 else 1.
 
 
-    def draw(self, z0=0.01, z1=10.0):
+    def draw(self, z0=0.01, z1=10.0, offscreen=False, save_image=False):
         '''Draw the volume, creating all objects as required.  Has two
         parameters, but normally the defaults are fine.
 
@@ -486,34 +498,66 @@ class View(object):
         ----------
         z0 : float, the front clip plane (default: 0.01)
         z1 : float, the back clip plane (default: 10.0)
+        offscreen : bool, if True, renders to the offscreen buffer instead of
+           the onscreen one.  (Usually used for screenshots/movies.)
         '''
 
         # When called from QT or other window managers, we can't assume
         # that the default framebuffer is 0, so check!
         default_fbo = glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING)
 
-        if self.width != self._oldwidth or self.height != self._oldheight:
-            #If the viewport has changed, resize things.
-            if not hasattr(self, 'fbo'):
-                self.fbo = FrameBufferObject(width=self.width, height=self.height,
-                                             target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
-                                             internal_format=GL_RGBA32F)
-            else:
-                self.fbo.resize(self.width, self.height)
-            self._oldwidth = self.width
-            self._oldheight = self.height
+        if offscreen:
+            width = self.os_width
+            height = self.os_height
+
+            if self.os_width != self._old_os_width or self.os_height != self._old_os_height:
+                #If the viewport has changed, resize things.
+                if not hasattr(self, 'os_fbo_back'):
+                    self.os_fbo_back = FrameBufferObject(width=self.os_width, height=self.os_height,
+                                                 target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
+                                                 internal_format=GL_RGBA32F)
+
+                    self.os_fbo_output = FrameBufferObject(width=self.os_width, height=self.os_height,
+                                                 data_type=GL_UNSIGNED_BYTE, internal_format=GL_RGBA)
+                else:
+                    self.os_fbo_back.resize(self.os_width, self.os_height)
+                    self.os_fbo_output.resize(self.os_width, self.os_height)
+
+                self._old_os_width = self.os_width
+                self._old_os_height = self.os_height
+
+            back_buffer = self.os_fbo_back
+            display_buffer_id = self.os_fbo_output.id
+
+        else:
+            width = self.width
+            height = self.height
+
+            if self.width != self._oldwidth or self.height != self._oldheight:
+                #If the viewport has changed, resize things.
+                if not hasattr(self, 'fbo'):
+                    self.fbo = FrameBufferObject(width=self.width, height=self.height,
+                                                 target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
+                                                 internal_format=GL_RGBA32F)
+                else:
+                    self.fbo.resize(self.width, self.height)
+                self._oldwidth = self.width
+                self._oldheight = self.height
+
+            back_buffer = self.fbo
+            display_buffer_id = default_fbo
+
+        # print(back_buffer.id, display_buffer_id)
 
         # Need to define things like scale if not already done
         self.autoscale()
 
-        # Set up the viewport.  We do this on every draw call to be safe; no
-        #   telling what the window manager is doing outside this code!
-        glViewport(0, 0, self.width, self.height)
+
 
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
 
-        aspect = self.width/self.height
+        aspect = width/height
         if self.fov > 0:
             ymax = z0 * np.tan(self.fov*np.pi/360)
             glFrustum(-ymax*aspect, ymax*aspect, -ymax, ymax, z0, z1)
@@ -535,7 +579,12 @@ class View(object):
 
 
         # Draw the back buffer; this is used to find the back of the ray trace
-        self.fbo.bind()
+        glBindFramebuffer(GL_FRAMEBUFFER, back_buffer.id)
+
+        # Set up the viewport.  We do this on every draw call to be safe; no
+        #   telling what the window manager is doing outside this code!
+        glViewport(0, 0, width, height)
+
         # glDisable(GL_FRAMEBUFFER_SRGB)
 
         # Here the drawing just writes the value of the texture coordinate on
@@ -555,10 +604,8 @@ class View(object):
         # Draw the cube; handles clipping etc. automatically.
         self._texture_cube()
 
-
-
         # Draw the front buffer; this is where the ray tracing magic happens.
-        glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)
+        glBindFramebuffer(GL_FRAMEBUFFER, display_buffer_id)
         # glEnable(GL_FRAMEBUFFER_SRGB)
         # glClearColor(1.0, 1.0, 1.0, 1.0)
         glClearColor(0.0, 0.0, 0.0, 1.0)
@@ -573,7 +620,7 @@ class View(object):
         #   ray to trace.
         glEnable(GL_TEXTURE_2D)
         glActiveTexture(GL_TEXTURE1)
-        self.fbo.texture.bind()
+        back_buffer.texture.bind()
 
 
         # glClampColor(GL_CLAMP_READ_COLOR, GL_FALSE);
@@ -587,7 +634,7 @@ class View(object):
             # If we don't have a volume bound, we can draw something neat!
             self.interference_shader.bind()
 
-        # self.interference_shader.bind()
+        # self.texture_to_color_shader.bind()
 
         # Draw just the front faces this time.
         glCullFace(GL_BACK)
@@ -595,6 +642,32 @@ class View(object):
         # Do it!
 
         self._texture_cube()
+
+        if save_image:
+            img = np.frombuffer(glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE), dtype='u1').reshape(height, width, -1)
+            Image.fromarray(img).save(save_image)
+
+
+        if display_buffer_id != default_fbo:
+            glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)
+
+
+    #
+    # def save_offscreen_image(self, fn):
+    #     '''Save an image of the rendered volume to a file.  The size of the
+    #     screenshot does not generally match the display, and is rendered
+    #     offscreen.  The width and height are normally determined by the
+    #     `os_width`, and `os_height` parameters.  If `width` or `height` are
+    #     passed, they will update these parameters.
+    #
+    #     Parameters
+    #     ----------
+    #     width : int, default: 1000
+    #     height: int, default: 1000
+    #     offscreen : bool, if True, renders to the offscreen buffer instead of
+    #        the onscreen one.  (Usually used for screenshots/movies.)
+    #     '''
+    #     Image.fromarray(self.offscreen_image).save(fn)
 
 
     def rot_x(self, a):

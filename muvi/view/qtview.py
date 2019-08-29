@@ -24,6 +24,7 @@ from PyQt5.QtGui import *
 import sys
 import traceback
 import math
+import glob
 
 from .view import View
 
@@ -58,17 +59,22 @@ class LinearViewSetting(QDoubleSpinBox):
         self.setValue(minval + (val/slider_max)*(maxval-minval))
 
 
+
+
+
+
+
 class IntViewSetting(QSpinBox):
-    def __init__(self, gl_display, varname, default, minval, maxval, rollover=True, parent=None):
+    def __init__(self, gl_display, varname, default, minval, maxval, rollover=True, parent=None, force_update=True):
         super().__init__(parent)
-        self.setValue(default)
         self.setRange(minval, maxval)
+        self.setValue(default)
         self.setMaximum(maxval)
         self.setSingleStep(1)
         self.rollover = rollover
 
         self.valueChanged.connect(lambda val: gl_display.update_view_settings(
-            **{varname:val}))
+            **{varname:val, 'force_update':force_update}))
 
     def advance(self):
         maxval = self.maximum()
@@ -76,6 +82,20 @@ class IntViewSetting(QSpinBox):
             i = self.value() + 1
             if self.rollover: i %= self.maximum()
             self.setValue(i)
+
+
+
+class ListViewSetting(IntViewSetting):
+    def __init__(self, gl_display, varname, default, vals, parent=None, force_update=True):
+        super().__init__(gl_display, varname, default, min(vals), max(vals), rollover=False, parent=parent, force_update=force_update)
+        self.vals = list(vals)
+
+    def stepBy(self, step):
+        if step > 0:
+            self.setValue(list(filter(lambda x: x > self.value(), self.vals))[0])
+        elif step < 0:
+            self.setValue(list(filter(lambda x: x < self.value(), self.vals))[-1])
+
 
 # class SlaveSlider(QSlider):
 #     def __init__(self, master, ticks=1000, parent=None):
@@ -98,6 +118,8 @@ class LogViewSetting(LinearViewSetting):
         sm = self.singleStep()
         i = math.log(self.value(), sm) + step
         self.setValue(sm**round(i))
+
+
 
 
 def fromQColor(qc, has_alpha):
@@ -214,9 +236,32 @@ class ViewWidget(QOpenGLWidget):
         self.update()
 
 
-    def update_view_settings(self, **kwargs):
+    def update_view_settings(self, force_update=True, **kwargs):
+        # print(kwargs)
         self.view.update_view_settings(**kwargs)
-        self.update()
+        if force_update:
+            self.update()
+
+
+    def save_image(self):
+        # fn = 'test.png'
+        fns = glob.glob('muvi_screenshot_*.png')
+        for i in range(10**4):
+            fn = 'muvi_screenshot_%08d.png' % i 
+            if fn not in fns:
+                break
+
+
+        # self.view.next_offscreen = True
+        # self.view.next_save_fn = fn
+        # self.update()
+        self.makeCurrent()
+        self.view.draw(offscreen=True, save_image=fn)
+        self.doneCurrent()
+        # self.view.next_offscreen = False
+
+        # self.view.save_offscreen_image(fn)
+        # self.view.save_image(fn)
 
 
 class CollapsableVBox(QWidget):
@@ -320,7 +365,7 @@ class ViewerApp(QMainWindow):
         self.view_options.add_row("Frame:", self.gl_display.frame_setting, self.play_pause)
 
         self.view_options.add_row("Cloud Opacity:",
-            LogViewSetting(self.gl_display, "opacity", 0.1, 1E-3, 1, 10**(1/4)))
+            LogViewSetting(self.gl_display, "opacity", 0.1, 1E-3, 2, 10**(1/8)))
 
         self.view_options.add_row("Cloud Tint:",
             ColorViewSetting(self.gl_display, "tint", (0.0, 0.3, 0.3)))
@@ -342,6 +387,20 @@ class ViewerApp(QMainWindow):
 
         self.adv_view_options.add_row("Show Grid:",
             BoolViewSetting(self.gl_display, "show_grid", False))
+
+        self.adv_view_options.add_row("Render Step:",
+            LogViewSetting(self.gl_display, "step_size", 1.0, 0.125, 2, 2**0.5))
+
+        self.ss_button = QPushButton("Save View")
+        self.ss_button.clicked.connect(self.gl_display.save_image)
+        self.view_options.add_row(self.ss_button)
+
+        self.ss_sizes = [100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000]
+
+        self.view_options.add_row("Saved Width:",
+            ListViewSetting(self.gl_display, "os_width", 1500, self.ss_sizes, force_update=False))
+        self.view_options.add_row("Saved Height:",
+            ListViewSetting(self.gl_display, "os_height", 1000, self.ss_sizes, force_update=False))
 
         self.v_box.addStretch()
 

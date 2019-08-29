@@ -20,15 +20,16 @@ import struct
 import warnings
 import os
 import sys
-import struct, blosc
+import blosc
 
 try:
     import tables
     _HAS_TABLES = True
 except:
-    warnings.warn("pytables module not found, HPF5 loading/saving not available.", RunTimeWarning)
+    warnings.warn("pytables module not found, HPF5 loading/saving not available.", RuntimeWarning)
     _HAS_TABLES = False
 
+# blosc.set_nthreads(1)
 
 class VolumetricMovieError(Exception):
     pass
@@ -220,6 +221,7 @@ class VolumetricMovie(object):
         self.dtype = vol0.dtype
         self.validate_info()
         self.name = name
+        
 
     def validate_info(self):
         if not hasattr(self, 'shape'):
@@ -621,6 +623,8 @@ _file_types = {
     'CINE': CineMovie,
     'MUVI': MuviMovie
 }
+
+
 
 def open_4D_movie(fn, file_type=None, *args, **kwargs):
     if file_type is None:

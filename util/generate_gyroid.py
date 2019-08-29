@@ -25,7 +25,7 @@ W = 128
 N = 128
 
 if len(sys.argv) == 1:
-    fn = 'gyroid.h5'
+    fn = 'gyroid.muv'
 else:
     fn = sys.argv[1]
 

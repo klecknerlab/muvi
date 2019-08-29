@@ -277,7 +277,7 @@ class FrameBufferObject(object):
         if self.depth:
             self.depth_id = glGenRenderbuffers(1)
             glBindRenderbuffer(GL_RENDERBUFFER, self.depth_id)
-            glRenderbufferStorage(GL_RENDERBUFFER, self.depth_type, width, height)
+            glRenderbufferStorage(GL_RENDERBUFFER, self.depth_type, self.width, self.height)
             glBindRenderbuffer(GL_RENDERBUFFER, 0)
             glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                                       GL_RENDERBUFFER, self.depth_id)

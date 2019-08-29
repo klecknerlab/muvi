@@ -23,6 +23,9 @@ In order to run the tools, you will need several Python packages installed, incl
   * numpy
   * pytables (https://www.pytables.org/)
   * pyQt5
+  * python-blosc
+  * pyopengl
+  * numba
 
 This is easiest to do with some sort of package manager; the utilities are being
 developed using Anaconda (https://www.anaconda.com/).  Note that the only
@@ -32,6 +35,7 @@ Assuming you have Anaconda installed, you can get the require packages with:
 
 ```shell
 $ conda install pytables pyqt pyopengl
+$ conda install -c conda-forge python-blosc
 ```
 
 ### Windows
