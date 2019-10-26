@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-# Copyright 2018 Dustin Kleckner
+# Copyright 2019 Dustin Kleckner
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,58 +14,352 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import numpy as np
-import json
+# import json
 import struct
 import warnings
 import os
 import sys
-import blosc
-
-try:
-    import tables
-    _HAS_TABLES = True
-except:
-    warnings.warn("pytables module not found, HPF5 loading/saving not available.", RuntimeWarning)
-    _HAS_TABLES = False
-
+# import blosc
 # blosc.set_nthreads(1)
+import lz4.block
+# import base64
+# import struct
+import concurrent.futures
+# from muvi import status_range
+from xml.etree import ElementTree as ET
+# import re
+# import numba
+
 
 class VolumetricMovieError(Exception):
     pass
 
 
-# class StatusBar(object):
-#     def __init__(self, max_count=100, pre_message='', post_message='', length=40):
-#         self.max_count = max_count
-#         self.length = length
-#         self.fmt = "\r" + pre_message +  "[%-" + str(length) + "s] " + post_message + "%s"
-#
-#     def __enter__(self):
-#         self.count = 0
-#         self.update(self.count)
-#         return self
-#
-#     def __exit__(self, exc_type, exc_val, exc_tb):
-#         self.update(self.max_count)
-#         sys.stdout.write('\n')
-#
-#     def update(self, i):
-#         # if i < self.max_count:
-#         cnt = '%d/%d' % (i, self.max_count)
-#         # else:
-#         #     cnt = 'done'
-#         i = min(self.max_count, i)
-#         sys.stdout.write(self.fmt % ('=' * int(i/self.max_count*self.length + 0.5), cnt))
-#         sys.stdout.flush()
-#
-#     def tick(self, n = 1):
-#         self.count += 1
-#         self.update(self.count)
+def xml_indent(elem, level=0):
+    i = "\n" + level * "  "
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = i + "  "
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+        for elem in elem:
+            xml_indent(elem, level+1)
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+    else:
+        if level and (not elem.tail or not elem.tail.strip()):
+            elem.tail = i
 
 
-class stat_range:
+class VolumeProperties:
+    _defaults = {
+        'dtype': 'u1',
+        'channels': 1,
+        'interleaved': True,
+        'offset': 1,
+    }
+
+    _alternates = {
+        'Lx': 'Nx',
+        'Ly': 'Ny',
+        'Lz': 'Nz',
+        'Ns': 'Nz',
+        'dy': 'dx',
+        'dz': 'dx',
+    }
+
+    _param_types = {
+        'Nx': int,
+        'Ny': int,
+        'Nz': int,
+        'Ns': int,
+        'offset': int,
+        'Nt': int,
+        'channels': int,
+        'interleaved': bool,
+        'Lx': float,
+        'Ly': float,
+        'Lz': float,
+        'Dx': float,
+        'Dy': float,
+        'Dz': float,
+        't0': float,
+        'dt': float,
+        'dtype': str,
+        'creation_time': float,
+        'units': str,
+        'notes': str,
+    }
+
+    __properties_TYPES = [str, int, float, bool]
+    __properties_TYPES_STR = dict((t.__name__, t) for t in __properties_TYPES)
+
+    def __init__(self, *args, **kwargs):
+        '''
+        Generic class for handling metadata associated with volumetric movies.
+
+        In general, behaves like a dictionary which only takes basic data types
+        (by default: string, int, float, bool).  Designed to export/import
+        from XML.
+
+        Initiated with positional and/or keyword arguments.  Positional
+        arguments can be strings (interpreted as XML input), ElementTrees,
+        dictionaries, or other VolumeProperties objects.  (See update method for
+        details)
+
+        Also contains default and alternate values specific to Volumetric
+        Images.
+
+        Known Keywords
+        --------------
+        Nx, Ny, Nz : int
+            Number of pixels on each axis
+        Nt : int
+            Number of time steps
+        Ns : int
+            The number of 2D frames per complete 3D scan period.  If the scan is
+            not interleaved, this is the time to scan a single color channel.
+            Generally, should be more than Nt, since there are (almost always)
+            dead frames in between scans.
+        dt : float
+            The time step (1 / volume rate).
+        channels : int
+            Number of color channels (default: 1)
+        interleaved : bool (default: True)
+            Indicates that different color channels are stacked in alternating
+            2D frames (e.g. RGRGRGRGRG--RGRG...).  If False, different color
+            channels are in separate scans (e.g. RRRRR--GGGGG--RR...).
+        offset : int
+            The number of 2D frames to ignore at the beginning of the movie.
+            (default: 0; only for 2D movies).
+        Lx, Ly, Lz : float
+            Physical size of the volume on each axis.  For distortion corrected
+            volumes, this is the size of the volume at the Axis center.
+        dx, dy, dz : float
+            Physical distance per pixel in each dimension.  Can be used to
+            specify the size of the volume when the image size might change.
+            If `dy` or `dz` is not speficied, it will default to `dx`.
+        Sx, Sy, Sz: float
+            Physical offset of the scanner/camera axis relative to the volume
+            center.  (See wiki for details.)
+        Cz : float
+            Physical offset of the camera nodel point from the center of the
+            volume.  (See wiki for details.)
+        units : str
+            The physical units for all lengths.
+        creation_time : float
+            The creation time of the volume, as a Unix time float.
+        '''
+        self._d = {}
+
+        for arg in args:
+            self.update(arg, raise_errors=True)
+
+        for k, v in kwargs.items():
+            self[k] = v
+
+
+    def update(self, input, warn=False, raise_errors=False):
+        '''
+        Update internal data with external source.
+
+        Parameters
+        ----------
+        input: string, xml.etree.ElementTree.Element, or dictionary-like
+
+        Keywords
+        --------
+        warn: bool (default: False)
+            If True, warns when it finds items in the input it can't parse.
+        raise_errors: bool (default: False)
+            If True, raises errors when it finds items it can't parse.
+
+        If input is another VolumeProperties or dictionary, elements are copied over.
+        If input is a string, it is assumed to be XML which is parsed and
+        then iterated over.  The default behavior is to ignore items it can't
+        parse, which can be changed (see above).
+
+        If input is an XML Element, it is assumed that it contains sub-elements
+        which are the items to be updated from.
+
+        If either a string or XML Element is specified, it is assumed all
+        data objects are embedded in an out tag (the type of which is ignored):
+        ```
+        <VolumeProperties>
+            <float name='Lx'>1.5</float>
+            <int name='Nx'>20</int>
+            ...
+        </VolumeProperties>
+        ```
+        '''
+        if isinstance(input, (VolumeProperties, dict)):
+            for k, v in input.items():
+              self[k] = v
+            return
+
+        if isinstance(input, (str, bytes)):
+            input = ET.fromstring(input)
+
+        if isinstance(input, ET.Element):
+            for item in input:
+                t = self.__properties_TYPES_STR.get(item.tag, None)
+                if t is None:
+                    if warn:
+                        print("Warning: could not interperet input tag '%s'" % item.tag)
+                    if raise_errors:
+                        raise ValueError("Could not interperet input tag '%s'" % item.tag)
+                    continue
+
+                if 'name' not in item.keys():
+                    if warn:
+                        print("Warning: input tag '%s' has no name" % item.tag)
+                    if raise_errors:
+                        raise ValueError("Input tag '%s' has no name" % item.tag)
+                    continue
+
+                self._d[item.get('name')] = t(item.text)
+
+        else:
+            raise TypeError('Could not interperet input: %s' % repr(input))
+
+
+
+    def __setitem__(self, key, val):
+        if type(val) not in self.__properties_TYPES:
+            raise ValueError('Values for VolumeProperties should be one of: [%s]' % (', '.join(self.__properties_TYPES_STR.keys())))
+        self._d[key] = val
+
+
+    def __getitem__(self, key):
+        if key in self._d:
+            return self._d[key]
+        elif key in self._defaults:
+            return self._defaults[key]
+        elif key in self._alternates:
+            return self[self._alternates[key]]
+        else:
+            raise KeyError(key)
+
+
+    def get(self, key, default=None):
+        try:
+            return self['key']
+        except KeyError:
+            return default
+
+
+    def items(self):
+        return self._d.items()
+
+
+    def xml(self, tag='VolumeProperties' encoding='UTF-8', indent=None):
+        '''Encode the properties into an XML bytestring
+
+        Arguments
+        ---------
+        tag: str (default: "VolumeProperties")
+            The tag to use to encapsulate the whole properties object.
+        encoding: str (default: "UTF-8")
+        indent: int or None (default: None)
+            The indentation level.  If None, the XML is compacted onto a single
+            line.  For an indent of 0, the outer element is unindented, but the
+            inner parts are indented with 2 spaces.
+            (indent = 1 adds an extra two spaces to everything, and so on.)
+        '''
+
+        base = ET.Element(tag)
+
+        for k, v in sorted(self._d.items()):
+            item = ET.SubElement(base, type(v).__name__)
+            item.set('name', k)
+            item.text = str(v)
+
+        if indent is not None:
+            if not isinstance(indent, int):
+                ident = 0
+            xml_indent(base, indent)
+            pre_indent = b'  ' * indent
+        else:
+            pre_indent = b''
+
+        return (pre_indent + ET.tostring(base, encoding=encoding)).rstrip(b' ')
+
+
+    def __str__(self):
+        return "%s(%s) " % (self.__class__.__name__, ', '.join(
+            "%s=%s" % (k, repr(v)) for k, v in sorted(self._d.items())
+        ))
+
+
+    def __contains__(self, key):
+        # Return true only if key is defined; alternates or default values will
+        #   not return True, even though they can be accessed!  (This is
+        #   intentional!)
+        return (key in self._d)
+
+
+    def to_file(self, filename):
+        '''Create a new XML file, and write the VolumeProperties to it.
+
+        Note that if you want to write the XML to an already open file you can
+        use the `xml` method instead.
+
+        Parameters
+        ----------
+        filename : str
+            Filename
+        '''
+
+        with open(filename, 'wb') as f:
+            f.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
+            f.write(self.xml(indent=0))
+
+
+    def update_from_file(self, filename, tag='VolumeProperties', warn=False, raise_errors=True):
+        '''Update object from an XML file.
+
+        Parameters
+        ----------
+        filename : str
+            Filename
+        tag : str (default: `"VolumeProperties"`)
+            Tag which contains the properties.  The reader will search for any
+            instances of this tag and extract information from them.
+        '''
+        root = ET.parse(filename)
+        self._search_tree(root, tag, warn=warn, raise_errors=raise_errors)
+
+
+    def _search_tree(self, e, tag, warn=False, raise_errors=True):
+        if e.tag == tag:
+            self.update(e, warn=warn, raise_errors=raise_errors)
+        else:
+            for ee in e:
+                self._search_tree(ee, tag, warn=warn, raise_errors=raise_errors)
+
+
+# Convert Numpy types to VTI Data types
+VTI_DATA_TYPES = {
+    'b': "Int8",
+    'B': "UInt8",
+    'h': "Int16",
+    'H': "Uint16",
+    'i': "Int32",
+    'I': "Uint32",
+    'l': "Int64",
+    'L': "Uint64",
+    'f': "Float32",
+    'd': "Float64"
+}
+
+
+
+class status_range:
     def __init__(self, start, stop=None, step=1, pre_message='', post_message='', length=40):
+        '''Create a range-like objet which prints out a status message
+        automatically.'''
         if stop is None:
             self.start = 0
             self.stop = start
@@ -84,7 +378,6 @@ class stat_range:
 
     def __iter__(self):
         self.update()
-
         return self
 
 
@@ -113,12 +406,21 @@ class stat_range:
 
 
     def update(self):
+        '''Update the printout.
+
+        It is not usually called directly, but rather automatically handled
+        on each loop.'''
+
         cnt = '%d/%d' % (self.count, self.max_count)
         sys.stdout.write(self.fmt % ('=' * int(min(self.max_count, self.count)/self.max_count*self.length + 0.5), cnt))
         sys.stdout.flush()
 
 
-class enum_range(stat_range):
+class status_enumerate(status_range):
+    '''Similar to `status_range` function, except acts like an `enumerate`
+    iterator instead of a `range` iterator.
+    '''
+
     def __init__(self, obj, **kwargs):
         super().__init__(len(obj), **kwargs)
         self.obj = obj
@@ -138,6 +440,26 @@ _file_ext = {
 }
 
 
+
+class VolumetricMovie:
+    def __init__(self, source, **kwargs):
+    '''Generic class for working with volumetric movies.
+
+    Attributes
+    ----------
+    source : str or list/array-like object
+        Either a filename with data in it, or an object which supports indexing
+        and returns 2D or 3D data, optionally with multi-channel information.
+
+    Additional keyword arguments get turned directly into VolumeParameter
+    values.  Note that any directly specified parameters will override data in
+    the stored files.  Any parameters not in the list of known parameters will
+    give warnings, but not errors.
+    '''
+
+    if isinstance(source, str):
+        bfn, ext = os.path.splitext()
+        ext = ext.lower()
 
 
 class VolumetricMovie(object):
@@ -221,7 +543,7 @@ class VolumetricMovie(object):
         self.dtype = vol0.dtype
         self.validate_info()
         self.name = name
-        
+
 
     def validate_info(self):
         if not hasattr(self, 'shape'):
@@ -325,7 +647,7 @@ class VolumetricMovie(object):
         if print_status:
             sfn = fn
             if len(fn) > 30: sfn = sfn[:27] + '...'
-            enum = stat_range(start, end, skip, post_message='%s:' % sfn)
+            enum = status_range(start, end, skip, post_message='%s:' % sfn)
         else:
             enum = range(start, end, skip)
 
@@ -542,100 +864,102 @@ def numpy_to_python_val(obj):
         return obj
 
 
-class MuviMovie(VolumetricMovie):
-    def __init__(self, fn, info={}):
-        self._f = open(fn, 'rb')
-        if self._f.read(4) != b'MUVI':
-            raise ValueError('%s does not appear to be a movie file (first 4 bytes are not "MUVI")' % fn)
+# class MuviMovie(VolumetricMovie):
+#     def __init__(self, fn, info={}):
+#         self._f = open(fn, 'rb')
+#         if self._f.read(4) != b'MUVI':
+#             raise ValueError('%s does not appear to be a movie file (first 4 bytes are not "MUVI")' % fn)
+#
+#         (self.version, ) = struct.unpack('<Q', self._f.read(8))
+#         if self.version != 1:
+#             raise ValueError('Version number of MUVI file is %d; only 1 is supported' % self.version)
+#
+#         (self.bin_header_offset, self.header_length) = struct.unpack('<QQ', self._f.read(16))
+#         header = self._f.read(self.header_length)
+#         # print(repr(header))
+#         self.info = json.loads(header)
+#         self.info.update(info)
+#
+#         self._f.seek(self.bin_header_offset)
+#         self.num_volumes, self.depth, self.height, self.width, self.channels = \
+#             struct.unpack('<QQQQQ', self._f.read(40))
+#         dt = self._f.read(2)
+#         if dt not in _MUV_TYPES:
+#             raise ValueError('MUVI file (%s) had data type "%s", which is not supported.' % (fn, dt))
+#         self.dt = _MUV_TYPES[dt]
+#
+#         self.shape = (self.depth, self.height, self.width, self.channels)
+#         self.volume_offsets = struct.unpack('<%dQ' % self.num_volumes, self._f.read(8 * self.num_volumes))
+#
+#         self.validate_info()
+#         self.name = fn
+#
+#
+#     def __len__(self):
+#         return self.num_volumes
+#
+#
+#     def get_volume(self, i):
+#         self._f.seek(self.volume_offsets[i])
+#         (nbytes, ) = struct.unpack('<Q', self._f.read(8))
+#
+#         raw = self._f.read(nbytes)
+#         (bbytes, ) = struct.unpack('<L', raw[12:16])
+#         if bbytes != nbytes:
+#             raise ValueError('Error loading volume %d in "%s"; blosc size does not match expected.\n(May be caused by >2GB volumes, which are not supported by this reader.)' % (i, self.name))
+#
+#         return np.frombuffer(blosc.decompress(raw), dtype=self.dt).reshape(self.shape)
+#
+#
+#     def close(self):
+#         self._f.close()
+#
+#
+# class HDF5Movie(VolumetricMovie):
+#     def __init__(self, fn, group='/VolumetricMovie'):
+#         self._f = tables.open_file(fn, 'r')
+#         self.movie_node = self._f.get_node('/VolumetricMovie')
+#         self.frames = sorted(filter(lambda n: n.startswith('frame_'), dir(self.movie_node)))
+#         self.info = {n:self.movie_node._v_attrs[n] for n in self.movie_node._v_attrs._v_attrnamesuser}
+#
+#         self.validate_info()
+#         self.name = fn
+#
+#
+#     def __len__(self):
+#         return len(self.frames)
+#
+#
+#     def get_volume(self, i):
+#         return np.asarray(self.movie_node[self.frames[i]])
+#
+#
+#     def close(self):
+#         self._f.close()
+#
+#
+# # _file_types = sorted(set(_file_ext.values()))
+# _file_types = {
+#     'HDF5': HDF5Movie,
+#     'S4D': SparseMovie,
+#     'CINE': CineMovie,
+#     'MUVI': MuviMovie
+# }
+#
+#
 
-        (self.version, ) = struct.unpack('<Q', self._f.read(8))
-        if self.version != 1:
-            raise ValueError('Version number of MUVI file is %d; only 1 is supported' % self.version)
-
-        (self.bin_header_offset, self.header_length) = struct.unpack('<QQ', self._f.read(16))
-        header = self._f.read(self.header_length)
-        # print(repr(header))
-        self.info = json.loads(header)
-        self.info.update(info)
-
-        self._f.seek(self.bin_header_offset)
-        self.num_volumes, self.depth, self.height, self.width, self.channels = \
-            struct.unpack('<QQQQQ', self._f.read(40))
-        dt = self._f.read(2)
-        if dt not in _MUV_TYPES:
-            raise ValueError('MUVI file (%s) had data type "%s", which is not supported.' % (fn, dt))
-        self.dt = _MUV_TYPES[dt]
-
-        self.shape = (self.depth, self.height, self.width, self.channels)
-        self.volume_offsets = struct.unpack('<%dQ' % self.num_volumes, self._f.read(8 * self.num_volumes))
-
-        self.validate_info()
-        self.name = fn
 
 
-    def __len__(self):
-        return self.num_volumes
-
-
-    def get_volume(self, i):
-        self._f.seek(self.volume_offsets[i])
-        (nbytes, ) = struct.unpack('<Q', self._f.read(8))
-
-        raw = self._f.read(nbytes)
-        (bbytes, ) = struct.unpack('<L', raw[12:16])
-        if bbytes != nbytes:
-            raise ValueError('Error loading volume %d in "%s"; blosc size does not match expected.\n(May be caused by >2GB volumes, which are not supported by this reader.)' % (i, self.name))
-
-        return np.frombuffer(blosc.decompress(raw), dtype=self.dt).reshape(self.shape)
-
-
-    def close(self):
-        self._f.close()
-
-
-class HDF5Movie(VolumetricMovie):
-    def __init__(self, fn, group='/VolumetricMovie'):
-        self._f = tables.open_file(fn, 'r')
-        self.movie_node = self._f.get_node('/VolumetricMovie')
-        self.frames = sorted(filter(lambda n: n.startswith('frame_'), dir(self.movie_node)))
-        self.info = {n:self.movie_node._v_attrs[n] for n in self.movie_node._v_attrs._v_attrnamesuser}
-
-        self.validate_info()
-        self.name = fn
-
-
-    def __len__(self):
-        return len(self.frames)
-
-
-    def get_volume(self, i):
-        return np.asarray(self.movie_node[self.frames[i]])
-
-
-    def close(self):
-        self._f.close()
-
-
-# _file_types = sorted(set(_file_ext.values()))
-_file_types = {
-    'HDF5': HDF5Movie,
-    'S4D': SparseMovie,
-    'CINE': CineMovie,
-    'MUVI': MuviMovie
-}
-
-
-
-def open_4D_movie(fn, file_type=None, *args, **kwargs):
-    if file_type is None:
-        ext = os.path.splitext(fn)[1].lower()
-        if ext in _file_ext:
-            file_type = _file_ext[ext]
-
-    if file_type not in _file_types:
-        raise ValueError('File extension %s not supported.' % ext)
-
-    return _file_types[file_type](fn, *args, **kwargs)
+# def open_4D_movie(fn, file_type=None, *args, **kwargs):
+#     if file_type is None:
+#         ext = os.path.splitext(fn)[1].lower()
+#         if ext in _file_ext:
+#             file_type = _file_ext[ext]
+#
+#     if file_type not in _file_types:
+#         raise ValueError('File extension %s not supported.' % ext)
+#
+#     return _file_types[file_type](fn, *args, **kwargs)
 
 
 # class HDF5Movie(object):
