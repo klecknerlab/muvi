@@ -58,7 +58,9 @@ class VolumeProperties:
         'dtype': 'u1',
         'channels': 1,
         'interleaved': True,
-        'offset': 1,
+        'offset': 0,
+        'clip': 80,
+        'gamma2': True,
     }
 
     _alternates = {
@@ -91,6 +93,9 @@ class VolumeProperties:
         'creation_time': float,
         'units': str,
         'notes': str,
+        'clip': int,
+        'top': int,
+        'gamma2': bool,
     }
 
     __properties_TYPES = [str, int, float, bool]
@@ -151,6 +156,15 @@ class VolumeProperties:
             The physical units for all lengths.
         creation_time : float
             The creation time of the volume, as a Unix time float.
+        clip : int (default: 80)
+            When converting 2D movies, the value below which to clip and count
+            as zero.
+        top : int
+            When converting 2D movies, the maximum value used to rescale data.
+        gamma2 : bool (default: True)
+            If true, set a gamma=2.0; in other words the stored value is the
+            square root of the actual intensity.  This method of storage
+            optimizes noise performance.
         '''
         self._d = {}
 
@@ -229,6 +243,12 @@ class VolumeProperties:
     def __setitem__(self, key, val):
         if type(val) not in self.__properties_TYPES:
             raise ValueError('Values for VolumeProperties should be one of: [%s]' % (', '.join(self.__properties_TYPES_STR.keys())))
+        elif key not in self._param_types:
+            if not key.startswith('user_'):
+                raise ValueError("Invalid VolumeProperty '%s'" % key)
+        else:
+            val = self._param_types(key)(val)
+
         self._d[key] = val
 
 
@@ -254,7 +274,7 @@ class VolumeProperties:
         return self._d.items()
 
 
-    def xml(self, tag='VolumeProperties' encoding='UTF-8', indent=None):
+    def xml(self, tag='VolumeProperties', encoding='UTF-8', indent=None):
         '''Encode the properties into an XML bytestring
 
         Arguments
@@ -440,9 +460,17 @@ _file_ext = {
 }
 
 
+MUVI_READERS = {
+    '.vti': vti.VTIReader,
+    '.cine': cine.Cine,
+    '.s3d': sparse.Sparse3D,
+}
+
+MUVI_WRITERS = {
+    '.vti': vti.VTIWriter,
+}
 
 class VolumetricMovie:
-    def __init__(self, source, **kwargs):
     '''Generic class for working with volumetric movies.
 
     Attributes
@@ -451,199 +479,78 @@ class VolumetricMovie:
         Either a filename with data in it, or an object which supports indexing
         and returns 2D or 3D data, optionally with multi-channel information.
 
-    Additional keyword arguments get turned directly into VolumeParameter
-    values.  Note that any directly specified parameters will override data in
-    the stored files.  Any parameters not in the list of known parameters will
-    give warnings, but not errors.
+    Additional keyword arguments get pass to the file reader object and/or
+    turned directly into VolumeParameter values.  (Generally speaking, this is
+    the default for reader objects as well.)
     '''
 
-    if isinstance(source, str):
-        bfn, ext = os.path.splitext()
-        ext = ext.lower()
+    def __init__(self, source, **kwargs):
+        # If the input is a string, this is a file we need to load.
+        if isinstance(source, str):
+            bfn, ext = os.path.splitext()
+            ext = ext.lower()
 
-
-class VolumetricMovie(object):
-    '''Generic class for working with volumetric movies.
-
-    Attributes
-    ----------
-    volumes : an iterable which contains the volumetric data.  Should support
-        ``len``, be addressable by index, and return a numpy array
-    info : a dictionary of metadata parameters, including perspective distortion
-        and scale information; see documentation of recognized parameters below
-    computed_info: a dictionary of metadata paremeters which are computed from
-        the other parameters.  These parameters are not saved if the volume
-        is written to disk
-    metadata : a dicionary of arbitrary user metadata, will be saved as a JSON
-        object if the volume is written to disk
-    name : a string used to identify the volume; if loaded from a disk this
-        should be the filename; otherwise it will be ``[VOLUME IN MEMORY]``.
-
-    Members of info, computed_info, and metadata will be accesible as attributes
-    of the class.  To alter these attibutes, however, the underlying
-    dictionaries should be altered, rather than modifying the attributes of the
-    class itself (which will not have the desired effect with regards to
-    saving the volume).
-
-    Each volume should be either 3 or 4 dimensional, where in the later case the
-    fourth axis is the color dimension, typically specifying 1--4 planes.
-
-    Length scales in the volume are specified in terms of an abitrary physical
-    unit, whose scale is specified via "Lunit".
-
-    Time scales are always specified in terms of seconds.
-
-    The valid info parameters are documented below.  Each parameter must be
-    expressable as a floating point number.
-
-    General Info Parameters
-    -----------------------
-    - Lunit : the size of the distance unit in meters (e.g. Lunit = 1E-3 if the
-        physical unit is mm (default), or 25.4E-3 if the unit is inches)
-    - VPS : volumes per second
-    - FPS : frames per second (if not specified, assumed to be VPS * [z depth];
-        this assumes no dead time in the scan, which is unlikely!)
-    - Lx, Ly, Lz : total length of each axis; *should be specified only for non-
-        distorted volumes (or non-distorted axes)*
-    - shape : tuple of ints.  The shape of each volume, automatically determined
-        from the first volume.  Has 3-4 elemeters, of the form:
-        (depth, height, width [, channels])
-    - dtype : numpy data type
-
-    Info Parameters for Scanning Slope-Distortion
-    ---------------------------------------------
-    - Dz : Displacement of camera from center of the volume.  Usually negative,
-        since the camera should always be in the negative-z direction relative
-        to the volume
-    - Dx, Dy: Displacement of the scanning sheet axis from the center of the
-        volume.  Only one should be specified, depending on the relevant axis
-    - m1x : the slope of the ray leading the right edge of the volume.  Can be
-        computed as -Lx / (2*Dz).
-    - m1z : the slop of the ray leading to the back edge of the volume.  Can be
-        computed as -Lz / (2*[Dx/Dy]), assuming the laser scanner is normal to
-        the camera axis (as is normally the case).
-    - m0z : the slope of the ray leading to the front edge of the volume.  If
-        not specified, assumed to be -m1z.  *This should only be directly
-        specified for scanning at an oblique angle*
-
-    The additional parameters m0x, m0y, and m1y are determined automatically
-    from the volume size.  These will be made available in the ``computed_info``
-    attributes, or as attributes of the main class itself.
-
-    '''
-
-    # metadata = {}
-
-    def __init__(self, volumes, info={}, name='[VOLUME IN MEMORY]'):
-        self.volumes = volumes
-        self.info = info
-        # self.metadata = metadata
-        vol0 = volumes[0]
-        self.shape = vol0.shape
-        self.dtype = vol0.dtype
-        self.validate_info()
-        self.name = name
-
-
-    def validate_info(self):
-        if not hasattr(self, 'shape'):
-            self.shape = self[0].shape
-
-        xy_ar = self.shape[2] / self.shape[1]
-        xz_ar = self.shape[2] / self.shape[0]
-        self.computed_info = {}
-
-        if 'Lx' in self.info:
-            if 'Dz' in self.info:
-                raise VolumetricMovieError('%s: Invalid specification for perspective correction on x/y axis\nBoth camera distance and scale directly specified; should be one or the other' % self.name)
-            elif 'Ly' not in self.info:
-                self.computed_info['Ly'] = self.info['Lx'] / xy_ar
-        elif 'Dz' in self.info:
-            if 'm1x' in self.info:
-                self.computed_info['m0x'] = -self.m1x
-                self.comptued_info['m1y'] = self.m1x / xy_ar
-                self.computed_info['m0y'] = -self.m1y
+            if ext in MUVI_READERS:
+                self.source = MUVI_READERS[ext](source, **kwargs)
             else:
-                raise VolumetricMovieError('%s: Camera distance (Dz) specified, but slope angle (m1x) not defined' % self.name)
+                raise ValueError('Unknown extension: %s' % ext)
+        # Otherwise assume it behaves like a list of arrays.
         else:
-            raise VolumetricMovieError('%s: Scaling info for X/Y requires either Lx or Dz/m1x entries in info; neither found' % self.name)
+            self.properties = VolumeProperties(**kwargs)
+            self.source = source
 
-        if 'Lz' in self.info:
-            if 'Dx' in self.info or 'Dy' in self.info:
-                raise VolumetricMovieError('%s: Invalid specification for perspective correction on z axis\nBoth scanner distance and scale directly specified; should be one or the other' % self.name)
-        elif 'Dx' in self.info:
-            if 'm1z' not in self.info:
-                raise VolumetricMovieError('%s: Scanner distance (Dx) specified, but slope angle (m1z) not defined' % self.name)
-            if 'm0z' not in self.info:
-                self.computed_info['m1z'] = -self.m0z
-            self.computed_info['Lz'] = abs((self.m1z - self.m0z) * self.Dx)
-        elif 'Dy' in self.info:
-            if 'm1z' not in self.info:
-                raise VolumetricMovieError('%s: Scanner distance (Dy) specified, but slope angle (m1z) not defined' % self.name)
-            if 'm0z' not in self.info:
-                self.computed_info['m1z'] = -self.m0z
-                self.computed_info['Lz'] = abs((self.m1z - self.m0z) * self.Dy)
+        # For the reader types, we will get data and initialize the reader
+        #   with the get_volume_properties function.  If we don't have it
+        #   that's ok too!
+        if hasattr(self.source, 'get_volume_properties'):
+            self.properties.update(self.source.get_volume_properties())
+
+        # Let's get a frame and infer what type of input it is from that.
+        frame = source[0]
+        if not hasattr(frame, 'source'):
+            raise ValueError('Invalid source object (should behave like a list of numpy arrays)')
+
+        shape = frame.shape
+
+        # If the last axis has four or less elements, it must be the color
+        #  channel
+        if len(frame.shape[-1]) <= 4:
+            channels = shape[-1]
+            shape = shape[:-1]
         else:
-            self.computed_info['Lz'] = self.Lz / xz_ar
+            channels = 1
+
+        # Check if it is 2D or 3D
+        if len(shape) == 2:
+            self.is_2D = True
+            if 'Nz' not in self.properties:
+                raise ValueError("If a 2D movie is used as the source, 'Nz' parameter must be defined!")
+        else:
+            self.is_3D = True
 
 
-    def get_info(self):
-        info = self.computed_info.copy()
-        info.udpate(self.info)
-        return info
-
-
-    # def __getattr__(self, name):
-    #     if name in self.info:
-    #         return self.info[name]
-    #     elif name in self.computed_info:
-    #         return self.computed_info[name]
-    #     elif name in self.metadata:
-    #         return self.metadata[name]
-    #     else:
-    #         raise AttributeError("'%s' object has no attribute '%s'" % self.__class__.__name__, name)
-
+    def __getitem__(self, key):
+        if isnistance(key, slice):
+            return [self[i] for i in key]
+        else:
+            if self.is_2D:
+                Nz = self.properties['Nz']
+                start = self.properties['offset'] + i*self.properties['Ns']
+                return self.source[start:start+Nz]
+            else:
+                return self.source[i]
+            
 
     def __len__(self):
-        return len(self.volumes)
-
-
-    def __getitem__(self, i):
-        return self.get_volume(i)
-
-
-    def get_volume(self, i):
-        return self.volumes[i]
-
-
-    def __iter__(self):
-        self._iter_index = 0;
-        return self
-
-
-    def __next__(self):
-        if self._iter_index < len(self):
-            vol = self[self._iter_index]
-            self._iter_index += 1
-            # print('iter ->', self._iter_index)
-            return vol
+        if self.is_2D:
+            Ns = self.properties['Ns']
+            return (len(self.source) - offset + (Ns - self.properties['Nz'])) // Ns
         else:
-            raise StopIteration
+            return len(self.source)
 
 
-    def save(self, fn, file_type=None, print_status=False, start=0, end=None, skip=1, **kwargs):
-        if file_type is None:
-            ext = os.path.splitext(fn)[1].lower()
-            if ext in _file_ext:
-                file_type = _file_ext[ext]
-            else:
-                raise ValueError('Filename does not contain one of the recognized extensions: %s\n(Found: "%s")' % (str(sorted(self._file_ext.keys())), ext))
-
-        blosc_options = dict(cname='lz4', shuffle=blosc.NOSHUFFLE, typesize=1)
-        blosc_options.update(kwargs)
-
-        if not end: end = len(self)
-
+    def save(self, fn, start=0, end=None, print_status=True):
+        if end is None: end = len(self)
         if print_status:
             sfn = fn
             if len(fn) > 30: sfn = sfn[:27] + '...'
@@ -651,218 +558,412 @@ class VolumetricMovie(object):
         else:
             enum = range(start, end, skip)
 
-        if file_type == "HDF5":
-            with tables.open_file(fn, mode='w') as f:
-                comp_filter = tables.Filters(**blosc_options)
 
-                g = f.create_group('/', 'VolumetricMovie')
+# class VolumetricMovie(object):
+#     '''Generic class for working with volumetric movies.
+#
+#     Attributes
+#     ----------
+#     volumes : an iterable which contains the volumetric data.  Should support
+#         ``len``, be addressable by index, and return a numpy array
+#     info : a dictionary of metadata parameters, including perspective distortion
+#         and scale information; see documentation of recognized parameters below
+#     computed_info: a dictionary of metadata paremeters which are computed from
+#         the other parameters.  These parameters are not saved if the volume
+#         is written to disk
+#     metadata : a dicionary of arbitrary user metadata, will be saved as a JSON
+#         object if the volume is written to disk
+#     name : a string used to identify the volume; if loaded from a disk this
+#         should be the filename; otherwise it will be ``[VOLUME IN MEMORY]``.
+#
+#     Members of info, computed_info, and metadata will be accesible as attributes
+#     of the class.  To alter these attibutes, however, the underlying
+#     dictionaries should be altered, rather than modifying the attributes of the
+#     class itself (which will not have the desired effect with regards to
+#     saving the volume).
+#
+#     Each volume should be either 3 or 4 dimensional, where in the later case the
+#     fourth axis is the color dimension, typically specifying 1--4 planes.
+#
+#     Length scales in the volume are specified in terms of an abitrary physical
+#     unit, whose scale is specified via "Lunit".
+#
+#     Time scales are always specified in terms of seconds.
+#
+#     The valid info parameters are documented below.  Each parameter must be
+#     expressable as a floating point number.
+#
+#     General Info Parameters
+#     -----------------------
+#     - Lunit : the size of the distance unit in meters (e.g. Lunit = 1E-3 if the
+#         physical unit is mm (default), or 25.4E-3 if the unit is inches)
+#     - VPS : volumes per second
+#     - FPS : frames per second (if not specified, assumed to be VPS * [z depth];
+#         this assumes no dead time in the scan, which is unlikely!)
+#     - Lx, Ly, Lz : total length of each axis; *should be specified only for non-
+#         distorted volumes (or non-distorted axes)*
+#     - shape : tuple of ints.  The shape of each volume, automatically determined
+#         from the first volume.  Has 3-4 elemeters, of the form:
+#         (depth, height, width [, channels])
+#     - dtype : numpy data type
+#
+#     Info Parameters for Scanning Slope-Distortion
+#     ---------------------------------------------
+#     - Dz : Displacement of camera from center of the volume.  Usually negative,
+#         since the camera should always be in the negative-z direction relative
+#         to the volume
+#     - Dx, Dy: Displacement of the scanning sheet axis from the center of the
+#         volume.  Only one should be specified, depending on the relevant axis
+#     - m1x : the slope of the ray leading the right edge of the volume.  Can be
+#         computed as -Lx / (2*Dz).
+#     - m1z : the slop of the ray leading to the back edge of the volume.  Can be
+#         computed as -Lz / (2*[Dx/Dy]), assuming the laser scanner is normal to
+#         the camera axis (as is normally the case).
+#     - m0z : the slope of the ray leading to the front edge of the volume.  If
+#         not specified, assumed to be -m1z.  *This should only be directly
+#         specified for scanning at an oblique angle*
+#
+#     The additional parameters m0x, m0y, and m1y are determined automatically
+#     from the volume size.  These will be made available in the ``computed_info``
+#     attributes, or as attributes of the main class itself.
+#
+#     '''
+#
+#     # metadata = {}
+#
+#     def __init__(self, volumes, info={}, name='[VOLUME IN MEMORY]'):
+#         self.volumes = volumes
+#         self.info = info
+#         # self.metadata = metadata
+#         vol0 = volumes[0]
+#         self.shape = vol0.shape
+#         self.dtype = vol0.dtype
+#         self.validate_info()
+#         self.name = name
+#
+#
+#     def validate_info(self):
+#         if not hasattr(self, 'shape'):
+#             self.shape = self[0].shape
+#
+#         xy_ar = self.shape[2] / self.shape[1]
+#         xz_ar = self.shape[2] / self.shape[0]
+#         self.computed_info = {}
+#
+#         if 'Lx' in self.info:
+#             if 'Dz' in self.info:
+#                 raise VolumetricMovieError('%s: Invalid specification for perspective correction on x/y axis\nBoth camera distance and scale directly specified; should be one or the other' % self.name)
+#             elif 'Ly' not in self.info:
+#                 self.computed_info['Ly'] = self.info['Lx'] / xy_ar
+#         elif 'Dz' in self.info:
+#             if 'm1x' in self.info:
+#                 self.computed_info['m0x'] = -self.m1x
+#                 self.comptued_info['m1y'] = self.m1x / xy_ar
+#                 self.computed_info['m0y'] = -self.m1y
+#             else:
+#                 raise VolumetricMovieError('%s: Camera distance (Dz) specified, but slope angle (m1x) not defined' % self.name)
+#         else:
+#             raise VolumetricMovieError('%s: Scaling info for X/Y requires either Lx or Dz/m1x entries in info; neither found' % self.name)
+#
+#         if 'Lz' in self.info:
+#             if 'Dx' in self.info or 'Dy' in self.info:
+#                 raise VolumetricMovieError('%s: Invalid specification for perspective correction on z axis\nBoth scanner distance and scale directly specified; should be one or the other' % self.name)
+#         elif 'Dx' in self.info:
+#             if 'm1z' not in self.info:
+#                 raise VolumetricMovieError('%s: Scanner distance (Dx) specified, but slope angle (m1z) not defined' % self.name)
+#             if 'm0z' not in self.info:
+#                 self.computed_info['m1z'] = -self.m0z
+#             self.computed_info['Lz'] = abs((self.m1z - self.m0z) * self.Dx)
+#         elif 'Dy' in self.info:
+#             if 'm1z' not in self.info:
+#                 raise VolumetricMovieError('%s: Scanner distance (Dy) specified, but slope angle (m1z) not defined' % self.name)
+#             if 'm0z' not in self.info:
+#                 self.computed_info['m1z'] = -self.m0z
+#                 self.computed_info['Lz'] = abs((self.m1z - self.m0z) * self.Dy)
+#         else:
+#             self.computed_info['Lz'] = self.Lz / xz_ar
+#
+#
+#     def get_info(self):
+#         info = self.computed_info.copy()
+#         info.udpate(self.info)
+#         return info
+#
+#
+#     # def __getattr__(self, name):
+#     #     if name in self.info:
+#     #         return self.info[name]
+#     #     elif name in self.computed_info:
+#     #         return self.computed_info[name]
+#     #     elif name in self.metadata:
+#     #         return self.metadata[name]
+#     #     else:
+#     #         raise AttributeError("'%s' object has no attribute '%s'" % self.__class__.__name__, name)
+#
+#
+#     def __len__(self):
+#         return len(self.volumes)
+#
+#
+#     def __getitem__(self, i):
+#         return self.get_volume(i)
+#
+#
+#     def get_volume(self, i):
+#         return self.volumes[i]
+#
+#
+#     def __iter__(self):
+#         self._iter_index = 0;
+#         return self
+#
+#
+#     def __next__(self):
+#         if self._iter_index < len(self):
+#             vol = self[self._iter_index]
+#             self._iter_index += 1
+#             # print('iter ->', self._iter_index)
+#             return vol
+#         else:
+#             raise StopIteration
+#
+#
+#     def save(self, fn, file_type=None, print_status=False, start=0, end=None, skip=1, **kwargs):
+#         if file_type is None:
+#             ext = os.path.splitext(fn)[1].lower()
+#             if ext in _file_ext:
+#                 file_type = _file_ext[ext]
+#             else:
+#                 raise ValueError('Filename does not contain one of the recognized extensions: %s\n(Found: "%s")' % (str(sorted(self._file_ext.keys())), ext))
+#
+#         blosc_options = dict(cname='lz4', shuffle=blosc.NOSHUFFLE, typesize=1)
+#         blosc_options.update(kwargs)
+#
+#         if not end: end = len(self)
+#
+#         if print_status:
+#             sfn = fn
+#             if len(fn) > 30: sfn = sfn[:27] + '...'
+#             enum = status_range(start, end, skip, post_message='%s:' % sfn)
+#         else:
+#             enum = range(start, end, skip)
+#
+#         if file_type == "HDF5":
+#             with tables.open_file(fn, mode='w') as f:
+#                 comp_filter = tables.Filters(**blosc_options)
+#
+#                 g = f.create_group('/', 'VolumetricMovie')
+#
+#                 for n in enum:
+#                     f.create_carray(g, 'frame_%08d' % n, obj=self[n], filters=comp_filter)
+#
+#                 for k, v in self.info.items():
+#                     f.set_node_attr(g, k, v)
+#
+#                 f.flush()
+#
+#         elif file_type == "MUVI":
+#
+#             info = dict((k, numpy_to_python_val(v)) for (k, v) in self.info.items())
+#
+#             # Set up header before opening file.
+#             json_bytes = bytes('\n' + json.dumps(info, ensure_ascii=False) + '\n', encoding='utf8')
+#             header_length = len(json_bytes)
+#             offset = max(28 + header_length, 8192)
+#             spacer_bytes = offset - (28 + header_length)
+#
+#             # Get volume info
+#             num_volumes = len(enum)
+#             vol0 = self[0]
+#
+#             # Basic volume info
+#             shape = vol0.shape
+#             dt = vol0.dtype.type
+#             if dt not in _NUMPY_TYPES:
+#                 raise ValueError('Data type %s not supported in MUV file!' % repr(dt))
+#             dt = _NUMPY_TYPES[dt]
+#
+#             # Lets pad the header and align with 1024 bit boundaries
+#             bin_header_size = align_bdy(offset + 5*8 + 2 + num_volumes*8, 1024) + 1024
+#             next_volume_offset = offset + bin_header_size
+#             uc_size = None
+#
+#             volume_offsets = []
+#
+#             # Check that this is actually a volume
+#             if len(shape) == 3:
+#                 (depth, height, width) = shape
+#                 channels = 1
+#             elif len(shape) == 4:
+#                 (depth, height, width, channels) = shape
+#             else:
+#                 raise ValueError('Volumes should have 3 or 4 dimensions, found %d' % (len(shape)))
+#
+#             if channels not in (1, 2, 3, 4):
+#                 raise ValueError('Volume should have 1-4 channels only! (found %d)' % channels)
+#
+#             # Open file
+#             with open(fn, 'wb') as f:
+#
+#                 # Write header
+#                 f.write(b'MUVI')
+#                 f.write(struct.pack('<QQQ', 1, offset, header_length))
+#                 f.write(json_bytes)
+#
+#                 # Write preliminary header data; we'll go back later and insert the
+#                 #   volume offsets.
+#                 # f.write(bytes(offset - f.tell()))
+#                 f.seek(offset)
+#                 f.write(struct.pack('<QQQQQ', num_volumes, depth, height, width, channels))
+#                 f.write(dt)
+#                 f.write(struct.pack('<Q', next_volume_offset))
+#
+#                 # Iterate over volumes, writing each
+#                 for i in enum:
+#                     # Convert to bytes
+#                     vol = self[i].tostring()
+#
+#                     # Get uncompressed size of a single volume
+#                     if uc_size is None:
+#                         uc_size = len(vol)
+#                         if uc_size > 2**31:
+#                             raise ValueError('The uncompressed size of a single volume is > 2GB; this is currently unsupported by the file writer.')
+#
+#                     # Check size
+#                     if uc_size != len(vol):
+#                         raise ValueError('Volume %d (0-indexed) does not have same size as first volume!' % i)
+#
+#                     # Compress volume
+#                     cvol = blosc.compress(vol, **blosc_options)
+#
+#                     # Jump to volume offset
+#                     # f.write(bytes(next_volume_offset - f.tell()))
+#                     f.seek(next_volume_offset)
+#                     nb = len(cvol)
+#                     f.write(struct.pack('<Q', nb))
+#                     f.write(cvol)
+#
+#                     # Keep track of current offset, find next one.
+#                     volume_offsets.append(next_volume_offset)
+#                     next_volume_offset = align_bdy(next_volume_offset + 8 + nb, 1024)
+#
+#                 # Go back and write offsets
+#                 f.seek(offset + 5*8 + 2)
+#                 for n in volume_offsets:
+#                     f.write(struct.pack('<Q', n))
+#
+#                 f.close()
+#
+#         else:
+#             raise ValueError("Unrecognized file type.  Valid options: ['HDF5', 'MUVI']")
+#
+#
+# class SparseMovie(VolumetricMovie):
+#     def __init__(self, fn, group='/VolumetricMovie'):
+#         from . import sparse
+#
+#         self._sp = sparse.Sparse4D(fn)
+#         v = self[0]
+#
+#         self.info = {
+#             'Lx': v.shape[2],
+#             'Ly': v.shape[1],
+#             'Lz': v.shape[0],
+#         }
+#
+#         self.name = fn
+#
+#         self.validate_info()
+#
+#
+#     def __len__(self):
+#         return len(self._sp)
+#
+#
+#     def get_volume(self, i):
+#         return self._sp[i]
+#
+#
+# class CineMovie(VolumetricMovie):
+#     def __init__(self, fn, fpv=512, offset=0, fps=None, info=None, clip=80, top=100, gamma=False):
+#         from .cine import Cine
+#
+#         self._f = Cine(fn)
+#
+#         if fps is None: fps = fpv
+#         self.fps = fps
+#         self.fpv = fpv
+#         self.offset = offset
+#         self.clip = clip
+#         self.top = top
+#         self.gamma = gamma
+#
+#         self.info = {
+#             'Lx': self._f.width,
+#             'Ly': self._f.height,
+#             'Lz': fps,
+#             'gamma': 2 if gamma else 1
+#         }
+#
+#         self.info.update()
+#         self.validate_info()
+#         self.name = fn
+#
+#
+#     def __len__(self):
+#         return len(self._f)//self.fps
+#
+#     def get_volume(self, i):
+#         i0 = self.offset + i * self.fps
+#
+#         vol = np.empty((self.fps, self._f.height, self._f.width), dtype='u1')
+#
+#         for i in range(self.fpv):
+#             frame = (np.clip(self._f[i+i0], self.clip, self.clip + self.top) - self.clip).astype('f')
+#             frame /= self.top
+#             if self.gamma: frame = np.sqrt(frame)
+#             vol[i] = (frame*255).astype('u1')
+#
+#         return vol
+#
+#
+#
+#     def close(self):
+#         self._f.close()
+#
+#
+# _MUV_TYPES = {
+#     b'u1': np.uint8,
+#     b'u2': np.uint16,
+#     b'u4': np.uint32,
+#     b's1': np.int8,
+#     b's2': np.int16,
+#     b's4': np.int32,
+#     b'hf': np.float16,
+#     b'ff': np.float32,
+#     b'df': np.float64
+# }
+#
+# _NUMPY_TYPES = dict((v, k) for k, v in _MUV_TYPES.items())
+#
+# def ceil_div(a, b): return -(-a//b)
+# def align_bdy(a, b): return ceil_div(a, b) * b
+#
+#
+# def numpy_to_python_val(obj):
+#     if np.issubdtype(type(obj), np.integer):
+#         return int(obj)
+#     elif np.issubdtype(type(obj), np.floating):
+#         return float(obj)
+#     elif np.issubdtype(type(obj), np.complexfloating):
+#         return complex(obj)
+#     else:
+#         return obj
 
-                for n in enum:
-                    f.create_carray(g, 'frame_%08d' % n, obj=self[n], filters=comp_filter)
 
-                for k, v in self.info.items():
-                    f.set_node_attr(g, k, v)
-
-                f.flush()
-
-        elif file_type == "MUVI":
-
-            info = dict((k, numpy_to_python_val(v)) for (k, v) in self.info.items())
-
-            # Set up header before opening file.
-            json_bytes = bytes('\n' + json.dumps(info, ensure_ascii=False) + '\n', encoding='utf8')
-            header_length = len(json_bytes)
-            offset = max(28 + header_length, 8192)
-            spacer_bytes = offset - (28 + header_length)
-
-            # Get volume info
-            num_volumes = len(enum)
-            vol0 = self[0]
-
-            # Basic volume info
-            shape = vol0.shape
-            dt = vol0.dtype.type
-            if dt not in _NUMPY_TYPES:
-                raise ValueError('Data type %s not supported in MUV file!' % repr(dt))
-            dt = _NUMPY_TYPES[dt]
-
-            # Lets pad the header and align with 1024 bit boundaries
-            bin_header_size = align_bdy(offset + 5*8 + 2 + num_volumes*8, 1024) + 1024
-            next_volume_offset = offset + bin_header_size
-            uc_size = None
-
-            volume_offsets = []
-
-            # Check that this is actually a volume
-            if len(shape) == 3:
-                (depth, height, width) = shape
-                channels = 1
-            elif len(shape) == 4:
-                (depth, height, width, channels) = shape
-            else:
-                raise ValueError('Volumes should have 3 or 4 dimensions, found %d' % (len(shape)))
-
-            if channels not in (1, 2, 3, 4):
-                raise ValueError('Volume should have 1-4 channels only! (found %d)' % channels)
-
-            # Open file
-            with open(fn, 'wb') as f:
-
-                # Write header
-                f.write(b'MUVI')
-                f.write(struct.pack('<QQQ', 1, offset, header_length))
-                f.write(json_bytes)
-
-                # Write preliminary header data; we'll go back later and insert the
-                #   volume offsets.
-                # f.write(bytes(offset - f.tell()))
-                f.seek(offset)
-                f.write(struct.pack('<QQQQQ', num_volumes, depth, height, width, channels))
-                f.write(dt)
-                f.write(struct.pack('<Q', next_volume_offset))
-
-                # Iterate over volumes, writing each
-                for i in enum:
-                    # Convert to bytes
-                    vol = self[i].tostring()
-
-                    # Get uncompressed size of a single volume
-                    if uc_size is None:
-                        uc_size = len(vol)
-                        if uc_size > 2**31:
-                            raise ValueError('The uncompressed size of a single volume is > 2GB; this is currently unsupported by the file writer.')
-
-                    # Check size
-                    if uc_size != len(vol):
-                        raise ValueError('Volume %d (0-indexed) does not have same size as first volume!' % i)
-
-                    # Compress volume
-                    cvol = blosc.compress(vol, **blosc_options)
-
-                    # Jump to volume offset
-                    # f.write(bytes(next_volume_offset - f.tell()))
-                    f.seek(next_volume_offset)
-                    nb = len(cvol)
-                    f.write(struct.pack('<Q', nb))
-                    f.write(cvol)
-
-                    # Keep track of current offset, find next one.
-                    volume_offsets.append(next_volume_offset)
-                    next_volume_offset = align_bdy(next_volume_offset + 8 + nb, 1024)
-
-                # Go back and write offsets
-                f.seek(offset + 5*8 + 2)
-                for n in volume_offsets:
-                    f.write(struct.pack('<Q', n))
-
-                f.close()
-
-        else:
-            raise ValueError("Unrecognized file type.  Valid options: ['HDF5', 'MUVI']")
-
-
-class SparseMovie(VolumetricMovie):
-    def __init__(self, fn, group='/VolumetricMovie'):
-        from . import sparse
-
-        self._sp = sparse.Sparse4D(fn)
-        v = self[0]
-
-        self.info = {
-            'Lx': v.shape[2],
-            'Ly': v.shape[1],
-            'Lz': v.shape[0],
-        }
-
-        self.name = fn
-
-        self.validate_info()
-
-
-    def __len__(self):
-        return len(self._sp)
-
-
-    def get_volume(self, i):
-        return self._sp[i]
-
-
-class CineMovie(VolumetricMovie):
-    def __init__(self, fn, fpv=512, offset=0, fps=None, info=None, clip=80, top=100, gamma=False):
-        from .cine import Cine
-
-        self._f = Cine(fn)
-
-        if fps is None: fps = fpv
-        self.fps = fps
-        self.fpv = fpv
-        self.offset = offset
-        self.clip = clip
-        self.top = top
-        self.gamma = gamma
-
-        self.info = {
-            'Lx': self._f.width,
-            'Ly': self._f.height,
-            'Lz': fps,
-            'gamma': 2 if gamma else 1
-        }
-
-        self.info.update()
-        self.validate_info()
-        self.name = fn
-
-
-    def __len__(self):
-        return len(self._f)//self.fps
-
-    def get_volume(self, i):
-        i0 = self.offset + i * self.fps
-
-        vol = np.empty((self.fps, self._f.height, self._f.width), dtype='u1')
-
-        for i in range(self.fpv):
-            frame = (np.clip(self._f[i+i0], self.clip, self.clip + self.top) - self.clip).astype('f')
-            frame /= self.top
-            if self.gamma: frame = np.sqrt(frame)
-            vol[i] = (frame*255).astype('u1')
-
-        return vol
-
-
-
-    def close(self):
-        self._f.close()
-
-
-_MUV_TYPES = {
-    b'u1': np.uint8,
-    b'u2': np.uint16,
-    b'u4': np.uint32,
-    b's1': np.int8,
-    b's2': np.int16,
-    b's4': np.int32,
-    b'hf': np.float16,
-    b'ff': np.float32,
-    b'df': np.float64
-}
-
-_NUMPY_TYPES = dict((v, k) for k, v in _MUV_TYPES.items())
-
-def ceil_div(a, b): return -(-a//b)
-def align_bdy(a, b): return ceil_div(a, b) * b
-
-
-def numpy_to_python_val(obj):
-    if np.issubdtype(type(obj), np.integer):
-        return int(obj)
-    elif np.issubdtype(type(obj), np.floating):
-        return float(obj)
-    elif np.issubdtype(type(obj), np.complexfloating):
-        return complex(obj)
-    else:
-        return obj
-
+if __name__ == '__main__':
+    example = VolumeProperties(dx=100/256, Nz=256, Ns=300, dt=0.01, units='mm')
+    example.to_file('volume_properties.xml')
 
 # class MuviMovie(VolumetricMovie):
 #     def __init__(self, fn, info={}):
