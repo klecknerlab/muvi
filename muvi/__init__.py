@@ -68,8 +68,6 @@ class VolumeProperties:
         'Ly': 'Ny',
         'Lz': 'Nz',
         'Ns': 'Nz',
-        'dy': 'dx',
-        'dz': 'dx',
     }
 
     _param_types = {
@@ -359,16 +357,16 @@ class VolumeProperties:
                 self._search_tree(ee, tag, warn=warn, raise_errors=raise_errors)
 
 
-# Convert Numpy types to VTI Data types
-VTI_DATA_TYPES = {
+# Convert Numpy types to VTK Data types
+VTK_DATA_TYPES = {
     'b': "Int8",
     'B': "UInt8",
     'h': "Int16",
-    'H': "Uint16",
+    'H': "UInt16",
     'i': "Int32",
-    'I': "Uint32",
+    'I': "UInt32",
     'l': "Int64",
-    'L': "Uint64",
+    'L': "UInt64",
     'f': "Float32",
     'd': "Float64"
 }
@@ -448,16 +446,15 @@ class status_enumerate(status_range):
     def get_next(self):
         return (self.count, self.obj[self.count])
 
-
-_file_ext = {
-    # '.h5':'HDF5',
-    # '.hdf5':'HDF5',
-    '.s4d':'S4D',
-    '.cine':'CINE',
-    '.muv':'MUVI',
-    '.muvi':'MUVI',
-
-}
+#
+# _file_ext = {
+#     # '.h5':'HDF5',
+#     # '.hdf5':'HDF5',
+#     '.s4d':'S4D',
+#     '.cine':'CINE',
+#     '.muv':'MUVI',
+#     '.muvi':'MUVI',
+# }
 
 
 # MUVI_READERS = {
@@ -515,7 +512,9 @@ class VolumetricMovie:
             channels = None
         elif len(shape) == 4:
             Nz, Ny, Nx, channels = shape
-        dtype = vol.dtype.str.lstrip('<>|')
+
+        # dtype = vol.dtype.str.lstrip('<>|')
+        dtype = vol.dtype.char
 
         for key, val in [
             ('Nx', Nx),
@@ -543,14 +542,203 @@ class VolumetricMovie:
         return self.info['Nt']
 
 
-    def save(self, fn, start=0, end=None, print_status=True):
-        if end is None: end = len(self)
+    def save(self, fn, start=0, end=None, compression=0, block_size=2**16, print_status=True):
+        '''Write volumetric movie to a VTI file.
+
+        Parameters
+        ----------
+        fn : str
+            Filename to write
+
+        Keywords
+        --------
+        start : int (default: 0)
+            The first frame to write.
+        end : int
+            The last frame to write; if not specificed, the last frame in the
+            movie.
+        compression : int (default: 0, ranges from -10 -- 12)
+            The level of compression.  If > 0 corresponds to the "fast" mode
+            in lz4.block, otherwise uses the "high_compression" option.
+        block_size : int (default: 2^16)
+            The size of the blocks in the compressed chunk
+        print_status : bool (default: True)
+            If specified, a running progress bar is printed as it is saved.
+        '''
+
+        num_frames = self.start_vti_write(fn, start, end, compression, block_size)
+
         if print_status:
             sfn = fn
             if len(fn) > 30: sfn = sfn[:27] + '...'
-            enum = status_range(start, end, skip, post_message='%s:' % sfn)
+            enum = status_range(0, num_frames, post_message='%s:' % sfn)
         else:
-            enum = range(start, end, skip)
+            enum = range(0, num_frames)
+
+        for i in enum:
+            self.write_vti_frame()
+
+
+    def start_vti_write(self, fn, start=0, end=None, compression=0, block_size=2**16):
+        '''Start writing a VTI file.  Used internally; see the `save` method
+        for a simple user interface.
+
+        Parameters
+        ----------
+        fn : str
+            Filename to write
+
+        Keywords
+        --------
+        start : int (default: 0)
+            The first frame to write.
+        end : int
+            The last frame to write; if not specificed, the last frame in the
+            movie.
+        compression : int (default: 0, ranges from -10 -- 12)
+            The level of compression.  If > 0 corresponds to the "fast" mode
+            in lz4.block, otherwise uses the "high_compression" option.
+        block_size : int (default: 2^16)
+            The size of the blocks in the compressed chunk
+
+        Returns
+        -------
+        frames_remaining : int
+            The number of frames which need to be written.
+        '''
+
+        if hasattr(self, '_write_file'):
+            raise ValueError("Tried to start writing a volume that is already being written to another file!")
+
+        if end is None:
+            end = len(self)
+        elif end < 0:
+            end = len(self) + end
+
+        if compression > 0:
+            self._write_comp = dict(mode='high_compression', compression=compression, store_size=False)
+        else:
+            self._write_comp = dict(mode='fast', acceleration=1-compression, store_size=False)
+
+        self._write_header_offsets = []
+        self._write_data_offsets = []
+        self._write_start = start
+        self._write_end = end
+        self._write_current = start
+        self._write_block_size = block_size
+
+        t = np.arange(end - start) * self.info.get('dt', 1)
+
+        vol_info = dict(
+            x0 = 0,
+            y0 = 0,
+            z0 = 0,
+            x1 = self.info['Nx'],
+            y1 = self.info['Ny'],
+            z1 = self.info['Nz'],
+            dx = 1,
+            dy = 1,
+            dz = 1,
+            time_values = ' '.join(map(str, t)),
+            num_time_steps = end-start,
+            encoding = "raw",
+            # encoding = "base64" if b64_encode else "raw",
+            header_type = "UInt64",
+            # header_type = "UInt64" if long_header else "UInt32",
+            arr_dtype = VTK_DATA_TYPES[self.info['dtype']],
+        )
+
+        self._write_file = open(fn, 'wb')
+        self._write_file.write(r'''<?xml version="1.0"?>
+<VTKFile type="ImageData" version="0.1" byte_order="LittleEndian" header_type="{header_type}" compressor="vtkLZ4DataCompressor">
+<ImageData WholeExtent="{x0} {x1} {y0} {y1} {z0} {z1}" Origin="{x0} {y0} {z0}" Spacing="{dx} {dy} {dz}" TimeValues="{time_values}">
+<Piece Extent="{x0} {x1} {y0} {y1} {z0} {z1}">
+<CellData name="ImageScalars">
+'''.format(**vol_info).encode('UTF-8'))
+
+        if 'channels' in self.info:
+            self._write_data_str = b'        <DataArray type="%s" Name="ImageScalars" format="appended" NumberOfComponents="%d" %%-60s\n' % (vol_info["arr_dtype"].encode("UTF-8"), self.info['channels'])
+        else:
+            self._write_data_str = b'        <DataArray type="%s" Name="ImageScalars" format="appended" %%-60s\n' % (vol_info["arr_dtype"].encode("UTF-8"))
+        self._write_attrib_str = b'TimeStep="%d" offset="%d"/>'
+
+        for n in range(start, end):
+            self._write_file.flush()
+            self._write_header_offsets.append(self._write_file.tell())
+            self._write_file.write(self._write_data_str % (self._write_attrib_str % (n-start, 0)))
+
+        self._write_file.write(r'''      </CellData>
+    </Piece>
+  </ImageData>
+  <AppendedData encoding="{encoding}">
+_'''.format(**vol_info).encode('UTF-8'))
+
+        return self._write_end - self._write_current
+
+
+    def write_vti_frame(self):
+        '''Write a single frame to a VTI file.  If all frames are written,
+        will also finish up writing the file and close it.
+
+        The file must be openeded with `start_vti_write` method before calling
+        this method.
+
+        Returns
+        -------
+        frames_remaining : int
+            The number of frames which still need to be written.  If it returns
+            a 0, the writing is done and the file is closed.
+        '''
+
+        if not hasattr(self, '_write_file'):
+            raise ValueError("No file open for writing; call start_vti_write first.")
+
+        dat = self[self._write_current].tostring()
+        self._write_current += 1
+
+        num_blocks = (len(dat) + self._write_block_size - 1) // self._write_block_size
+        dat_split = [dat[i*self._write_block_size:(i+1)*self._write_block_size] for i in range(num_blocks)]
+
+        with concurrent.futures.ThreadPoolExecutor() as exec:
+            dat_comp = list(exec.map(lambda x: lz4.block.compress(x, **self._write_comp), dat_split))
+
+        # if long_header:
+        header = struct.pack('<QQQ', num_blocks, self._write_block_size, len(dat_split[-1]))
+        header += struct.pack('<%dQ' % num_blocks, *map(len, dat_comp))
+        # else:
+        #     header = struct.pack('<III', num_blocks, block_size, len(dat_split[-1]))
+        #     header += struct.pack('<%dI' % num_blocks, *map(len, dat_comp))
+
+        # if b64_encode:
+            # return base64.b64encode(header) + base64.b64encode(b''.join(dat_comp))
+        # else:
+        # dat_comp.insert(0, header)
+        # return b''.join(dat_comp)
+
+        self._write_data_offsets.append(self._write_file.tell())
+
+        self._write_file.write(header)
+        for chunk in dat_comp:
+            self._write_file.write(chunk)
+
+        remaining = self._write_end - self._write_current
+
+        if remaining <= 0:
+            self._write_file.write(b'  </AppendedData>\n</VTKFile>')
+
+            for n, (hoff, doff) in enumerate(zip(self._write_header_offsets, self._write_data_offsets)):
+                doff = doff - self._write_data_offsets[0]
+                self._write_file.seek(hoff)
+                self._write_file.write(self._write_data_str % (self._write_attrib_str % (n, doff)))
+
+            self._write_file.close()
+            del self._write_file
+
+            return 0
+
+        else:
+            return remaining
+
 
 
 # class VolumetricMovie(object):
@@ -955,9 +1143,9 @@ class VolumetricMovie:
 #         return obj
 
 
-if __name__ == '__main__':
-    example = VolumeProperties(dx=100/256, Nz=256, Ns=300, dt=0.01, units='mm')
-    example.to_file('volume_properties.xml')
+# if __name__ == '__main__':
+#     example = VolumeProperties(dx=100/256, Nz=256, Ns=300, dt=0.01, units='mm')
+#     example.to_file('volume_properties.xml')
 
 # class MuviMovie(VolumetricMovie):
 #     def __init__(self, fn, info={}):

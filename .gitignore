@@ -4,6 +4,10 @@ __pycache__/
 *$py.class
 .DS_Store
 
+# Volume files
+*.vti
+*.muv
+
 # C extensions
 *.so
 

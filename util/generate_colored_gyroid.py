@@ -25,7 +25,7 @@ W = 128
 N = 128
 
 if len(sys.argv) == 1:
-    fn = 'gyroid.vti'
+    fn = 'colored_gyroid.vti'
 else:
     fn = sys.argv[1]
 
@@ -37,17 +37,29 @@ x = np.arange(W).reshape(1, 1, -1) * scale
 y = np.arange(W).reshape(1, -1, 1) * scale
 z = np.arange(W).reshape(-1, 1, 1) * scale
 
+phi = 2 * x
+
 gyroid_base = np.sin(x)*np.cos(y) + np.sin(y)*np.cos(z) + np.sin(z)*np.cos(x)
 noise = 5*ndimage.gaussian_filter((np.random.rand(W, W, W)-0.5) * 1.0, 3, mode='wrap')
 
-np_frames = [
-    (255 * np.clip(np.roll(gyroid_base, n, axis=0) + noise - 0.5, 0, 1)).astype('u1').reshape(W, W, W, 1) for n in range(N)
-]
+frames = []
+
+# np_frames = [
+#     (255 * np.clip(np.roll(gyroid_base, n, axis=0) + noise - 0.5, 0, 1)).astype('u1').reshape(W, W, W, 1) for n in range(N)
+# ]
+
+
+for n in range(N):
+    base = 255 * np.clip(np.roll(gyroid_base, n, axis=0) + noise - 0.5, 0, 1)
+    f = np.empty((W, W, W, 2), dtype='u1')
+    f[..., 0] = base * abs(np.sin(phi))
+    f[..., 1] = base * abs(np.cos(phi))
+    frames.append(f)
 
 el = time.time() - start
 
 print('Generate volume: %.1f ms' % (el * 1000))
-print('Fraction empty: %.1f%%' % ((np_frames[0]==0).mean()*100))
+print('Fraction empty: %.1f%%' % ((frames[0]==0).mean()*100))
 
 
 info = {
@@ -58,10 +70,13 @@ info = {
 }
 
 start = time.time()
-VolumetricMovie(np_frames, **info).save(fn)
+vol = VolumetricMovie(frames, **info)
+vol.save(fn)
 el = time.time() - start
 
+print(vol.info)
+
 fs = os.path.getsize(fn)
-rs = N * np_frames[0].nbytes
+rs = N * frames[0].nbytes
 print('Save compressed file: %.1f ms (%.2f raw GB/s)' % (el*1000, rs/1E9/el))
 print('Final size: %d MB (compression ratio=%.2f)' % (fs/1E6, rs/fs))
