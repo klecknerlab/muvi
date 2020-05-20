@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-# Copyright 2018 Dustin Kleckner
+# Copyright 2020 Dustin Kleckner
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -478,7 +478,8 @@ class View(object):
     def autoscale(self):
         '''Sets limits of volume and scale if not already defined.'''
         if self.X1 is None:
-            self.X1 = np.array(self.volume.shape[2::-1]) if self.volume is not None else np.ones(3)
+            self.X1 = np.array([self.volume.info['Nx'], self.volume.info['Ny'], self.volume.info['Nz']]) \
+                if self.volume is not None else np.ones(3)
         if self.scale is None:
             self.scale = float(2.0/mag(self.X1-self.X0))
         if self.center is None:

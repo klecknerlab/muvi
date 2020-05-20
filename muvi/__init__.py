@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-# Copyright 2019 Dustin Kleckner
+# Copyright 2020 Dustin Kleckner
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -55,12 +55,12 @@ def xml_indent(elem, level=0):
 
 class VolumeProperties:
     _defaults = {
-        'dtype': 'u1',
-        'channels': 1,
-        'interleaved': True,
-        'offset': 0,
-        'clip': 80,
-        'gamma2': True,
+        # 'dtype': 'u1',
+        # 'channels': 1,
+        # 'interleaved': True,
+        # 'offset': 0,
+        # 'clip': 80,
+        # 'gamma2': True,
     }
 
     _alternates = {
@@ -84,15 +84,14 @@ class VolumeProperties:
         'Lx': float,
         'Ly': float,
         'Lz': float,
-        'Dx': float,
-        'Dy': float,
-        'Dz': float,
+        'dx': float,
+        'dy': float,
+        'dz': float,
         't0': float,
         'dt': float,
         'dtype': str,
         'creation_time': float,
         'units': str,
-        'notes': str,
         'clip': int,
         'top': int,
         'gamma2': bool,
@@ -131,7 +130,9 @@ class VolumeProperties:
         dt : float
             The time step (1 / volume rate).
         channels : int
-            Number of color channels (default: 1)
+            Number of color channels.  If specified, this will be the size
+            of the last axis of a single volume.  If it is not specified, the
+            returned volumes will be 3D.
         interleaved : bool (default: True)
             Indicates that different color channels are stacked in alternating
             2D frames (e.g. RGRGRGRGRG--RGRG...).  If False, different color
@@ -143,15 +144,13 @@ class VolumeProperties:
             Physical size of the volume on each axis.  For distortion corrected
             volumes, this is the size of the volume at the Axis center.
         dx, dy, dz : float
-            Physical distance per pixel in each dimension.  Can be used to
-            specify the size of the volume when the image size might change.
-            If `dy` or `dz` is not speficied, it will default to `dx`.
-        Sx, Sy, Sz: float
-            Physical offset of the scanner/camera axis relative to the volume
-            center.  (See wiki for details.)
-        Cz : float
-            Physical offset of the camera nodel point from the center of the
-            volume.  (See wiki for details.)
+            Used for perspective correction; effective distance along each axis
+            to the pivot point.  `dz` should be the effective distance from the
+            volume center to the camera nodal point, and should positive.
+            Only one of `dy` or `dz` should be specified, depending on where
+            the camera is located.  Sign depends on the location of the scanner;
+            for example if the scanner is in the -y direction, you would
+            specify a negative `dy`.
         units : str
             The physical units for all lengths.
         creation_time : float
@@ -247,7 +246,7 @@ class VolumeProperties:
             if not key.startswith('user_'):
                 raise ValueError("Invalid VolumeProperty '%s'" % key)
         else:
-            val = self._param_types(key)(val)
+            val = self._param_types[key](val)
 
         self._d[key] = val
 
@@ -451,102 +450,97 @@ class status_enumerate(status_range):
 
 
 _file_ext = {
-    '.h5':'HDF5',
-    '.hdf5':'HDF5',
+    # '.h5':'HDF5',
+    # '.hdf5':'HDF5',
     '.s4d':'S4D',
     '.cine':'CINE',
     '.muv':'MUVI',
     '.muvi':'MUVI',
+
 }
 
 
-MUVI_READERS = {
-    '.vti': vti.VTIReader,
-    '.cine': cine.Cine,
-    '.s3d': sparse.Sparse3D,
-}
-
-MUVI_WRITERS = {
-    '.vti': vti.VTIWriter,
-}
+# MUVI_READERS = {
+#     '.vti': vti.VTIReader,
+#     '.cine': cine.Cine,
+#     '.s3d': sparse.Sparse3D,
+# }
+#
+# MUVI_WRITERS = {
+#     '.vti': vti.VTIWriter,
+# }
 
 class VolumetricMovie:
-    '''Generic class for working with volumetric movies.
+    '''Base class for working with volumetric movies.
 
     Attributes
     ----------
-    source : str or list/array-like object
-        Either a filename with data in it, or an object which supports indexing
-        and returns 2D or 3D data, optionally with multi-channel information.
+    source : list/array-like object
+        An object which supports indexing and returns a 3D or 4D numpy array.
 
-    Additional keyword arguments get pass to the file reader object and/or
-    turned directly into VolumeParameter values.  (Generally speaking, this is
-    the default for reader objects as well.)
+    Any keywords are passed directly to the `info` attribute, which is a
+    VolumeProperties object.
+
+    If you would like to suppport a new data type, it is suggest you inheret
+    from this class.  To make a new class which is supported by the viewer,
+    you must meet the following requirements:
+        1. Define a new `__init__` and `get_volume` method.
+        2. The initialization must create an `info` attribute which is
+            a `VolumeProperties` object, and populate it as needed.  (The
+            `infer_properties` method can take care of many basic attributes.)
     '''
 
     def __init__(self, source, **kwargs):
-        # If the input is a string, this is a file we need to load.
-        if isinstance(source, str):
-            bfn, ext = os.path.splitext()
-            ext = ext.lower()
+        self.source = source
+        self.info = VolumeProperties(**kwargs)
+        self.info['Nt'] = len(source)
+        self.infer_properties()
 
-            if ext in MUVI_READERS:
-                self.source = MUVI_READERS[ext](source, **kwargs)
-            else:
-                raise ValueError('Unknown extension: %s' % ext)
-        # Otherwise assume it behaves like a list of arrays.
-        else:
-            self.properties = VolumeProperties(**kwargs)
-            self.source = source
 
-        # For the reader types, we will get data and initialize the reader
-        #   with the get_volume_properties function.  If we don't have it
-        #   that's ok too!
-        if hasattr(self.source, 'get_volume_properties'):
-            self.properties.update(self.source.get_volume_properties())
+    def infer_properties(self, overwrite=False):
+        '''
+        Infer properties of volume from first frame.
 
-        # Let's get a frame and infer what type of input it is from that.
-        frame = source[0]
-        if not hasattr(frame, 'source'):
-            raise ValueError('Invalid source object (should behave like a list of numpy arrays)')
+        Keywords
+        --------
+        overwrite : bool (default: False)
+            If True, existing values will be overwritten
+        '''
 
-        shape = frame.shape
+        vol = self.get_volume(0)
 
-        # If the last axis has four or less elements, it must be the color
-        #  channel
-        if len(frame.shape[-1]) <= 4:
-            channels = shape[-1]
-            shape = shape[:-1]
-        else:
-            channels = 1
+        shape = vol.shape
+        if len(shape) == 3:
+            Nz, Ny, Nx = shape
+            channels = None
+        elif len(shape) == 4:
+            Nz, Ny, Nx, channels = shape
+        dtype = vol.dtype.str.lstrip('<>|')
 
-        # Check if it is 2D or 3D
-        if len(shape) == 2:
-            self.is_2D = True
-            if 'Nz' not in self.properties:
-                raise ValueError("If a 2D movie is used as the source, 'Nz' parameter must be defined!")
-        else:
-            self.is_3D = True
+        for key, val in [
+            ('Nx', Nx),
+            ('Ny', Ny),
+            ('Nz', Nz),
+            ('channels', channels),
+            ('dtype', dtype),
+        ]:
+            if val is not None and key not in self.info:
+                self.info[key] = val
+
+
+    def get_volume(self, index):
+        return self.source[index]
 
 
     def __getitem__(self, key):
-        if isnistance(key, slice):
-            return [self[i] for i in key]
+        if isinstance(key, slice):
+            return [self.get_volume(i) for i in key]
         else:
-            if self.is_2D:
-                Nz = self.properties['Nz']
-                start = self.properties['offset'] + i*self.properties['Ns']
-                return self.source[start:start+Nz]
-            else:
-                return self.source[i]
-            
+            return self.get_volume(key)
+
 
     def __len__(self):
-        if self.is_2D:
-            Ns = self.properties['Ns']
-            return (len(self.source) - offset + (Ns - self.properties['Nz'])) // Ns
-        else:
-            return len(self.source)
+        return self.info['Nt']
 
 
     def save(self, fn, start=0, end=None, print_status=True):

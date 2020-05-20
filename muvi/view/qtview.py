@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-# Copyright 2018 Dustin Kleckner
+# Copyright 2020 Dustin Kleckner
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -186,12 +186,14 @@ class ViewWidget(QOpenGLWidget):
         # These are not needed, and throw errors on Windows installs
         # self.gl = self.context().versionFunctions()
         # self.gl.initializeOpenGLFunctions()
+
         self.dpr = self.devicePixelRatio()
         try:
-            self.view = View(volume=self.volume, width=self.width()*self.dpr,
-                height=self.height()*self.dpr)
-            if hasattr(self, "frame_setting"):
-                self.frame_setting.setMaximum(len(self.volume)-1)
+            pass
+            # self.view = View(volume=self.volume, width=self.width()*self.dpr,
+            #     height=self.height()*self.dpr)
+            # if hasattr(self, "frame_setting"):
+            #     self.frame_setting.setMaximum(len(self.volume)-1)
         except:
             traceback.print_exc()
             self.parent.close()
@@ -199,14 +201,21 @@ class ViewWidget(QOpenGLWidget):
 
     def paintGL(self):
         try:
-            if hasattr(self, 'view'): self.view.draw()
+            if hasattr(self, 'view'):
+                self.view.draw()
+            else:
+                self.view = View(volume=self.volume, width=self.width()*self.dpr,
+                    height=self.height()*self.dpr)
+                if hasattr(self, "frame_setting"):
+                    self.frame_setting.setMaximum(len(self.volume)-1)
         except:
             traceback.print_exc()
             self.parent.close()
 
 
     def resizeGL(self, width, height):
-        if hasattr(self, 'view'): self.view.resize(width*self.dpr, height*self.dpr)
+        if hasattr(self, 'view'):
+            self.view.resize(width*self.dpr, height*self.dpr)
 
 
     def mousePressEvent(self, event):
@@ -247,7 +256,7 @@ class ViewWidget(QOpenGLWidget):
         # fn = 'test.png'
         fns = glob.glob('muvi_screenshot_*.png')
         for i in range(10**4):
-            fn = 'muvi_screenshot_%08d.png' % i 
+            fn = 'muvi_screenshot_%08d.png' % i
             if fn not in fns:
                 break
 
