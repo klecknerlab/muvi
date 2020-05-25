@@ -37,16 +37,12 @@ x = np.arange(W).reshape(1, 1, -1) * scale
 y = np.arange(W).reshape(1, -1, 1) * scale
 z = np.arange(W).reshape(-1, 1, 1) * scale
 
-phi = 2 * x
+phi = 2 * z
 
 gyroid_base = np.sin(x)*np.cos(y) + np.sin(y)*np.cos(z) + np.sin(z)*np.cos(x)
 noise = 5*ndimage.gaussian_filter((np.random.rand(W, W, W)-0.5) * 1.0, 3, mode='wrap')
 
 frames = []
-
-# np_frames = [
-#     (255 * np.clip(np.roll(gyroid_base, n, axis=0) + noise - 0.5, 0, 1)).astype('u1').reshape(W, W, W, 1) for n in range(N)
-# ]
 
 
 for n in range(N):
