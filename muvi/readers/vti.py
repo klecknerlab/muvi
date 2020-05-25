@@ -260,9 +260,9 @@ class VTIMovie(VolumetricMovie):
 
         # Find the frame shape -- this should never change!
         if 'channels' in self.info:
-            self.shape = (self.info['Nx'], self.info['Ny'], self.info['Nz'], self.info['channels'])
+            self.shape = (self.info['Nz'], self.info['Ny'], self.info['Nx'], self.info['channels'])
         else:
-            self.shape = (self.info['Nx'], self.info['Ny'], self.info['Nz'])
+            self.shape = (self.info['Nz'], self.info['Ny'], self.info['Nx'])
 
         # Update info fields if the user directly specified anything
         self.info.update(kwargs)
