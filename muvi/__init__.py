@@ -31,7 +31,7 @@ import concurrent.futures
 from xml.etree import ElementTree as ET
 # import re
 # import numba
-
+import time
 
 class VolumetricMovieError(Exception):
     pass
@@ -457,15 +457,8 @@ class status_enumerate(status_range):
 # }
 
 
-# MUVI_READERS = {
-#     '.vti': vti.VTIReader,
-#     '.cine': cine.Cine,
-#     '.s3d': sparse.Sparse3D,
-# }
-#
-# MUVI_WRITERS = {
-#     '.vti': vti.VTIWriter,
-# }
+
+
 
 class VolumetricMovie:
     '''Base class for working with volumetric movies.
@@ -491,10 +484,10 @@ class VolumetricMovie:
         self.source = source
         self.info = VolumeProperties(**kwargs)
         self.info['Nt'] = len(source)
-        self.infer_properties()
+        self.validate_info()
 
 
-    def infer_properties(self, overwrite=False):
+    def validate_info(self, overwrite=False):
         '''
         Infer properties of volume from first frame.
 
@@ -523,9 +516,15 @@ class VolumetricMovie:
             ('channels', channels),
             ('dtype', dtype),
         ]:
-            if val is not None and key not in self.info:
-                self.info[key] = val
+            if val is not None:
+                if key not in self.info:
+                    self.info[key] = val
+                else:
+                    if self.info[key] != val:
+                        raise VolumetricMovieError("validation error in %s:\n    info property '%s' does not agree with value infered from first frame (%s != %s)" % (repr(self), key, self.info[key], val))
 
+        if 'creation_time' not in self.info:
+            self.info['creation_time'] = time.time()
 
     def get_volume(self, index):
         return self.source[index]
@@ -540,6 +539,10 @@ class VolumetricMovie:
 
     def __len__(self):
         return self.info['Nt']
+
+
+    def close(self):
+        pass
 
 
     def save(self, fn, start=0, end=None, compression=0, block_size=2**16, print_status=True):
@@ -651,9 +654,11 @@ class VolumetricMovie:
         self._write_file = open(fn, 'wb')
         self._write_file.write(r'''<?xml version="1.0"?>
 <VTKFile type="ImageData" version="0.1" byte_order="LittleEndian" header_type="{header_type}" compressor="vtkLZ4DataCompressor">
-<ImageData WholeExtent="{x0} {x1} {y0} {y1} {z0} {z1}" Origin="{x0} {y0} {z0}" Spacing="{dx} {dy} {dz}" TimeValues="{time_values}">
-<Piece Extent="{x0} {x1} {y0} {y1} {z0} {z1}">
-<CellData name="ImageScalars">
+'''.format(**vol_info).encode('UTF-8'))
+        self._write_file.write(self.info.xml(indent=1))
+        self._write_file.write(r'''  <ImageData WholeExtent="{x0} {x1} {y0} {y1} {z0} {z1}" Origin="{x0} {y0} {z0}" Spacing="{dx} {dy} {dz}" TimeValues="{time_values}">
+    <Piece Extent="{x0} {x1} {y0} {y1} {z0} {z1}">
+      <CellData name="ImageScalars">
 '''.format(**vol_info).encode('UTF-8'))
 
         if 'channels' in self.info:
@@ -670,7 +675,7 @@ class VolumetricMovie:
         self._write_file.write(r'''      </CellData>
     </Piece>
   </ImageData>
-  <AppendedData encoding="{encoding}">
+<AppendedData encoding="{encoding}">
 _'''.format(**vol_info).encode('UTF-8'))
 
         return self._write_end - self._write_current
@@ -738,6 +743,18 @@ _'''.format(**vol_info).encode('UTF-8'))
 
         else:
             return remaining
+
+
+def open_4D_movie(fn, file_type=None, *args, **kwargs):
+    if file_type is None:
+        file_type = os.path.splitext(fn)[1].lower().lstrip('.')
+
+    if file_type == 'vti':
+        from .readers.vti import VTIMovie
+        return VTIMovie(fn)
+    else:
+        raise ValueError("4D Movie file with extension '%s' not supported" % file_type)
+
 
 
 
@@ -1233,16 +1250,11 @@ _'''.format(**vol_info).encode('UTF-8'))
 
 
 
-# def open_4D_movie(fn, file_type=None, *args, **kwargs):
-#     if file_type is None:
-#         ext = os.path.splitext(fn)[1].lower()
-#         if ext in _file_ext:
-#             file_type = _file_ext[ext]
-#
-#     if file_type not in _file_types:
-#         raise ValueError('File extension %s not supported.' % ext)
-#
-#     return _file_types[file_type](fn, *args, **kwargs)
+    #
+    # if file_type not in _file_types:
+    #     raise ValueError('File extension %s not supported.' % ext)
+    #
+    # return _file_types[file_type](fn, *args, **kwargs)
 
 
 # class HDF5Movie(object):

@@ -26,10 +26,9 @@ $ python setup.py install
 
 In order to run the tools, you will need several Python packages installed, including:
   * numpy
-  * pytables (https://www.pytables.org/)
   * pyQt5
-  * python-blosc
   * pyopengl
+  * lz4
   * numba
 
 This is easiest to do with some sort of package manager; the utilities are being
@@ -39,17 +38,16 @@ Python 3.X is supported.
 Assuming you have Anaconda installed, you can get the require packages with:
 
 ```shell
-$ conda install pytables pyqt pyopengl
-$ conda install -c conda-forge python-blosc
+$ conda install numba lz4 pyopengl pyqt
 ```
 
 ### Windows
 
 You should be able to download the package directly from the Git repo and run `setup.py` as above.  
 
-Alternatively, if you have Atom () installed, you can use it to clone the repository and install this way.
-To do this, from within atom:
- - `Ctrl+Shift+P`
+Alternatively, if you have Atom (https://atom.io/) installed, you can use it to clone the repository and install this way.
+To do this, from within Atom:
+ - `Ctrl+Shift+P` (Note: `Command+Shift+P` on Mac)
  - Enter `Github: Clone` into the dialog, and hit enter
  - Add the address of this page (`https://github.com/klecknerlab/muvi.git`)
  - Select a folder, and navigate there in an Anaconda prompt
@@ -63,8 +61,8 @@ To create and view an example volume:
 
 ```shell
 $ cd [MUVI DIR]/util
-$ python generate_gyroid.py ~/gyroid.h5
-$ python view.py ~/gyroid.h5
+$ python generate_gyroid.py ~/gyroid.vti
+$ python view.py ~/gyroid.vti
 ```
 
 ![](gyroid.png)
@@ -77,7 +75,7 @@ $ python convert_cine.py [INPUT FILE] -s [FRAMES PER SCAN] -v [LIVE FRAMES PER V
 $ python view.py [OUTPUT FILE]
 ```
 
-By default, the output filename is the same as the input with an `.h5` extension.  There are also more options in the conversion utility, which you can view with:
+By default, the output filename is the same as the input with an `.vti` extension.  There are also more options in the conversion utility, which you can view with:
 
 ```shell
 $ cd [MUVI DIR]/util
@@ -120,11 +118,14 @@ A number of features are currently planned:
 
 - [x] Volume rendering
 - [x] Isosurface viewing
-- [x] HDF5 input format
-- [x] Custom "MUVI" format (much faster than HDF5)
+- [x] VTI file writing
+- [x] VTI file reading
+- [ ] VTI reading from other sources
 - [x] CINE conversion
+- [ ] SEQ conversion
 - [ ] Conversion GUI
 - [ ] Display perspective correction
+- [ ] Multichannel support
 - [ ] Support for perspective in old "S4D" format  
 - [ ] Perspective correction on volumes in memory (for external processing)
 - [ ] Image export (high res)
@@ -141,7 +142,7 @@ A number of features are currently planned:
 
 # License
 
-Copyright 2019 Dustin Kleckner
+Copyright 2020 Dustin Kleckner
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
