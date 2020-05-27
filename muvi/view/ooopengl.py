@@ -85,7 +85,7 @@ class Texture(object):
     data_type : texture data type (default: GL_UNSIGNED_BYTE)
     mag_filter : magnification filter (default: GL_LINEAR)
     min_filter : minification filter (default: GL_LINEAR)
-    target : type of texture (default: GL_TEXTURE_2D or GL_TEXTURE_3D, depending on shape)
+    target : type of texture (default: depends on shape)
     source : optional data source, i.e. byte stream of numpy array (default: None)
     wrap_s : texture wrap type in s (x) (default: None, not set)
     wrap_t : texture wrap type in t (y) (default: None, not set)
@@ -105,17 +105,23 @@ class Texture(object):
 
         # print(size)
         if target is None:
-            if len(size) == 2:
+            if len(size) == 1:
+                target = GL_TEXTURE_1D
+            elif len(size) == 2:
                 target = GL_TEXTURE_2D
             elif len(size) == 3:
                 target = GL_TEXTURE_3D
-            else: raise ValueError('size should have 2 or 3 elements (found %s)' % len(size))
+            else:
+                raise ValueError('size should have 1--3 elements (found %s)' % len(size))
 
         self.target = target
 
-        if wrap_s is None: wrap_s = wrap
-        if wrap_t is None: wrap_t = wrap
-        if wrap_r is None: wrap_r = wrap
+        if wrap_s is None:
+            wrap_s = wrap
+        if wrap_t is None:
+            wrap_t = wrap
+        if wrap_r is None:
+            wrap_r = wrap
 
         self.id = glGenTextures(1)
         glActiveTexture(GL_TEXTURE0)
@@ -128,13 +134,16 @@ class Texture(object):
         else:
             self.internal_format = internal_format
 
-        if len(size) == 2:
-            glTexImage2D(self.target, 0, self.internal_format, size[0], size[1], 0, format,
-                         data_type, source)
-        elif len(size) == 3:
-            glTexImage3D(self.target, 0, self.internal_format, size[0], size[1], size[2], 0,
+        if len(size) == 1:
+            glTexImage1D(self.target, 0, self.internal_format, size[0], 0,
                          format, data_type, source)
-        else: raise ValueError('size should have 2 or 3 elements (found %s)' % len(size))
+        elif len(size) == 2:
+            glTexImage2D(self.target, 0, self.internal_format, size[0],
+                         size[1], 0, format, data_type, source)
+        elif len(size) == 3:
+            glTexImage3D(self.target, 0, self.internal_format, size[0],
+                         size[1], size[2], 0, format, data_type, source)
+        else: raise ValueError('size should have 1--3 elements (found %s)' % len(size))
 
         if mag_filter is not None:
             glTexParameteri(self.target, GL_TEXTURE_MAG_FILTER, mag_filter)
@@ -142,9 +151,9 @@ class Texture(object):
             glTexParameteri(self.target, GL_TEXTURE_MIN_FILTER, min_filter)
         if wrap_s is not None:
             glTexParameteri(self.target, GL_TEXTURE_WRAP_S, wrap_s)
-        if wrap_t is not None:
+        if len(size) >= 2 and wrap_t is not None:
             glTexParameteri(self.target, GL_TEXTURE_WRAP_T, wrap_t)
-        if len(size)==3 and wrap_r is not None:
+        if len(size) >= 3 and wrap_r is not None:
             glTexParameteri(self.target, GL_TEXTURE_WRAP_R, wrap_r)
 
 
@@ -166,15 +175,26 @@ class Texture(object):
         glBindTexture(self.target, self.id)
 
         # print(self.size, arr.shape)
-        if (self.size != arr.shape[:len(self.size)][::-1]):
-            raise ValueError('new array must have same shape as texture!')
+        if type(arr) == bytes:
+            pass
+            # if (np.prod(self.size) != len(arr)):
+                # raise ValueError('input buffer must have sime size as texture!')
+        else:
+            if (self.size != arr.shape[:len(self.size)][::-1]):
+                raise ValueError('new array must have same shape as texture!')
+
+        if len(self.size) == 1:
+            glTexImage1D(self.target, 0, self.internal_format, self.size[0],
+                         0, self.format, self.data_type, arr)
 
         if len(self.size) == 2:
-            glTexImage2D(self.target, 0, self.internal_format, self.size[0], self.size[1], 0, self.format,
+            glTexImage2D(self.target, 0, self.internal_format,
+                         self.size[0], self.size[1], 0, self.format,
                          self.data_type, arr)
 
         elif len(self.size) == 3:
-            glTexImage3D(self.target, 0, self.internal_format, self.size[0], self.size[1], self.size[2], 0,
+            glTexImage3D(self.target, 0, self.internal_format,
+                         self.size[0], self.size[1], self.size[2], 0,
                          self.format, self.data_type, arr)
 
 
@@ -185,9 +205,9 @@ def texture_from_array(arr, format=None, **kwargs):
     ----------
     arr : Numpy array.  Should have dimensions [y, x, d] or [z, y, x, d].  The
             last dimension is *always* the depth, which is used to determine
-            the internal fromat (I, IA, RGB, or RGBA)
+            the internal fromat (R, RG, RGB, or RGBA)
     format : directly specify the format.  Can be used to switch between (e.g.)
-            IA and RG.  (default: determined from shape)
+            RG and IA.  (default: determined from shape)
 
     Any extra keyword arguments are passed directly to Texture.
     '''
@@ -211,8 +231,9 @@ def texture_from_array(arr, format=None, **kwargs):
     if arr.dtype not in dts:
         raise ValueError('Data type of array should be one of: [%s] (found %s)', (','.join(dts.keys()), arr.dtype))
 
-    if arr.ndim not in (3, 4):
-        raise ValueError('Array should have dimensions [y, x, d] or [z, y, x, d] (found %s dimensions)' % (arr.ndim))
+    # Tricky to get this for any size texture... so don't
+    # if arr.ndim not in (3, 4):
+    #     raise ValueError('Array should have dimensions [y, x, d] or [z, y, x, d] (found %s dimensions)' % (arr.ndim))
 
     if format is None:
         if arr.shape[-1] not in formats:
@@ -220,7 +241,6 @@ def texture_from_array(arr, format=None, **kwargs):
         format = formats[arr.shape[-1]]
 
     arr = np.ascontiguousarray(arr)
-
 
     return Texture(arr.shape[:-1][::-1], format=format, data_type=dts[arr.dtype],
                    source=arr, **kwargs)

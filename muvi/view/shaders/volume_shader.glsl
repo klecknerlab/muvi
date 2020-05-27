@@ -43,8 +43,7 @@ vec3 vol_texture_space(in vec3 p);
 
 
 
-// !! The following line is used to insert code from Python, do not remove !!
-<<VOL INIT>>
+
 
 // Any variables that should be adjustable by the user should be specified with
 //   a comment in the format "VIEW_VAR: [value spec]".  This specifies both
@@ -61,8 +60,8 @@ uniform vec3 vol_size;
 uniform vec3 vol_delta;
 uniform float vol_grad_step;
 uniform float vol_gamma_correct;
-
 uniform sampler1D colormap;
+
 uniform float opacity = 0.1; // VIEW_VAR: logfloat(0.05, 1E-4, 1.0, 2, 2)
 uniform float step_size; // VIEW_VAR: logfloat(1.0, 0.125, 1.0, 2, 2)
 uniform float iso_level; // VIEW_VAR: float(0.25, 0.0, 1.0, 0.05)
@@ -79,6 +78,8 @@ mat4x3 distortion_map_gradient(in vec3 U);
 // int iso_level(in vec4 color);
 vec4 cloud_color(in vec4 color, in vec3 X);
 
+// !! The following line is used to insert code from Python, do not remove !!
+<<VOL INIT>>
 
 // #ifdef VOL_SHOW_ISOSURFACE
 //     vec3 vol_gradient(in vec3 p) {
