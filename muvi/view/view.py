@@ -14,8 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Reference: http://qt.apidoc.info/5.2.0/qtopengl/qtopengl-framebufferobject2-example.html
-
 '''
 This file contains the openGL routines for drawing a volume, but does not
 actually handle any of window managment.
@@ -43,37 +41,59 @@ _module_path = os.path.split(os.path.abspath(__file__))[0]
 def in_module_dir(fn):
     return os.path.join(_module_path, fn)
 
-#----------------------------------------------------------
+_shader_path = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'shaders')
+def in_shader_dir(fn):
+    return os.path.join(_shader_path, fn)
+
+
+# ----------------------------------------------------------
 # Class for writing persepective corrected volume rendering
-#----------------------------------------------------------
+# ----------------------------------------------------------
 
-_VOLUME_GLSL_DEFS = '''
-uniform sampler3D vol_texture;
-uniform sampler2DRect vol_back_buffer;
-uniform vec3 vol_size;
-uniform vec3 vol_delta;
-uniform float vol_grad_step;
-uniform float vol_gamma_correct;
-
-vec3 vol_gradient(in vec3 p);
-vec3 vol_texture_space(in vec3 p);
-
-vec3 vol_rgb_function(in vec3 p) {
-    return texture3D(vol_texture, vol_texture_space(p)).$cc;
-}
-
-float vol_a_function(in vec3 p) {
-    return texture3D(vol_texture, vol_texture_space(p)).$oc;
-}
-
-vec4 vol_rgba_function(in vec3 p) {
-    return texture3D(vol_texture, vol_texture_space(p)).$cc$oc;
-}
-
-vec4 vol_output_correct(in vec4 color) {
-    return pow(color, vec4(vol_gamma_correct, vol_gamma_correct, vol_gamma_correct, 1.0));
-}
-'''
+# _VOLUME_GLSL_DEFS = '''
+# uniform sampler3D vol_texture;
+# uniform sampler2DRect vol_back_buffer;
+# uniform sampler1D colormap;
+# uniform vec3 vol_size;
+# uniform vec3 vol_delta;
+# uniform float vol_grad_step;
+# uniform float vol_gamma_correct;
+#
+# // vec3 vol_gradient(in vec3 p);
+# vec3 vol_texture_space(in vec3 p);
+#
+# /*
+# vec3 vol_rgb_function(in vec3 p) {
+#     return texture3D(vol_texture, vol_texture_space(p)).$cc;
+# }
+#
+# float vol_a_function(in vec3 p) {
+#     return texture3D(vol_texture, vol_texture_space(p)).$oc;
+# }
+# */
+#
+# vec4 vol_cloud_color(in vec4 c) {
+#     return c.$cc$oc;
+# }
+#
+# /*
+# vec4 vol_rgba_function(in vec3 p) {
+#     return texture3D(vol_texture, vol_texture_space(p)).$cc$oc;
+# }
+# */
+#
+# float vol_iso_level(in vec4 c) {
+#     return c.$oc;
+# }
+#
+# float vol_iso_color(in vec4 c) {
+#
+# }
+#
+# vec4 vol_output_correct(in vec4 color) {
+#     return pow(color, vec4(vol_gamma_correct, vol_gamma_correct, vol_gamma_correct, 1.0));
+# }
+# '''
 
 _VOLUME_DEFAULT_UNIFORMS = {
     'vol_texture': 0,
@@ -127,6 +147,7 @@ vec3 vol_texture_space(in vec3 p) {
     return(p * vol_delta);
 }
 
+/* Moved to volume_shader.glsl
 vec3 vol_gradient(in vec3 p) {
     vec3 dx = vol_grad_step * vec3(vol_delta.x, 0.0, 0.0);
     vec3 dy = vol_grad_step * vec3(0.0, vol_delta.y, 0.0);
@@ -139,6 +160,7 @@ vec3 vol_gradient(in vec3 p) {
     texture3D(vol_texture, ts + dz).$oc - texture3D(vol_texture, ts - dz).$oc
     ));
 }
+*/
 ''',
 }
 
@@ -178,41 +200,71 @@ class VolumeShader(object):
             # print(name, val)
             self.uniforms[name] = val
 
+        # cloud_colors = {}
+        # base = "cloud_color_"
+        # ext = ".glsl"
+        # for fn in glob.glob(in_shader_dir(base + "*" + ext)):
+        #     short_name = os.path.splitext(os.path.basename(fn))[len(base):-len(ext)]
+        #     cloud_colors[short_name] = fn
+
         self.cached_shaders = {}
 
-    def compile(self, color_function='rrr', opacity_function='r',
-                perspective_model="uncorrected", defines=""):
+    def compile(self, defines='', cloud_color='rgb_mag', iso_level='single', iso_color='shiny', distortion_model=None):
+    # color_function='rrr', opacity_function='r',
+    #             perspective_model="uncorrected", defines=""):
         '''Compile and return a shader with the options.
 
         Parameters
         ----------
-        color_function : length 3 string with GLSL swizzle specifiction.  I.e.
-            "rgb" would copy the color channels as is , and "rrr" would set R/G/B
-            to all be based on the red channel.  (default: "rrr")
-        opacity_function : length 1 string with GLSL swizzle specification for opacity
-            source channel.  (default: "r")
-        perspective_model : string with model name.  Currently not
-            implemeneted.  (default: "uncorrected")
-        defines : string which gets appended to the beginning of the code.
-            Intended to be used to pass defines which control the render
-            pathway.
+        defines : str (default: empty)
+        cloud_color : str (default: "rgb_mag")
+        iso_level : str (default: "single")
+        iso_color : str (default: "shiny")
 
         Returns
         -------
         shader : ShaderProgram object with compiled code.  May be reused from
             previous compiles.
         '''
-        key = (color_function, opacity_function, perspective_model, defines)
 
-        if key not in self.cached_shaders:
-            if perspective_model not in _PERSPECTIVE_MODEL_CODE:
-                raise ValueError('Specified unknown perspective model "%s"\n(known options:[%s])' %
-                    (perspective_model, ', '.join(map(repr, _PERSPECTIVE_MODEL_CODE.keys())) ))
+        key = (defines, cloud_color, iso_level, iso_color, distortion_model)
 
-            code = defines + '\n' + _VOLUME_GLSL_DEFS + _PERSPECTIVE_MODEL_CODE[perspective_model]
-            code = self.source.replace('<<VOL INIT>>', code).replace('$oc', opacity_function).replace('$cc', color_function)
+        if key in self.cached_shaders:
+            return self.cached_shaders[key]
 
-            self.cached_shaders[key] = ShaderProgram(fragment_shader=code, uniforms=self.uniforms)
+        if distortion_model is None:
+            distortion_model = '''
+                vec3 distortion_map(in vec3 U) {
+                    return U;
+                }
+
+                mat4x3 distortion_map_gradient(in vec3 X){
+                    mat4x3 map_grad;
+                    map_grad[0] = X;
+                    map_grad[1] = vec3(1.0, 0.0, 0.0);
+                    map_grad[2] = vec3(0.0, 1.0, 0.0);
+                    map_grad[3] = vec3(0.0, 0.0, 1.0);
+
+                    return map_grad;
+                }
+            '''
+
+        code = [defines, distortion_model]
+
+        for shader, name in (
+                ("cloud_color", cloud_color),
+                ):
+            fn = in_shader_dir(shader + '_' + name + '.glsl')
+            if not os.path.exists(fn):
+                raise ValueError("Shader '%s' does not exist!" % fn)
+            with open(fn, 'rt') as f:
+                code.append(f.read())
+
+        code = self.source.replace('<<VOL INIT>>', '\n'.join(code))
+
+        # for i, line in enumerate(code.splitlines()): print('%4d | %s' % (i, line))
+
+        self.cached_shaders[key] = ShaderProgram(fragment_shader=code, uniforms=self.uniforms)
 
         return self.cached_shaders[key]
 
@@ -313,10 +365,8 @@ class View(object):
         # self.volume_iso_shader = self.volume_iso.compile('rrr', 'r')
         # self.select_volume_shader(self.volume_iso_shader)
 
-        self.volume_shader_template = VolumeShader(in_module_dir('volume_shader.glsl'))
+        self.volume_shader_template = VolumeShader(in_shader_dir('volume_shader.glsl'))
         self.select_volume_shader()
-
-
 
 
     def units_per_pixel(self):
@@ -371,6 +421,10 @@ class View(object):
             self.center += self.units_per_pixel() * (self.R[:, 0] * dx - self.R[:, 1] * dy)
 
         # display_rot(y = r_xy[0], x = r_xy[1], z = -r_z)
+
+
+    def select_colomap(self, colormap):
+        pass
 
 
     def attach_volume(self, volume):
@@ -461,9 +515,7 @@ class View(object):
         else:
             defines = ""
 
-        self.current_volume_shader = self.volume_shader_template.compile(
-            color_function=color_function, opacity_function=opacity_function,
-            perspective_model=perspective_model, defines=defines)
+        self.current_volume_shader = self.volume_shader_template.compile(defines=defines)
         # print(self.render_uniforms)
         self.current_volume_shader.bind()
         self.current_volume_shader.set_uniforms(**self.render_uniforms)

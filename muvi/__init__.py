@@ -16,22 +16,15 @@
 
 
 import numpy as np
-# import json
 import struct
 import warnings
 import os
 import sys
-# import blosc
-# blosc.set_nthreads(1)
 import lz4.block
-# import base64
-# import struct
 import concurrent.futures
-# from muvi import status_range
 from xml.etree import ElementTree as ET
-# import re
-# import numba
 import time
+from .distortion import get_distortion_map
 
 class VolumetricMovieError(Exception):
     pass
@@ -486,7 +479,6 @@ class VolumetricMovie:
         self.info['Nt'] = len(source)
         self.validate_info()
 
-
     def validate_info(self, overwrite=False):
         '''
         Infer properties of volume from first frame.
@@ -525,6 +517,18 @@ class VolumetricMovie:
 
         if 'creation_time' not in self.info:
             self.info['creation_time'] = time.time()
+
+        self.update_distortion()
+
+
+    def update_distortion(self):
+        '''Update distortion map.
+
+        Should only need to be called diectly if volume info has changed
+        since initilization (which shouldn't usually happen).
+        '''
+        self.distortion = distortion.get_distortion_map(self.info)
+
 
     def get_volume(self, index):
         return self.source[index]
