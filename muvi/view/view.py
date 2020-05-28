@@ -38,18 +38,14 @@ import os
 from PIL import Image
 import xml.etree.ElementTree as ET
 import base64
+import glob
 
 # ----------------------------------------------------------
 # Paths for finding critical files
 # ----------------------------------------------------------
 
 _module_path = os.path.split(os.path.abspath(__file__))[0]
-def in_module_dir(fn):
-    return os.path.join(_module_path, fn)
-
-_shader_path = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'shaders')
-def in_shader_dir(fn):
-    return os.path.join(_shader_path, fn)
+_shader_path = os.path.join(_module_path, 'shaders')
 
 
 # ----------------------------------------------------------
@@ -59,6 +55,7 @@ def in_shader_dir(fn):
 #  if you want to add new colormaps, do it there!
 
 _colormaps = {}
+_colormap_names = {}
 
 class ColorMap:
     def __init__(self, xml):
@@ -72,233 +69,10 @@ class ColorMap:
             raise ValueError('Colormap "%s" has invalid length' % self.short_name)
 
 
-for cm in ET.parse(in_shader_dir('colormaps.xml')).getroot():
+for cm in ET.parse(os.path.join(_shader_path, 'colormaps.xml')).getroot():
     cm = ColorMap(cm)
     _colormaps[cm.short_name] = cm
-
-
-# ----------------------------------------------------------
-# Class for writing persepective corrected volume rendering
-# ----------------------------------------------------------
-
-# _VOLUME_GLSL_DEFS = '''
-# uniform sampler3D vol_texture;
-# uniform sampler2DRect vol_back_buffer;
-# uniform sampler1D colormap;
-# uniform vec3 vol_size;
-# uniform vec3 vol_delta;
-# uniform float vol_grad_step;
-# uniform float vol_gamma_correct;
-#
-# // vec3 vol_gradient(in vec3 p);
-# vec3 vol_texture_space(in vec3 p);
-#
-# /*
-# vec3 vol_rgb_function(in vec3 p) {
-#     return texture3D(vol_texture, vol_texture_space(p)).$cc;
-# }
-#
-# float vol_a_function(in vec3 p) {
-#     return texture3D(vol_texture, vol_texture_space(p)).$oc;
-# }
-# */
-#
-# vec4 vol_cloud_color(in vec4 c) {
-#     return c.$cc$oc;
-# }
-#
-# /*
-# vec4 vol_rgba_function(in vec3 p) {
-#     return texture3D(vol_texture, vol_texture_space(p)).$cc$oc;
-# }
-# */
-#
-# float vol_iso_level(in vec4 c) {
-#     return c.$oc;
-# }
-#
-# float vol_iso_color(in vec4 c) {
-#
-# }
-#
-# vec4 vol_output_correct(in vec4 color) {
-#     return pow(color, vec4(vol_gamma_correct, vol_gamma_correct, vol_gamma_correct, 1.0));
-# }
-# '''
-
-_VOLUME_DEFAULT_UNIFORMS = {
-    'vol_texture': 0,
-    'vol_back_buffer': 1,
-    'vol_size': np.ones(3, dtype='f')*256,
-    'vol_delta': np.ones(3, dtype='f')/256,
-    'vol_grad_step': 1.0,
-    'vol_gamma_correct': 1/2.2,
-    'colormap': 2,
-}
-
-class Value(object):
-    def __init__(self, val, minval=None, maxval=None, step=1):
-        self.val = val
-        self.minval = minval
-        self.maxval = maxval
-        self.step = step
-
-    def inc(self):
-        self.val += self.step
-        if self.minval is not None:
-            self.val = max(self.minval, val)
-
-    def dec(self):
-        self.val -= self.step
-        if self.minval is not None:
-            self.val = min(self.maxval, val)
-
-
-class LogValue(object):
-    def __init__(self, val, minval=None, maxval=None, logbase=2, steps_per_base=2):
-        self.val = val
-        self.minval = minval
-        self.maxval = maxval
-        self.logbase = logbase
-        self.step = logbase**(1/steps_per_base)
-
-    def inc(self):
-        self.val *= self.step
-        if self.minval is not None:
-            self.val = max(self.minval, val)
-
-    def dec(self):
-        self.val /= self.step
-        if self.minval is not None:
-            self.val = min(self.maxval, val)
-
-
-# _PERSPECTIVE_MODEL_CODE = {
-# 'uncorrected': '''
-# vec3 vol_texture_space(in vec3 p) {
-#     return(p * vol_delta);
-# }
-#
-# /* Moved to volume_shader.glsl
-# vec3 vol_gradient(in vec3 p) {
-#     vec3 dx = vol_grad_step * vec3(vol_delta.x, 0.0, 0.0);
-#     vec3 dy = vol_grad_step * vec3(0.0, vol_delta.y, 0.0);
-#     vec3 dz = vol_grad_step * vec3(0.0, 0.0, vol_delta.z);
-#     vec3 ts = vol_texture_space(p);
-#
-#     return(vec3(
-#     texture3D(vol_texture, ts + dx).$oc - texture3D(vol_texture, ts - dx).$oc,
-#     texture3D(vol_texture, ts + dy).$oc - texture3D(vol_texture, ts - dy).$oc,
-#     texture3D(vol_texture, ts + dz).$oc - texture3D(vol_texture, ts - dz).$oc
-#     ));
-# }
-# */
-# ''',
-# }
-
-class VolumeShader(object):
-    '''Creates a volume shader from an appropriate GLSL fragment shader.
-
-    The Python code handles inserting the appropriate perspective correction
-    functions, textures, and key variables to provide consistent implementation.
-
-    Parameters
-    ----------
-    source : filename for external fragment shader code, or string with shader
-        code.  If the input contains a line ending, it will assume it is code,
-        otherwise it is treated as a filename.
-
-    Note that no code will not get compiled until the "compile" method is
-        called.
-    '''
-
-    def __init__(self, source):
-        if '\n' in source:
-            self.source = source
-        else:
-            with open(source) as f:
-                self.source = f.read()
-
-        self.uniforms = _VOLUME_DEFAULT_UNIFORMS.copy()
-
-        def tup(*val): return val
-
-        spec_dict = {"logfloat":LogValue, "float":Value, "int":Value,
-                     "color":tup, "vector":tup, "norm":tup}
-        for t, name, spec in \
-            re.findall('\s*uniform\s+(\S+)\s+(\S+)\s*;\s*//\s*VIEW_VAR:\s*(.*)\s+', self.source, flags=re.M):
-            # print(spec)
-            val = eval(spec, spec_dict)
-            # print(name, val)
-            self.uniforms[name] = val
-
-        # cloud_colors = {}
-        # base = "cloud_color_"
-        # ext = ".glsl"
-        # for fn in glob.glob(in_shader_dir(base + "*" + ext)):
-        #     short_name = os.path.splitext(os.path.basename(fn))[len(base):-len(ext)]
-        #     cloud_colors[short_name] = fn
-
-        self.cached_shaders = {}
-
-    def compile(self, defines='', cloud_color='colormap', iso_level='single', iso_color='shiny', distortion_model=None):
-    # color_function='rrr', opacity_function='r',
-    #             perspective_model="uncorrected", defines=""):
-        '''Compile and return a shader with the options.
-
-        Parameters
-        ----------
-        defines : str (default: empty)
-        cloud_color : str (default: "rgb_mag")
-        iso_level : str (default: "single")
-        iso_color : str (default: "shiny")
-
-        Returns
-        -------
-        shader : ShaderProgram object with compiled code.  May be reused from
-            previous compiles.
-        '''
-
-        key = (defines, cloud_color, iso_level, iso_color, distortion_model)
-
-        if key in self.cached_shaders:
-            return self.cached_shaders[key]
-
-        if distortion_model is None:
-            distortion_model = '''
-                vec3 distortion_map(in vec3 U) {
-                    return U;
-                }
-
-                mat4x3 distortion_map_gradient(in vec3 X){
-                    mat4x3 map_grad;
-                    map_grad[0] = X;
-                    map_grad[1] = vec3(1.0, 0.0, 0.0);
-                    map_grad[2] = vec3(0.0, 1.0, 0.0);
-                    map_grad[3] = vec3(0.0, 0.0, 1.0);
-
-                    return map_grad;
-                }
-            '''
-
-        code = [defines, distortion_model]
-
-        for shader, name in (
-                ("cloud_color", cloud_color),
-                ):
-            fn = in_shader_dir(shader + '_' + name + '.glsl')
-            if not os.path.exists(fn):
-                raise ValueError("Shader '%s' does not exist!" % fn)
-            with open(fn, 'rt') as f:
-                code.append(f.read())
-
-        code = self.source.replace('<<VOL INIT>>', '\n'.join(code))
-
-        # for i, line in enumerate(code.splitlines()): print('%4d | %s' % (i, line))
-
-        self.cached_shaders[key] = ShaderProgram(fragment_shader=code, uniforms=self.uniforms)
-
-        return self.cached_shaders[key]
+    _colormap_names[cm.short_name] = cm.name
 
 
 #--------------------------------------------------------
@@ -322,8 +96,10 @@ _BOX_EDGES = [(i, j) for i in range(8) for j in range(8) if ((i < j) and sum((_U
 #--------------------
 # The main view class
 #--------------------
-class View(object):
-    '''An object which represents and renders views of a 3D volumes.
+class View:
+    '''An object used to render views of 3D volumes.  This class does not take
+    care of window management, just the low-level OpenGL calls and viewport
+    and rendering managment.
 
     Parameters
     ----------
@@ -344,18 +120,47 @@ class View(object):
     os_height : int (default: 1000), the height of the off-screen view
     '''
 
-    def __init__(self, volume=None, R=np.eye(3), center=None, fov=30,
-                 X0=np.zeros(3), X1=None, width=100, height=100,
-                 os_width=1500, os_height=1000, scale=None):
+    view_defaults = {
+        'X0': np.zeros(3, dtype='f'),
+        'X1': np.ones(3, dtype='f') * 256,
+        'R': np.eye(3, dtype='f'),
+        'center': -np.ones(3, dtype='f') * 128,
+        'scale': 1.0,
+        'frame': 0,
+        'fov': 30,
+        'colormap': 'plasma',
+    }
 
-        self.R = normalize_basis(R)
-        self.center = center
-        self.fov = fov
-        self.X0 = X0
-        self.X1 = X1
+    uniform_defaults = {
+        'opacity': 0.3,
+        'step_size': 1.0,
+        'iso_offset': 0.5,
+    }
+
+    shader_defaults = {
+        'show_isosurface': False,
+        'cloud_color': 'colormap',
+        'iso_level': 'single',
+        'iso_color': 'shiny',
+    }
+
+    hidden_uniform_defaults = {
+        'vol_texture': 0,
+        'back_buffer_texture': 1,
+        'colormap_texture': 2,
+        'vol_size': np.ones(3, dtype='f')*256,
+        'vol_delta': np.ones(3, dtype='f')/256,
+        'grad_step': 1.0,
+        'gamma_correct': 1/2.2,
+    }
+
+    subshader_names = ('cloud_color', )
+    def __init__(self, volume=None, width=100, height=100, os_width=1500, os_height=1000, params={}, source_dir=None):
+
+        self.source_dir = _shader_path if source_dir is None else source_dir
+
         self.width = width
         self.height = height
-        self.scale = scale
         self._oldwidth = -1
         self._oldheight = -1
         self.os_width = os_width
@@ -364,11 +169,17 @@ class View(object):
         self._old_os_height = -1
 
         self.buttons_pressed = 0
-        self.volume_shader = None
-        self.render_uniforms = {}
 
-        if volume is not None: self.attach_volume(volume)
-        else: self.volume = None
+        self.params = self.view_defaults.copy()
+        self.params.update(self.shader_defaults)
+        self.params.update(self.uniform_defaults)
+
+        self.hidden_uniforms = self.hidden_uniform_defaults.copy()
+
+        if volume is not None:
+            self.attach_volume(volume)
+        else:
+            self.volume = None
 
         self.texture_to_color_shader = ShaderProgram(fragment_shader='''
             void main() {
@@ -390,21 +201,99 @@ class View(object):
             }
         ''', uniforms=dict(back_buffer=1, scale=2.0))
 
-        # self.volume_add = VolumeShader(in_module_dir('volume_add_shader.glsl'))
-        # self.volume_add_shader = self.volume_add.compile('rrr', 'r')
-        #
-        # self.volume_iso = VolumeShader(in_module_dir('volume_iso_shader.glsl'))
-        # self.volume_iso_shader = self.volume_iso.compile('rrr', 'r')
-        # self.select_volume_shader(self.volume_iso_shader)
+        self.update_colormap()
+        self.refresh_shaders()
+        self.update_shader()
 
-        self.volume_shader_template = VolumeShader(in_shader_dir('volume_shader.glsl'))
-        self.select_colormap()
-        self.select_volume_shader()
+
+    def refresh_shaders(self):
+        '''Load shaders from the shader directory.
+
+        Normally not called by the user, but can be used to udpate sources,
+        if they are being edited while a program is being run.
+        '''
+        with open(os.path.join(self.source_dir, 'volume_shader.glsl')) as f:
+            self.source_template = f.read()
+
+        for subshader in self.subshader_names:
+            ds = {}
+            dn = {}
+
+            for fn in sorted(glob.glob(os.path.join(self.source_dir, subshader + "_*.glsl"))):
+                short_name = re.match('.*' + subshader + '_(.*).glsl', fn).group(1)
+
+                with open(fn) as f:
+                    code = f.read()
+
+                m = re.match(r'^\s*//\s*NAME:\s*(.*)\s*$', code, flags=re.MULTILINE)
+                long_name = m.group(1) if m else short_name
+                ds[short_name] = code
+                dn[short_name] = long_name
+
+            setattr(self, subshader + "_source", ds)
+            setattr(self, subshader + "_name", dn)
+
+        self.cached_shaders = {}
+
+
+    def update_shader(self, distortion_model=None):
+        '''Recompile the shader based on the current view options.
+        '''
+
+        # See if this shader has already been compiled by making a key
+        key = hash(tuple(self.params[key] for key in self.shader_defaults.keys()) + (distortion_model, ))
+
+        uniforms = self.get_uniforms(include_hidden=True)
+
+        if key in self.cached_shaders:
+            self.current_volume_shader = self.cached_shaders[key]
+            self.current_volume_shader.bind()
+            self.current_volume_shader.set_uniforms(**uniforms)
+
+        # If not, lets build a new one.
+        else:
+            if distortion_model is None:
+                distortion_model = '''
+                    vec3 distortion_map(in vec3 U) {
+                        return U;
+                    }
+
+                    mat4x3 distortion_map_gradient(in vec3 X){
+                        mat4x3 map_grad;
+                        map_grad[0] = X;
+                        map_grad[1] = vec3(1.0, 0.0, 0.0);
+                        map_grad[2] = vec3(0.0, 1.0, 0.0);
+                        map_grad[3] = vec3(0.0, 0.0, 1.0);
+
+                        return map_grad;
+                    }
+                '''
+
+            code = [distortion_model]
+
+            if self.params['show_isosurface']:
+                code.append('#define VOL_SHOW_ISOSURFACE 1')
+
+            # Find the cloud_color, iso_level, and iso_color sources
+            for subshader in self.subshader_names:
+                sources = getattr(self, subshader + '_source')
+                name = self.params[subshader]
+                if name not in sources:
+                    raise ValueError("Unknown %s shader '%s'" % (subshader, name))
+                code.append(sources[name])
+
+            code = self.source_template.replace('<<VOL INIT>>', '\n'.join(code))
+
+            self.current_volume_shader = ShaderProgram(fragment_shader=code, uniforms=uniforms)
+            self.cached_shaders[key] = self.current_volume_shader
+
+        self.current_volume_shader.bind()
+        self.current_volume_shader.set_uniforms(**uniforms)
 
 
     def units_per_pixel(self):
         '''Returns the viewport scale in image units per pixel.'''
-        return 2.0/self.scale
+        return 2.0/self.params['scale']
 
 
     def mouse_move(self, x, y, dx, dy):
@@ -450,13 +339,22 @@ class View(object):
             self.rot_z(-r_z)
 
         elif self.buttons_pressed & 2:
-            self.autoscale()
+            # self.autoscale()
             self.center += self.units_per_pixel() * (self.R[:, 0] * dx - self.R[:, 1] * dy)
 
         # display_rot(y = r_xy[0], x = r_xy[1], z = -r_z)
 
 
-    def select_colormap(self, name="plasma"):
+    def get_options(self, var):
+        if var == 'cloud_color':
+            return self.cloud_color_names
+        elif var == 'colormap':
+            return _colormap_names
+        else:
+            raise ValueError("parameter '%s' does not exist or does not have a list of options" % var)
+
+
+    def update_colormap(self):
         '''Choose the display colormap.
 
         Parameters
@@ -470,101 +368,118 @@ class View(object):
             self.colormap_texture = Texture(size = (256, ), format=GL_RGB, wrap=GL_CLAMP_TO_EDGE, internal_format=GL_SRGB)
 
         glActiveTexture(GL_TEXTURE2)
+
+        name = self.params['colormap']
+        if name not in _colormaps:
+            raise ValueError("unknown colormap '%s'" % name)
         self.colormap_texture.replace(_colormaps[name].data)
 
 
     def attach_volume(self, volume):
         '''Attach a VolumetricMovie to the view.'''
         self.volume = volume
+
         if hasattr(self, 'volume_texture'):
             self.volume_texture.delete()
+
         vol = self.volume[0]
         if vol.ndim == 3: vol = vol[..., np.newaxis]
-        # print(vol.shape)
+
+        glActiveTexture(GL_TEXTURE0)
+
         self.volume_texture = texture_from_array(vol, wrap=GL_CLAMP_TO_EDGE)
-        vs = np.array(vol.shape[-2::-1], dtype='f')
-        self.update_uniforms(vol_size=vs, vol_delta=1./vs)
+
+        self.reset_view()
+
+
+    def reset_view(self):
+        if hasattr(self, 'volume'):
+            vs = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f')
+        else:
+            vs = np.ones(3, dtype='f')
+
+        self.update_params(vol_size=vs, vol_delta=1./vs, center=-0.5*vs,
+                           X1=vs, X0=np.zeros(3, dtype='f'),
+                           scale=float(2.0 / mag(vs)))
 
 
     def frame(self, frame):
+        '''Change the displayed frame.
+
+        Parameters
+        ----------
+        frame : int
+            The new frame number
+        '''
+
         glActiveTexture(GL_TEXTURE0)
         vol = self.volume[frame % len(self.volume)]
         if vol.ndim == 3: vol = vol[..., np.newaxis]
-        # print(vol.shape)
         self.volume_texture.replace(vol)
 
 
-    def update_uniforms(self, **kwargs):
-        '''Function to update uniforms associated with volume rendering shader.
+    def get_uniforms(self, include_hidden=False):
+        '''Get a dictionary of the uniforms used by the volume shader.
 
-        The variable names and values should be passed as keyword arguments.
-
-        See ``volume_shader.glsl`` for a list of valid parameters.
+        Keywords
+        --------
+        include_hidden : bool (default: False)
+            If True, also includes hidden uniforms.
         '''
-        self.render_uniforms.update(**kwargs)
-        # for k, v in kwargs.items(): print(k, v)
-        if hasattr(self, "current_volume_shader"):
-            self.current_volume_shader.bind()
-            self.current_volume_shader.set_uniforms(**kwargs)
+
+        d = self.hidden_uniforms.copy() if include_hidden else {}
+        for k in self.uniform_defaults.keys():
+            d[k] = self.params[k]
+
+        return d
 
 
-    def update_view_settings(self, **kwargs):
-        '''Updates the view settings, recompiling the shader if needed.
+    def update_params(self, **kwargs):
+        '''Updates the view parameters, performing all necessary updates
+        downstream.
 
-        Accepts keyword arguments which are passed either to ``update_uniforms``
-        or ``select_volume_shader``, as needed.  This is a convenience function
-        which treats all view variables the same to ease front end creation.
+        Note: this is the prefered method to update the `params` dictionary,
+        as updating it directly will not trigger all the dependent operations
+        to be performed.
         '''
-        svs = {}
 
         if 'frame' in kwargs:
             self.frame(kwargs.pop('frame'))
 
-        for k in ("show_isosurface", "color_function", "opacity_function", "perspective_model", "show_grid"):
-            if k in kwargs:
-                svs[k] = kwargs.pop(k)
+        if 'colormap' in kwargs:
+            self.select_colormap(kwargs.pop('colormap'))
 
-        for k in ("os_width", "os_height"):
+        for k in ("os_width", "os_height", "width", "height"):
             if k in kwargs:
                 setattr(self, k, kwargs.pop(k))
 
-        if svs: self.select_volume_shader(**svs)
-        if kwargs: self.update_uniforms(**kwargs)
+        update_shader = False
+        update_uniforms = {}
+        pop_keys = []
 
+        for k, v in kwargs.items():
+            if k in self.shader_defaults:
+                update_shader = True
+            elif k in self.uniform_defaults:
+                update_uniforms[k] = v
+            elif k in self.hidden_uniforms:
+                update_uniforms[k] = v
+                self.hidden_uniforms[k] = v
+                # kwargs.pop(k)
+                pop_keys.append(k)
+            elif k not in self.view_defaults:
+                raise KeyError("unknown view parameter '%s'" % k)
 
-    def select_volume_shader(self, show_isosurface=True, color_function='rrr',
-        opacity_function='r', perspective_model='uncorrected', show_grid=False):
-        '''Compiles the volume render shader with the desired options.
+        for k in pop_keys:
+            kwargs.pop(k)
+        self.params.update(kwargs)
 
-        Parameters
-        ----------
-        show_isosurface : bool (default: True).  If True, isosurface is
-            displated.
-        color_function : string (default: 'rrr').  Select the function used to
-            translate the values in the raw image data to RGB.
-        opacity_function : string (default: 'r').  Select the channel used for
-            opacity data.
-        perspective_model : string (default: 'uncorrected').  Select the
-            perspective correction model used by the renderer.  Currently
-            no other options are implemented
-        show_grid : bool (default: False).  If true, show grid on top of
-            isosurface.
+        if update_shader:
+            self.update_shader()
 
-        Note that the last three options are passed directly to
-        ``VolumeShader.compile``, which contains more details on their
-        effects.
-        '''
-        if show_isosurface:
-            defines = "#define VOL_SHOW_ISOSURFACE 1"
-            if show_grid:
-                defines = defines + "\n#define VOL_SHOW_GRID 1"
-        else:
-            defines = ""
-
-        self.current_volume_shader = self.volume_shader_template.compile(defines=defines)
-        # print(self.render_uniforms)
-        self.current_volume_shader.bind()
-        self.current_volume_shader.set_uniforms(**self.render_uniforms)
+        if update_uniforms and hasattr(self, 'current_volume_shader'):
+            self.current_volume_shader.bind()
+            self.current_volume_shader.set_uniforms(**update_uniforms)
 
 
     def resize(self, width, height):
@@ -573,20 +488,9 @@ class View(object):
         self.height = height
 
 
-    def autoscale(self):
-        '''Sets limits of volume and scale if not already defined.'''
-        if self.X1 is None:
-            self.X1 = np.array([self.volume.info['Nx'], self.volume.info['Ny'], self.volume.info['Nz']]) \
-                if self.volume is not None else np.ones(3)
-        if self.scale is None:
-            self.scale = float(2.0/mag(self.X1-self.X0))
-        if self.center is None:
-            self.center = -0.5*(self.X0+self.X1)
-
-
     def fov_correction(self):
         '''Computes the half height of the viewport in OpenGL units.'''
-        return np.tan(self.fov*np.pi/360) if self.fov > 0 else 1.
+        return np.tan(self.params['fov']*np.pi/360) if self.params['fov'] > 0 else 1.
 
 
     def draw(self, z0=0.01, z1=10.0, offscreen=False, save_image=False):
@@ -610,7 +514,7 @@ class View(object):
             height = self.os_height
 
             if self.os_width != self._old_os_width or self.os_height != self._old_os_height:
-                #If the viewport has changed, resize things.
+                # If the viewport has changed, resize things.
                 if not hasattr(self, 'os_fbo_back'):
                     self.os_fbo_back = FrameBufferObject(width=self.os_width, height=self.os_height,
                                                  target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
@@ -633,7 +537,7 @@ class View(object):
             height = self.height
 
             if self.width != self._oldwidth or self.height != self._oldheight:
-                #If the viewport has changed, resize things.
+                # If the viewport has changed, resize things.
                 if not hasattr(self, 'fbo'):
                     self.fbo = FrameBufferObject(width=self.width, height=self.height,
                                                  target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
@@ -646,19 +550,13 @@ class View(object):
             back_buffer = self.fbo
             display_buffer_id = default_fbo
 
-        # print(back_buffer.id, display_buffer_id)
-
-        # Need to define things like scale if not already done
-        self.autoscale()
-
-
 
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
 
         aspect = width/height
-        if self.fov > 0:
-            ymax = z0 * np.tan(self.fov*np.pi/360)
+        if self.params['fov'] > 0:
+            ymax = z0 * np.tan(self.params['fov']*np.pi/360)
             glFrustum(-ymax*aspect, ymax*aspect, -ymax, ymax, z0, z1)
         else:
             glOrtho(-aspect_ratio, aspect_ratio, -1, 1, z0, z1)
@@ -668,14 +566,12 @@ class View(object):
         glLoadIdentity()
 
         R4 = np.eye(4, dtype='f')
-        R4[:3, :3] = self.R * self.scale * self.fov_correction()
+        R4[:3, :3] = self.params['R'] * self.params['scale'] * self.fov_correction()
 
         # These get applied in the opposite order!
         glTranslatef(0, 0, -1) # Move it back to z = -1
         glMultMatrixf(R4) # Rotate about center
-        glTranslatef(self.center[0], self.center[1], self.center[2]) # Move the center to the center
-
-
+        glTranslatef(*self.params['center']) # Move the center to the center
 
         # Draw the back buffer; this is used to find the back of the ray trace
         glBindFramebuffer(GL_FRAMEBUFFER, back_buffer.id)
@@ -721,14 +617,12 @@ class View(object):
         glActiveTexture(GL_TEXTURE1)
         back_buffer.texture.bind()
 
-
         # glClampColor(GL_CLAMP_READ_COLOR, GL_FALSE);
         # glClampColor(GL_CLAMP_VERTEX_COLOR, GL_FALSE);
         # glClampColor(GL_CLAMP_FRAGMENT_COLOR, GL_FALSE)
 
         if self.volume is not None:
             self.current_volume_shader.bind()
-            # self.volume_iso_shader.bind()
         else:
             # If we don't have a volume bound, we can draw something neat!
             self.interference_shader.bind()
@@ -739,13 +633,11 @@ class View(object):
         glCullFace(GL_BACK)
 
         # Do it!
-
         self._texture_cube()
 
         if save_image:
             img = np.frombuffer(glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE), dtype='u1').reshape(height, width, -1)
             Image.fromarray(img).save(save_image)
-
 
         if display_buffer_id != default_fbo:
             glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)
@@ -771,24 +663,24 @@ class View(object):
 
     def rot_x(self, a):
         '''Rotate view around x axis by a given angle (in radians).'''
-        self.R = rot_x(a, self.R)
+        self.params['R'] = rot_x(a, self.params['R'])
 
 
     def rot_y(self, a):
         '''Rotate view around y axis by a given angle (in radians).'''
-        self.R = rot_y(a, self.R)
+        self.params['R'] = rot_y(a, self.params['R'])
 
 
     def rot_z(self, a):
         '''Rotate view around z axis by a given angle (in radians).'''
-        self.R = rot_z(a, self.R)
+        self.params['R'] = rot_z(a, self.params['R'])
 
 
     def _texture_cube(self):
         glEnableClientState(GL_VERTEX_ARRAY)
         glEnableClientState(GL_TEXTURE_COORD_ARRAY)
 
-        ub = (_UNIT_BOX * (self.X1 - self.X0) + self.X0).astype('f')
+        ub = (_UNIT_BOX * (self.params['X1'] - self.params['X0']) + self.params['X0']).astype('f')
 
         glVertexPointer(3, GL_FLOAT, 0, ub)
         glTexCoordPointer(3, GL_FLOAT, 0, ub)

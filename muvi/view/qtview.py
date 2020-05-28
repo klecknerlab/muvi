@@ -35,7 +35,7 @@ class BoolViewSetting(QCheckBox):
     def __init__(self, gl_display, varname, default, parent=None):
         super().__init__(None, parent)
         self.setChecked(default)
-        self.stateChanged.connect(lambda state: gl_display.update_view_settings(
+        self.stateChanged.connect(lambda state: gl_display.update_params(
             **{varname:(state==Qt.Checked)}))
 
 
@@ -49,7 +49,7 @@ class LinearViewSetting(QDoubleSpinBox):
         if decimals is None: decimals= math.ceil(0.5-math.log10(step))
         self.setDecimals(decimals)
 
-        self.valueChanged.connect(lambda val: gl_display.update_view_settings(
+        self.valueChanged.connect(lambda val: gl_display.update_params(
             **{varname:val}))
 
 
@@ -57,11 +57,6 @@ class LinearViewSetting(QDoubleSpinBox):
         minval = self.minumum()
         maxval = self.maximum()
         self.setValue(minval + (val/slider_max)*(maxval-minval))
-
-
-
-
-
 
 
 class IntViewSetting(QSpinBox):
@@ -73,7 +68,7 @@ class IntViewSetting(QSpinBox):
         self.setSingleStep(1)
         self.rollover = rollover
 
-        self.valueChanged.connect(lambda val: gl_display.update_view_settings(
+        self.valueChanged.connect(lambda val: gl_display.update_params(
             **{varname:val, 'force_update':force_update}))
 
     def advance(self):
@@ -120,6 +115,29 @@ class LogViewSetting(LinearViewSetting):
         self.setValue(sm**round(i))
 
 
+class SelectViewSetting(QComboBox):
+    def __init__(self, gl_display, varname, default, parent=None):
+        super().__init__(None, parent)
+
+        self.update_options()
+        self.gl_display = gl_display
+        self.varname = varname
+
+        self.update_options()
+
+        self.stateChanged.connect(lambda index: gl_display.update_params(
+            **{varname:self.options[index]}))
+
+
+    def update_options(self):
+        for i in self.count():
+            self.removeItem(i)
+
+        self.options = []
+        for key, name in sorted(self.gl_display.get_options(self.varname).items()):
+            self.options.append(key)
+            self.insertItem(len(self.options), name)
+
 
 
 def fromQColor(qc, has_alpha):
@@ -158,7 +176,7 @@ class ColorViewSetting(QFrame):
             self.setValue(QColorDialog.getColor(self.color, options=QColorDialog.ShowAlphaChannel))
         else:
             self.setValue(QColorDialog.getColor(self.color))
-        self.gl_display.update_view_settings(
+        self.gl_display.update_params(
             **{self.varname:fromQColor(self.color, self.has_alpha)})
 
 
@@ -241,13 +259,13 @@ class ViewWidget(QOpenGLWidget):
 
 
     def wheelEvent(self, event):
-        self.view.scale *= 1.25**(event.angleDelta().y()/120)
+        self.view.params['scale'] *= 1.25**(event.angleDelta().y()/120)
         self.update()
 
 
-    def update_view_settings(self, force_update=True, **kwargs):
+    def update_params(self, force_update=True, **kwargs):
         # print(kwargs)
-        self.view.update_view_settings(**kwargs)
+        self.view.update_params(**kwargs)
         if force_update:
             self.update()
 
@@ -374,31 +392,31 @@ class ViewerApp(QMainWindow):
         self.view_options.add_row("Frame:", self.gl_display.frame_setting, self.play_pause)
 
         self.view_options.add_row("Cloud Opacity:",
-            LogViewSetting(self.gl_display, "opacity", 0.1, 1E-3, 2, 10**(1/8)))
+            LogViewSetting(self.gl_display, "opacity", View.uniform_defaults['opacity'], 1E-3, 2, 10**(1/8)))
 
-        self.view_options.add_row("Cloud Tint:",
-            ColorViewSetting(self.gl_display, "tint", (0.0, 0.3, 0.3)))
+        # self.view_options.add_row("Cloud Tint:",
+        #     ColorViewSetting(self.gl_display, "tint", (0.0, 0.3, 0.3)))
 
         self.view_options.add_row("Show Isosurface:",
-            BoolViewSetting(self.gl_display, "show_isosurface", True))
+            BoolViewSetting(self.gl_display, "show_isosurface", View.shader_defaults["show_isosurface"]))
 
         self.view_options.add_row("Isosurface Level:",
-            LinearViewSetting(self.gl_display, "iso_level", 0.5, 0.0, 1.0, 0.1))
+            LinearViewSetting(self.gl_display, "iso_offset", View.uniform_defaults['iso_offset'], 0.0, 1.0, 0.1))
 
-        self.view_options.add_row("Isosurface Color:",
-            ColorViewSetting(self.gl_display, "surface_color", (1.0, 0.0, 0.0, 0.5)))
+        # self.view_options.add_row("Isosurface Color:",
+        #     ColorViewSetting(self.gl_display, "surface_color", (1.0, 0.0, 0.0, 0.5)))
 
         self.adv_view_options = CollapsableVBox(self, "Advanced View Options", isOpen=True)
         self.v_box.addWidget(self.adv_view_options)
 
-        self.adv_view_options.add_row("Shine:",
-            LinearViewSetting(self.gl_display, "shine", 0.2, 0, 1, 0.1))
+        # self.adv_view_options.add_row("Shine:",
+        #     LinearViewSetting(self.gl_display, "shine", 0.2, 0, 1, 0.1))
 
-        self.adv_view_options.add_row("Show Grid:",
-            BoolViewSetting(self.gl_display, "show_grid", False))
+        # self.adv_view_options.add_row("Show Grid:",
+        #     BoolViewSetting(self.gl_display, "show_grid", False))
 
         self.adv_view_options.add_row("Render Step:",
-            LogViewSetting(self.gl_display, "step_size", 1.0, 0.125, 2, 2**0.5))
+            LogViewSetting(self.gl_display, "step_size", View.uniform_defaults['step_size'], 0.125, 2, 2**0.5))
 
         self.ss_button = QPushButton("Save View")
         self.ss_button.clicked.connect(self.gl_display.save_image)

@@ -29,6 +29,8 @@ from .distortion import get_distortion_map
 class VolumetricMovieError(Exception):
     pass
 
+# Create a unique object for use below...
+_not_a_default = object()
 
 def xml_indent(elem, level=0):
     i = "\n" + level * "  "
@@ -228,8 +230,6 @@ class VolumeProperties:
         else:
             raise TypeError('Could not interperet input: %s' % repr(input))
 
-
-
     def __setitem__(self, key, val):
         if type(val) not in self.__properties_TYPES:
             raise ValueError('Values for VolumeProperties should be one of: [%s]' % (', '.join(self.__properties_TYPES_STR.keys())))
@@ -241,7 +241,6 @@ class VolumeProperties:
 
         self._d[key] = val
 
-
     def __getitem__(self, key):
         if key in self._d:
             return self._d[key]
@@ -252,17 +251,23 @@ class VolumeProperties:
         else:
             raise KeyError(key)
 
-
-    def get(self, key, default=None):
+    def get(self, key, default=_not_a_default):
         try:
-            return self['key']
+            return self[key]
         except KeyError:
-            return default
+            if default is _not_a_default:
+                raise KeyError(key)
+            else:
+                return default
 
+    def get_list(self, *keys):
+        return [self[key] for key in keys]
 
     def items(self):
         return self._d.items()
 
+    def keys(self):
+        return self._d.keys()
 
     def xml(self, tag='VolumeProperties', encoding='UTF-8', indent=None):
         '''Encode the properties into an XML bytestring

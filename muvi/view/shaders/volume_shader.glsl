@@ -26,25 +26,6 @@ Additionally a block of code defining uniforms and functions gets inserted at
 #version 120
 #extension GL_ARB_texture_rectangle : enable
 
-/*
-The following uniforms and functions are defined by the python code,
-    reproduced here for clarity.
-The values below are defaults, and will be updated accordingly.
-
-uniform sampler3D vol_texture = 0;
-uniform sampler2DRect vol_back_buffer = 1;
-uniform sampler1D colormap = 2;
-uniform vec3 vol_size = {256., 256., 256.};
-uniform vec3 vol_delta = {1./256., 1./256., 1./256.};
-uniform float vol_grad_step = 1.0;
-vec3 vol_gradient(in vec3 p);
-vec3 vol_texture_space(in vec3 p);
-*/
-
-
-
-
-
 // Any variables that should be adjustable by the user should be specified with
 //   a comment in the format "VIEW_VAR: [value spec]".  This specifies both
 //   defaults and how it changes.
@@ -55,22 +36,23 @@ vec3 vol_texture_space(in vec3 p);
 //   * color([r], [g], [b], [a])
 
 uniform sampler3D vol_texture;
-uniform sampler2DRect vol_back_buffer;
-uniform vec3 vol_size;
-uniform vec3 vol_delta;
-uniform float vol_grad_step;
-uniform float vol_gamma_correct;
-uniform sampler1D colormap;
+uniform sampler2DRect back_buffer_texture;
+uniform sampler1D colormap_texture;
+uniform vec3 vol_size = vec3(256.0, 256.0, 256.0);
+uniform vec3 vol_delta = vec3(1.0/256.0, 1.0/256.0, 1.0/256.0);
+uniform float grad_step = 1.0;
+uniform float gamma_correct = 1.0/2.2;
 
 uniform float opacity = 0.1; // VIEW_VAR: logfloat(0.05, 1E-4, 1.0, 2, 2)
-uniform float step_size; // VIEW_VAR: logfloat(1.0, 0.125, 1.0, 2, 2)
-uniform float iso_level; // VIEW_VAR: float(0.25, 0.0, 1.0, 0.05)
-uniform vec4 surface_color; // VIEW_VAR: color(1.0, 0.0, 0.0, 0.5)
-uniform vec3 tint; // VIEW_VAR: color(0.0, 0.3, 0.3)
-uniform float shine; // VIEW_VAR: float(0.2, 0.0, 1.0, 0.05)
-uniform float grid_thickness; // VIEW_VAR: logfloat(0.5, 0.1, 10.0, 10, 5)
-uniform float grid_spacing; // VIEW_VAR: logfloat(8.0, 1.0, 1024.0, 2, 1)
-uniform vec4 grid_color; // VIEW_VAR: color(0.0, 0.0, 0.0, 1.0)
+uniform float step_size = 1.0; // VIEW_VAR: logfloat(1.0, 0.125, 1.0, 2, 2)
+uniform float iso_offset = 0.5;
+// uniform float iso_level = 0.5; // VIEW_VAR: float(0.25, 0.0, 1.0, 0.05)
+// uniform vec4 surface_color = vec4(1.0, 0.0, 0.0, 0.5); // VIEW_VAR: color(1.0, 0.0, 0.0, 0.5)
+// uniform vec3 tint; // VIEW_VAR: color(0.0, 0.3, 0.3)
+// uniform float shine = 0.2; // VIEW_VAR: float(0.2, 0.0, 1.0, 0.05)
+// uniform float grid_thickness; // VIEW_VAR: logfloat(0.5, 0.1, 10.0, 10, 5)
+// uniform float grid_spacing; // VIEW_VAR: logfloat(8.0, 1.0, 1024.0, 2, 1)
+// uniform vec4 grid_color; // VIEW_VAR: color(0.0, 0.0, 0.0, 1.0)
 
 vec3 distortion_map(in vec3 U);
 mat4x3 distortion_map_gradient(in vec3 U);
@@ -130,7 +112,7 @@ void main() {
     //   pixel coordinates in the volume, not yet normalized!
     vec3 P0 = gl_TexCoord[0].xyz;
     // The back of the ray is determined from a pre-drawn buffer.
-    vec3 P1 = texture2DRect(vol_back_buffer, gl_FragCoord.st).xyz;
+    vec3 P1 = texture2DRect(back_buffer_texture, gl_FragCoord.st).xyz;
 
     // Length of a ray in pixels
     float l = length(P0 - P1);
@@ -230,5 +212,6 @@ void main() {
     //     #endif
     // }
 
-    gl_FragColor = pow(color, vec4(vol_gamma_correct, vol_gamma_correct, vol_gamma_correct, 1.0));
+    gl_FragColor = pow(color, vec4(gamma_correct, gamma_correct, gamma_correct, 1.0));
+    // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
 }

@@ -429,6 +429,7 @@ class ShaderProgram(object):
         for ss in s:
             glDeleteShader(ss)
 
+
     def set_uniforms(self, **kwargs):
         '''Set uniform values for shader as keyword arguments.
 
@@ -454,10 +455,18 @@ class ShaderProgram(object):
             # print(key, val)
             _glUniforms[dt, len(val)](self.uloc[key], *val)
 
+
     def bind(self):
         '''Use shader.'''
         glUseProgram(self.id)
 
+
     def delete(self):
         '''Delete shader object.'''
-        glDeleteProgram(self.id)
+        if hasattr(self, 'id'):
+            glDeleteProgram(self.id)
+            del self.id
+
+
+    def __del__(self):
+        self.delete()
