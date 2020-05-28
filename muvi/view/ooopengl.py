@@ -124,7 +124,10 @@ class Texture(object):
             wrap_r = wrap
 
         self.id = glGenTextures(1)
-        glActiveTexture(GL_TEXTURE0)
+
+        # Let the user set the active texture
+        # glActiveTexture(GL_TEXTURE0)
+
         self.bind()
         self.format = format
         self.data_type = data_type
@@ -172,7 +175,7 @@ class Texture(object):
 
         Will also bind the texture to the current texture unit.'''
 
-        glBindTexture(self.target, self.id)
+        self.bind()
 
         # print(self.size, arr.shape)
         if type(arr) == bytes:
@@ -184,8 +187,11 @@ class Texture(object):
                 raise ValueError('new array must have same shape as texture!')
 
         if len(self.size) == 1:
-            glTexImage1D(self.target, 0, self.internal_format, self.size[0],
-                         0, self.format, self.data_type, arr)
+            # glTexImage1D(self.target, 0, self.internal_format, self.size[0],
+            #              0, self.format, self.data_type, arr)
+            glTexSubImage1D(self.target, 0, 0, self.size[0],
+                         self.format, self.data_type, arr)
+            # print(len(arr))
 
         if len(self.size) == 2:
             glTexImage2D(self.target, 0, self.internal_format,
@@ -193,10 +199,15 @@ class Texture(object):
                          self.data_type, arr)
 
         elif len(self.size) == 3:
-            glTexImage3D(self.target, 0, self.internal_format,
-                         self.size[0], self.size[1], self.size[2], 0,
+            # glTexImage3D(self.target, 0, self.internal_format,
+            #              self.size[0], self.size[1], self.size[2], 0,
+            #              self.format, self.data_type, arr)
+            glTexSubImage3D(self.target, 0, 0, 0, 0,
+                         self.size[0], self.size[1], self.size[2],
                          self.format, self.data_type, arr)
 
+        # If we don't flush, the update may not show up until the next frame!
+        glFlush()
 
 def texture_from_array(arr, format=None, **kwargs):
     '''Create an OpenGL Texture Object from a numpy array.

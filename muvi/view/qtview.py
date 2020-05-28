@@ -115,29 +115,33 @@ class LogViewSetting(LinearViewSetting):
         self.setValue(sm**round(i))
 
 
-class SelectViewSetting(QComboBox):
-    def __init__(self, gl_display, varname, default, parent=None):
-        super().__init__(None, parent)
+class OptionsViewSetting(QComboBox):
+    def __init__(self, gl_display, varname, force_update=True, parent=None):
+        super().__init__(None)
 
-        self.update_options()
+        default = gl_display.get(varname)
         self.gl_display = gl_display
         self.varname = varname
-
-        self.update_options()
-
-        self.stateChanged.connect(lambda index: gl_display.update_params(
-            **{varname:self.options[index]}))
-
-
-    def update_options(self):
-        for i in self.count():
-            self.removeItem(i)
-
         self.options = []
-        for key, name in sorted(self.gl_display.get_options(self.varname).items()):
-            self.options.append(key)
-            self.insertItem(len(self.options), name)
+        self.update_options(selected=default)
 
+        self.currentIndexChanged.connect(lambda index: gl_display.update_params(
+             **{varname:self.options[index], 'force_update':force_update}))
+
+
+    def update_options(self, selected=None):
+        if selected is None:
+            selected = self.options[self.currentIndex()]
+        # print(selected)
+
+        self.clear()
+
+        for i, (sn, ln) in enumerate(self.gl_display.get_options(self.varname).items()):
+            self.addItem(ln)
+            self.options.append(sn)
+
+            if sn == selected:
+                self.setCurrentIndex(i)
 
 
 def fromQColor(qc, has_alpha):
@@ -191,6 +195,11 @@ class ViewWidget(QOpenGLWidget):
         self.lastPos = QPoint()
         self.volume = volume
 
+        self.view = View(volume=self.volume, )
+
+        # if hasattr(self, "frame_setting"):
+        #     self.frame_setting.setMaximum(len(self.volume)-1)
+
 
     def minimumSizeHint(self):
         return QSize(300, 300)
@@ -201,17 +210,10 @@ class ViewWidget(QOpenGLWidget):
 
 
     def initializeGL(self):
-        # These are not needed, and throw errors on Windows installs
-        # self.gl = self.context().versionFunctions()
-        # self.gl.initializeOpenGLFunctions()
-
-        self.dpr = self.devicePixelRatio()
         try:
-            pass
-            # self.view = View(volume=self.volume, width=self.width()*self.dpr,
-            #     height=self.height()*self.dpr)
-            # if hasattr(self, "frame_setting"):
-            #     self.frame_setting.setMaximum(len(self.volume)-1)
+            self.dpr = self.devicePixelRatio()
+            self.view.resize(width=self.width()*self.dpr,
+                height=self.height()*self.dpr)
         except:
             traceback.print_exc()
             self.parent.close()
@@ -219,13 +221,8 @@ class ViewWidget(QOpenGLWidget):
 
     def paintGL(self):
         try:
-            if hasattr(self, 'view'):
-                self.view.draw()
-            else:
-                self.view = View(volume=self.volume, width=self.width()*self.dpr,
-                    height=self.height()*self.dpr)
-                if hasattr(self, "frame_setting"):
-                    self.frame_setting.setMaximum(len(self.volume)-1)
+            # if hasattr(self, 'view'):
+            self.view.draw()
         except:
             traceback.print_exc()
             self.parent.close()
@@ -266,8 +263,17 @@ class ViewWidget(QOpenGLWidget):
     def update_params(self, force_update=True, **kwargs):
         # print(kwargs)
         self.view.update_params(**kwargs)
+
         if force_update:
             self.update()
+
+
+    def get_options(self, varname):
+        return self.view.get_options(varname)
+
+
+    def get(self, varname):
+        return self.view.params[varname]
 
 
     def save_image(self):
@@ -381,15 +387,17 @@ class ViewerApp(QMainWindow):
         self.view_options = CollapsableVBox(self, "View Options", isOpen=True)
         self.v_box.addWidget(self.view_options)
 
-        self.gl_display.frame_setting = IntViewSetting(self.gl_display, "frame", 0, 0, 0)
-        self.view_options.add_row("Frame:", self.gl_display.frame_setting)
+        self.gl_display.frame_setting = IntViewSetting(self.gl_display, "frame", 0, 0, len(volume))
+        # self.view_options.add_row("Frame:", self.gl_display.frame_setting)
 
         self.frame_timer = QTimer()
         self.frame_timer.setSingleShot(False)
         self.frame_timer.setInterval(1000//30)
         self.frame_timer.timeout.connect(self.gl_display.frame_setting.advance)
         self.play_pause = PlayButton(self.frame_timer)
-        self.view_options.add_row("Frame:", self.gl_display.frame_setting, self.play_pause)
+
+        # self.view_options.add_row("Frame:")
+        self.view_options.add_row(self.play_pause, self.gl_display.frame_setting)
 
         self.view_options.add_row("Cloud Opacity:",
             LogViewSetting(self.gl_display, "opacity", View.uniform_defaults['opacity'], 1E-3, 2, 10**(1/8)))
@@ -397,11 +405,16 @@ class ViewerApp(QMainWindow):
         # self.view_options.add_row("Cloud Tint:",
         #     ColorViewSetting(self.gl_display, "tint", (0.0, 0.3, 0.3)))
 
+        self.view_options.add_row("Cloud Color:", OptionsViewSetting(self.gl_display, "cloud_color"))
+        self.view_options.add_row("Colormap:", OptionsViewSetting(self.gl_display, "colormap"))
+
+
         self.view_options.add_row("Show Isosurface:",
             BoolViewSetting(self.gl_display, "show_isosurface", View.shader_defaults["show_isosurface"]))
 
         self.view_options.add_row("Isosurface Level:",
             LinearViewSetting(self.gl_display, "iso_offset", View.uniform_defaults['iso_offset'], 0.0, 1.0, 0.1))
+
 
         # self.view_options.add_row("Isosurface Color:",
         #     ColorViewSetting(self.gl_display, "surface_color", (1.0, 0.0, 0.0, 0.5)))
