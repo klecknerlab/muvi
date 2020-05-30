@@ -129,7 +129,7 @@ class View:
         'scale': 1.0,
         'frame': 0,
         'fov': 30,
-        'colormap': 'viridis',
+        'colormap': 'inferno',
     }
 
     uniform_defaults = {

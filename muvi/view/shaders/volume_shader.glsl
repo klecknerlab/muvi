@@ -56,8 +56,8 @@ uniform float iso_offset = 0.5;
 
 vec3 distortion_map(in vec3 U);
 mat4x3 distortion_map_gradient(in vec3 U);
-// vec4 iso_color(in vec4 voxel_color, in mat4x3 grad, in int level);
-// int iso_level(in vec4 color);
+vec4 iso_color(in vec4 voxel_color, in mat4x3 grad, in int level);
+int iso_level(in vec4 color);
 vec4 cloud_color(in vec4 color, in vec3 X);
 
 // !! The following line is used to insert code from Python, do not remove !!

@@ -1,5 +1,5 @@
 // NAME: Single Isolevel
 
-vec4 cloud_color(in vec4 color, in vec3 X) {
-    return vec4(color.r, color.g, color.b, length(color.rgb));
+int iso_level(in vec4 color)
+    return color.a > iso_offset ? 0 : 1;
 }
