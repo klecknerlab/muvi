@@ -1,0 +1,2 @@
+The scripts in this directory are used to autogenerate part of the module.
+This should not be run by the end user.

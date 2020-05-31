@@ -32,7 +32,7 @@ class VolumetricMovieError(Exception):
 # Create a unique object for use below...
 _not_a_default = object()
 
-def xml_indent(elem, level=0):
+def _xml_indent(elem, level=0):
     i = "\n" + level * "  "
     if len(elem):
         if not elem.text or not elem.text.strip():
@@ -40,7 +40,7 @@ def xml_indent(elem, level=0):
         if not elem.tail or not elem.tail.strip():
             elem.tail = i
         for elem in elem:
-            xml_indent(elem, level+1)
+            _xml_indent(elem, level+1)
         if not elem.tail or not elem.tail.strip():
             elem.tail = i
     else:
@@ -318,7 +318,7 @@ class VolumeProperties:
         if indent is not None:
             if not isinstance(indent, int):
                 ident = 0
-            xml_indent(base, indent)
+            _xml_indent(base, indent)
             pre_indent = b'  ' * indent
         else:
             pre_indent = b''
@@ -400,7 +400,7 @@ VTK_DATA_TYPES = {
 
 
 
-class status_range:
+class _status_range:
     def __init__(self, start, stop=None, step=1, pre_message='', post_message='', length=40):
         '''Create a range-like objet which prints out a status message
         automatically.'''
@@ -460,8 +460,8 @@ class status_range:
         sys.stdout.flush()
 
 
-class status_enumerate(status_range):
-    '''Similar to `status_range` function, except acts like an `enumerate`
+class _status_enumerate(_status_range):
+    '''Similar to `_status_range` function, except acts like an `enumerate`
     iterator instead of a `range` iterator.
     '''
 
@@ -473,30 +473,36 @@ class status_enumerate(status_range):
     def get_next(self):
         return (self.count, self.obj[self.count])
 
-#
-# _file_ext = {
-#     # '.h5':'HDF5',
-#     # '.hdf5':'HDF5',
-#     '.s4d':'S4D',
-#     '.cine':'CINE',
-#     '.muv':'MUVI',
-#     '.muvi':'MUVI',
-# }
-
-
-
-
 
 class VolumetricMovie:
     '''Base class for working with volumetric movies.
 
-    Attributes
+    Parameters
     ----------
-    source : list/array-like object
-        An object which supports indexing and returns a 3D or 4D numpy array.
+    info : VolumeProperties object
+        Storage for the volume metadata
 
-    Any keywords are passed directly to the `info` attribute, which is a
-    VolumeProperties object.
+    Methods
+    -------
+    validate_info()
+        Auto determines properties of the volumes from the first frame.
+    update_distortion()
+        Generates the distortion map info from the volume info.
+    get_volume(index)
+        Retrieves a volume.  Note that volumes may also be accessed by treating
+        the VolumetricMovie object like a list; this is preferable for most
+        uses.  (This method is called by __item__; if implementing a derived
+        class, you should *only* redefine `get_volume`.)
+    close()
+        Closes the input files (if any)
+    save(fn)
+        Saves the movie to a VTI file.
+    start_vti_write(fn)
+        Starts a write to a VTI file.  Used when an external utility wants to
+        track the saving process over time.
+    write_vti_frame()
+        Writes a single frame, and returns the number of frames remaining.
+        Write must be started with `start_vti_write` first.
 
     If you would like to suppport a new data type, it is suggest you inheret
     from this class.  To make a new class which is supported by the viewer,
@@ -504,23 +510,28 @@ class VolumetricMovie:
         1. Define a new `__init__` and `get_volume` method.
         2. The initialization must create an `info` attribute which is
             a `VolumeProperties` object, and populate it as needed.  (The
-            `infer_properties` method can take care of many basic attributes.)
+            `validate_info` method can take care of many basic attributes.)
     '''
 
     def __init__(self, source, **kwargs):
+        '''
+        Parameters
+        ----------
+        source : list/array-like object
+            An object which supports indexing and returns a 3D or 4D numpy array.
+
+        Any keywords are passed directly to the `info` attribute, which is a
+        VolumeProperties object.
+        '''
+
         self.volumes = source
         self.info = VolumeProperties(**kwargs)
         self.info['Nt'] = len(source)
         self.validate_info()
 
-    def validate_info(self, overwrite=False):
+    def validate_info(self):
         '''
         Infer properties of volume from first frame.
-
-        Keywords
-        --------
-        overwrite : bool (default: False)
-            If True, existing values will be overwritten
         '''
 
         vol = self.get_volume(0)
@@ -565,6 +576,8 @@ class VolumetricMovie:
 
 
     def get_volume(self, index):
+        '''
+        '''
         return self.volumes[index]
 
 
@@ -612,7 +625,7 @@ class VolumetricMovie:
         if print_status:
             sfn = fn
             if len(fn) > 30: sfn = sfn[:27] + '...'
-            enum = status_range(0, num_frames, post_message='%s:' % sfn)
+            enum = _status_range(0, num_frames, post_message='%s:' % sfn)
         else:
             enum = range(0, num_frames)
 
@@ -785,14 +798,27 @@ _'''.format(**vol_info).encode('UTF-8'))
             return remaining
 
 
-def open_3D_movie(fn, file_type=None, *args, **kwargs):
+def open_3D_movie(fn, file_type=None, **kwargs):
+    '''Open a 3D movie from a file on disk.
+
+    Parameters
+    ----------
+    fn : str
+        The input filename.  Currently supports 'vti' and 'cine' files.
+    file_type : str or None
+        If defined, treat the file as if it has this extension.
+
+    Keyword arguments are passed directly to the volumetric movie object, and
+    will in general be passed into the info attribute.  This can be used, for
+    example, to adjust distortion parameters.
+    '''
     if file_type is None:
         file_type = os.path.splitext(fn)[1]
     file_type = file_type.lower().lstrip('.')
 
     if file_type == 'vti':
         from .readers.vti import VTIMovie
-        return VTIMovie(fn)
+        return VTIMovie(fn, **kwargs)
     if file_type == 'cine':
         from .readers.cine import Cine
         return VolumetricMovieFrom2D(fn, Cine, **kwargs)
@@ -804,6 +830,25 @@ def open_3D_movie(fn, file_type=None, *args, **kwargs):
 open_4D_movie = open_3D_movie
 
 class VolumetricMovieFrom2D(VolumetricMovie):
+    '''
+    A class used to create 3D movies from 2D movies.
+
+    Methods
+    -------
+    locate_info()
+        Automatically locate `.xml` file with VolumeProperties info.
+    validate_2D()
+        Determine VolumeProperties from first frame (should be called *after*
+        `locate_info`).
+    get_frame(index)
+        Retrieve a single frame from the 2D movie.
+
+    In general, it should not be nessesary to create descendents from this
+    class.  If you would like to implement a reader for a new type of 2D movie,
+    the class can be passed to the `reader` method of initialization.  All
+    other functions should be handled automatically.
+    '''
+
     # If True, the frames already have tone mapping applied.  False in general,
     #  but may be true for derived classes (e.g. Cine)
     _FRAMES_TONE_MAPPED = False
@@ -816,6 +861,20 @@ class VolumetricMovieFrom2D(VolumetricMovie):
     _TONE_MAP_KEYS = ('black_level', 'white_level', 'gamma', 'dark_clip')
 
     def __init__(self, filename, reader, setup_xml=None, **kwargs):
+        '''
+        Parameters
+        ----------
+        filename : str
+        reader : class
+            This class should take the filename as the first argument, and
+            return an object which behaves like a list of 2D arrays.  See
+            `readers/cine.py` for an example.
+        setup_xml : str or None
+            If defined, use this file to determine the VolumeProperties
+            (i.e. the `info` attribute).  If not defined, will attempt to
+            locate an `.xml` file with the same basename as the input, or
+            a file called `muvi_setup.xml` in the same directory.
+        '''
         self.info = VolumeProperties(self._DEFAULT_INFO)
 
         self.info['source_filename'] = filename
@@ -843,6 +902,9 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         self.validate_2D()
 
     def locate_info(self):
+        '''
+        Attempt to auto-locate an `.xml` file with the VolumeProperties info.
+        '''
         bfn = os.path.splitext(self.info['source_filename'])[0]
         bdir = os.path.split(bfn)[0]
 
@@ -860,6 +922,9 @@ class VolumetricMovieFrom2D(VolumetricMovie):
 
 
     def validate_2D(self):
+        '''
+        Auto-determine the Volume Properties from the first frame of the movie.
+        '''
         if 'Nz' not in self.info:
             raise ValueError("if deriving volumes from 2D data, 'Nz' must be defined")
         if 'Ns' not in self.info:

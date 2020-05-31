@@ -7,7 +7,7 @@ __pycache__/
 **/muvi_screenshot*.png
 
 # Volume files
-*.vti
+util/*.vti
 *.muv
 
 # C extensions
