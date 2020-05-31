@@ -5,6 +5,7 @@ __pycache__/
 .DS_Store
 **/.DS_Store
 **/muvi_screenshot*.png
+.swp
 
 # Volume files
 util/*.vti
@@ -110,3 +111,6 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+util/*.png
+util/*.muv
