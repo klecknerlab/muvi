@@ -18,7 +18,14 @@ from muvi.view.qtview import view_volume
 import sys
 from muvi import open_4D_movie
 
-vol = open_4D_movie(sys.argv[1])
+fn = sys.argv[1]
+
+vol = open_4D_movie(fn)
+
+print('Info fields from %s' % fn)
+print('-'*40)
+for key, val in vol.info.items():
+    print('%15s: %s' % (key, repr(val)))
 
 ret = view_volume(vol)
 

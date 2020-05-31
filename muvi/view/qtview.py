@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-# Copyright 2018 Dustin Kleckner
+# Copyright 2020 Dustin Kleckner
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ class BoolViewSetting(QCheckBox):
     def __init__(self, gl_display, varname, default, parent=None):
         super().__init__(None, parent)
         self.setChecked(default)
-        self.stateChanged.connect(lambda state: gl_display.update_view_settings(
+        self.stateChanged.connect(lambda state: gl_display.update_params(
             **{varname:(state==Qt.Checked)}))
 
 
@@ -49,7 +49,7 @@ class LinearViewSetting(QDoubleSpinBox):
         if decimals is None: decimals= math.ceil(0.5-math.log10(step))
         self.setDecimals(decimals)
 
-        self.valueChanged.connect(lambda val: gl_display.update_view_settings(
+        self.valueChanged.connect(lambda val: gl_display.update_params(
             **{varname:val}))
 
 
@@ -57,11 +57,6 @@ class LinearViewSetting(QDoubleSpinBox):
         minval = self.minumum()
         maxval = self.maximum()
         self.setValue(minval + (val/slider_max)*(maxval-minval))
-
-
-
-
-
 
 
 class IntViewSetting(QSpinBox):
@@ -73,7 +68,7 @@ class IntViewSetting(QSpinBox):
         self.setSingleStep(1)
         self.rollover = rollover
 
-        self.valueChanged.connect(lambda val: gl_display.update_view_settings(
+        self.valueChanged.connect(lambda val: gl_display.update_params(
             **{varname:val, 'force_update':force_update}))
 
     def advance(self):
@@ -120,6 +115,33 @@ class LogViewSetting(LinearViewSetting):
         self.setValue(sm**round(i))
 
 
+class OptionsViewSetting(QComboBox):
+    def __init__(self, gl_display, varname, force_update=True, parent=None):
+        super().__init__(None)
+
+        default = gl_display.get(varname)
+        self.gl_display = gl_display
+        self.varname = varname
+        self.options = []
+        self.update_options(selected=default)
+
+        self.currentIndexChanged.connect(lambda index: gl_display.update_params(
+             **{varname:self.options[index], 'force_update':force_update}))
+
+
+    def update_options(self, selected=None):
+        if selected is None:
+            selected = self.options[self.currentIndex()]
+        # print(selected)
+
+        self.clear()
+
+        for i, (sn, ln) in enumerate(self.gl_display.get_options(self.varname).items()):
+            self.addItem(ln)
+            self.options.append(sn)
+
+            if sn == selected:
+                self.setCurrentIndex(i)
 
 
 def fromQColor(qc, has_alpha):
@@ -158,7 +180,7 @@ class ColorViewSetting(QFrame):
             self.setValue(QColorDialog.getColor(self.color, options=QColorDialog.ShowAlphaChannel))
         else:
             self.setValue(QColorDialog.getColor(self.color))
-        self.gl_display.update_view_settings(
+        self.gl_display.update_params(
             **{self.varname:fromQColor(self.color, self.has_alpha)})
 
 
@@ -173,6 +195,11 @@ class ViewWidget(QOpenGLWidget):
         self.lastPos = QPoint()
         self.volume = volume
 
+        self.view = View(volume=self.volume, )
+
+        # if hasattr(self, "frame_setting"):
+        #     self.frame_setting.setMaximum(len(self.volume)-1)
+
 
     def minimumSizeHint(self):
         return QSize(300, 300)
@@ -183,15 +210,10 @@ class ViewWidget(QOpenGLWidget):
 
 
     def initializeGL(self):
-        # These are not needed, and throw errors on Windows installs
-        # self.gl = self.context().versionFunctions()
-        # self.gl.initializeOpenGLFunctions()
-        self.dpr = self.devicePixelRatio()
         try:
-            self.view = View(volume=self.volume, width=self.width()*self.dpr,
+            self.dpr = self.devicePixelRatio()
+            self.view.resize(width=self.width()*self.dpr,
                 height=self.height()*self.dpr)
-            if hasattr(self, "frame_setting"):
-                self.frame_setting.setMaximum(len(self.volume)-1)
         except:
             traceback.print_exc()
             self.parent.close()
@@ -199,14 +221,16 @@ class ViewWidget(QOpenGLWidget):
 
     def paintGL(self):
         try:
-            if hasattr(self, 'view'): self.view.draw()
+            # if hasattr(self, 'view'):
+            self.view.draw()
         except:
             traceback.print_exc()
             self.parent.close()
 
 
     def resizeGL(self, width, height):
-        if hasattr(self, 'view'): self.view.resize(width*self.dpr, height*self.dpr)
+        if hasattr(self, 'view'):
+            self.view.resize(width*self.dpr, height*self.dpr)
 
 
     def mousePressEvent(self, event):
@@ -232,22 +256,31 @@ class ViewWidget(QOpenGLWidget):
 
 
     def wheelEvent(self, event):
-        self.view.scale *= 1.25**(event.angleDelta().y()/120)
+        self.view.params['scale'] *= 1.25**(event.angleDelta().y()/120)
         self.update()
 
 
-    def update_view_settings(self, force_update=True, **kwargs):
+    def update_params(self, force_update=True, **kwargs):
         # print(kwargs)
-        self.view.update_view_settings(**kwargs)
+        self.view.update_params(**kwargs)
+
         if force_update:
             self.update()
+
+
+    def get_options(self, varname):
+        return self.view.get_options(varname)
+
+
+    def get(self, varname):
+        return self.view.params[varname]
 
 
     def save_image(self):
         # fn = 'test.png'
         fns = glob.glob('muvi_screenshot_*.png')
         for i in range(10**4):
-            fn = 'muvi_screenshot_%08d.png' % i 
+            fn = 'muvi_screenshot_%08d.png' % i
             if fn not in fns:
                 break
 
@@ -354,42 +387,49 @@ class ViewerApp(QMainWindow):
         self.view_options = CollapsableVBox(self, "View Options", isOpen=True)
         self.v_box.addWidget(self.view_options)
 
-        self.gl_display.frame_setting = IntViewSetting(self.gl_display, "frame", 0, 0, 0)
-        self.view_options.add_row("Frame:", self.gl_display.frame_setting)
+        self.gl_display.frame_setting = IntViewSetting(self.gl_display, "frame", 0, 0, len(volume))
+        # self.view_options.add_row("Frame:", self.gl_display.frame_setting)
 
         self.frame_timer = QTimer()
         self.frame_timer.setSingleShot(False)
         self.frame_timer.setInterval(1000//30)
         self.frame_timer.timeout.connect(self.gl_display.frame_setting.advance)
         self.play_pause = PlayButton(self.frame_timer)
-        self.view_options.add_row("Frame:", self.gl_display.frame_setting, self.play_pause)
+
+        # self.view_options.add_row("Frame:")
+        self.view_options.add_row(self.play_pause, self.gl_display.frame_setting)
 
         self.view_options.add_row("Cloud Opacity:",
-            LogViewSetting(self.gl_display, "opacity", 0.1, 1E-3, 2, 10**(1/8)))
+            LogViewSetting(self.gl_display, "opacity", View.uniform_defaults['opacity'], 1E-3, 2, 10**(1/8)))
 
-        self.view_options.add_row("Cloud Tint:",
-            ColorViewSetting(self.gl_display, "tint", (0.0, 0.3, 0.3)))
+        # self.view_options.add_row("Cloud Tint:",
+        #     ColorViewSetting(self.gl_display, "tint", (0.0, 0.3, 0.3)))
+
+        self.view_options.add_row("Cloud Color:", OptionsViewSetting(self.gl_display, "cloud_color"))
+        self.view_options.add_row("Colormap:", OptionsViewSetting(self.gl_display, "colormap"))
+
 
         self.view_options.add_row("Show Isosurface:",
-            BoolViewSetting(self.gl_display, "show_isosurface", True))
+            BoolViewSetting(self.gl_display, "show_isosurface", View.shader_defaults["show_isosurface"]))
 
         self.view_options.add_row("Isosurface Level:",
-            LinearViewSetting(self.gl_display, "iso_level", 0.5, 0.0, 1.0, 0.1))
+            LinearViewSetting(self.gl_display, "iso_offset", View.uniform_defaults['iso_offset'], 0.0, 1.0, 0.1))
 
-        self.view_options.add_row("Isosurface Color:",
-            ColorViewSetting(self.gl_display, "surface_color", (1.0, 0.0, 0.0, 0.5)))
+
+        # self.view_options.add_row("Isosurface Color:",
+        #     ColorViewSetting(self.gl_display, "surface_color", (1.0, 0.0, 0.0, 0.5)))
 
         self.adv_view_options = CollapsableVBox(self, "Advanced View Options", isOpen=True)
         self.v_box.addWidget(self.adv_view_options)
 
-        self.adv_view_options.add_row("Shine:",
-            LinearViewSetting(self.gl_display, "shine", 0.2, 0, 1, 0.1))
+        # self.adv_view_options.add_row("Shine:",
+        #     LinearViewSetting(self.gl_display, "shine", 0.2, 0, 1, 0.1))
 
-        self.adv_view_options.add_row("Show Grid:",
-            BoolViewSetting(self.gl_display, "show_grid", False))
+        # self.adv_view_options.add_row("Show Grid:",
+        #     BoolViewSetting(self.gl_display, "show_grid", False))
 
         self.adv_view_options.add_row("Render Step:",
-            LogViewSetting(self.gl_display, "step_size", 1.0, 0.125, 2, 2**0.5))
+            LogViewSetting(self.gl_display, "step_size", View.uniform_defaults['step_size'], 0.125, 2, 2**0.5))
 
         self.ss_button = QPushButton("Save View")
         self.ss_button.clicked.connect(self.gl_display.save_image)

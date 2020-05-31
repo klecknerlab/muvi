@@ -25,7 +25,7 @@ W = 128
 N = 128
 
 if len(sys.argv) == 1:
-    fn = 'gyroid.muv'
+    fn = 'gyroid.vti'
 else:
     fn = sys.argv[1]
 
@@ -54,10 +54,11 @@ info = {
     'Lx': 100,
     'Ly': 100,
     'Lz': 100,
+    'units': 'mm',
 }
 
 start = time.time()
-VolumetricMovie(np_frames, info=info).save(fn)
+VolumetricMovie(np_frames, **info).save(fn)
 el = time.time() - start
 
 fs = os.path.getsize(fn)
