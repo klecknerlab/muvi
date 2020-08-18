@@ -819,9 +819,12 @@ def open_3D_movie(fn, file_type=None, **kwargs):
     if file_type == 'vti':
         from .readers.vti import VTIMovie
         return VTIMovie(fn, **kwargs)
-    if file_type == 'cine':
+    elif file_type == 'cine':
         from .readers.cine import Cine
         return VolumetricMovieFrom2D(fn, Cine, **kwargs)
+    elif file_type == 'seq':
+        import pims
+        return VolumetricMovieFrom2D(fn, pims.open, **kwargs)
     else:
         raise ValueError("3D Movie file with extension '%s' not supported" % file_type)
 
