@@ -887,7 +887,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
 
         self.info.update(kwargs)
 
-        if reader._MUVI_SUPPORTS_TONE_MAP:
+        if getattr(reader, "_MUVI_SUPPORTS_TONE_MAP", False):
             self.needs_tone_map = False
             tone_map = {k:v for k, v in self.info.items() if k in self._TONE_MAP_KEYS}
             self.frames = reader(filename, **tone_map)
