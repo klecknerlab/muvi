@@ -86,7 +86,7 @@ To convert a Phantom CINE file to compressed VTI volume, you need to first gener
     <!-- Nx/Ny don't need to be specified, determined automatically -->
 
     <!-- Number of frames in a scan, must satisfy Ns >= Nz -->
-    <int name="Nz">300</int>
+    <int name="Ns">300</int>
 
     <!-- Dark clip value; default works well for Cine files -->
     <float name="dark_clip">0.005</float>
