@@ -577,8 +577,34 @@ class Cine:
             self._file.close()
         del self._file
 
+    def get_image_times(self):
+        '''Read the image time block from the Cine file.  Will raise an error
+        if the timestamp block isn't found.  (This shouldn't be a problem
+        with files saved from recent versions of the software.)
+
+        Returns
+        -------
+        timestamps : array of 64 bit unsigned integers
+            The timestamp of each frame.  First 32 bits are the unix time stamp
+            in seconds; final 32 bits are the fractional seconds bit.  (I.e.
+            the whole timestamp is a fixed point number with 32 decimal bits.)
+        '''
+        self._file.seek(self.header['OffSetup'] + self.setup['Length'])
+
+        while self._file.tell() < self.header['OffImageOffsets']:
+            block_size, block_type, res = struct.unpack('<LHH', self._file.read(8))
+            # print(block_size, type)
+
+            dat = self._file.read(block_size-8)
+            if block_type == 1002: # Time stamp block!
+                return np.fromstring(dat, dtype='u8')
+        else:
+            raise ValueError("Cine file does not contain timestamp block!")
+
+
     def __del__(self):
         self._file.close()
+
 
 if __name__ == "__main__":
     import sys

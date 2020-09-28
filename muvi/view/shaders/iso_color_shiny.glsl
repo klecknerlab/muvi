@@ -20,4 +20,5 @@ vec4 iso_color(in vec4 voxel_color, in vec3 grad, in int level) {
     //         surf.rgb *= surf.a;
     //         surf.rgb += shine*pow(abs(dp), 30.0);
     //         return(color + surf * (1-color.a));
+
 }

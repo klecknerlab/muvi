@@ -492,6 +492,7 @@ class ViewerApp(QMainWindow):
 
 def view_volume(vol, window_name="Volumetric Viewer"):
     app = QApplication(sys.argv)
+    app.setStyle('Fusion')
     app.setApplicationDisplayName(window_name)
     ex = ViewerApp(volume=vol, window_name=window_name)
     return(app.exec_())
