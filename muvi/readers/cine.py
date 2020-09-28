@@ -589,6 +589,8 @@ class Cine:
             in seconds; final 32 bits are the fractional seconds bit.  (I.e.
             the whole timestamp is a fixed point number with 32 decimal bits.)
         '''
+        self.file_lock.acquire()
+
         self._file.seek(self.header['OffSetup'] + self.setup['Length'])
 
         while self._file.tell() < self.header['OffImageOffsets']:
@@ -597,9 +599,12 @@ class Cine:
 
             dat = self._file.read(block_size-8)
             if block_type == 1002: # Time stamp block!
+                self.file_lock.release()
                 return np.fromstring(dat, dtype='u8')
         else:
+            self.file_lock.release()
             raise ValueError("Cine file does not contain timestamp block!")
+
 
 
     def __del__(self):

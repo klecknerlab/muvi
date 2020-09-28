@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QGridLayout,
 from PyQt5.QtGui import (QIcon)
 import textwrap
 import sys
-from kli.fpga import Synchronizer, reset_fpga
+from muvi.drivers import Synchronizer, reset_fpga
 
 # Set the name in the menubar.
 if sys.platform.startswith('darwin'):
