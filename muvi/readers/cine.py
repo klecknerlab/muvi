@@ -577,7 +577,7 @@ class Cine:
             self._file.close()
         del self._file
 
-    def get_image_times(self):
+    def get_frame_times(self):
         '''Read the image time block from the Cine file.  Will raise an error
         if the timestamp block isn't found.  (This shouldn't be a problem
         with files saved from recent versions of the software.)

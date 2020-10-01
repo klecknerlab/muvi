@@ -928,10 +928,35 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         '''
         Auto-determine the Volume Properties from the first frame of the movie.
         '''
+        if 'offset' not in self.info and hasattr(self.frames, 'get_frame_times'):
+            t = self.frames.get_frame_times()
+            dt = t[1:] - t[:-1]
+            t1 = np.median(dt)
+            i, = np.where(dt > 2*t1)
+            di = i[1:] - i[:-1]
+
+            if not len(i):
+                warnings.warn('Auto offset failed: was this movie triggered properly?\n(no gaps found in frame timings!)')
+            elif di.min() != di.max():
+                warnings.warn('Auto offset failed: inconsistent volume sizing detected.\n(size of triggered blocks was not consistent, most likely a triggering issue.)')
+            else:
+                Nz = int(di[0])
+                if 'Nz' in self.info and self.info['Nz'] != Nz:
+                    warnings.warn(f"Auto offset detection found different volume depth ({Nz}) than specified in setup ({self.info['Nz']})\n(defaulting to auto-detected value)")
+                self.info['Nz'] = Nz
+
+                if 'Ns' in self.info and self.info['Ns'] != Nz:
+                    warnings.warn(f"Auto offset detection found different number of scan frames ({Nz}) than specified in setup ({self.info['Ns']})\n(defaulting to auto-detected value)")
+                self.info['Ns'] = Nz
+
+                self.info['offset'] = (int(i[0]) + 1) % Nz
+
         if 'Nz' not in self.info:
             raise ValueError("if deriving volumes from 2D data, 'Nz' must be defined")
+
         if 'Ns' not in self.info:
             warnings.warn("'Ns' not defined for volumes derived from 2D data\n   Will default to Ns=Nz, but this is probably wrong!")
+
         if self.info['Ns'] < self.info['Nz']:
             raise ValueError("Ns must be >= Nz")
 
