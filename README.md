@@ -1,5 +1,61 @@
 # Setup
 
+## Windows Instructions
+
+### Prerequisites
+
+If you don't already have a Python distribution, you will need to download one
+first.  We recommend "Anaconda", as it includes many of the required packages
+already (and is widely used for data analysis in many fields).
+
+We also need to install the following Python packages:
+  * pyQt5
+  * pyopengl
+  * lz4
+  * numba
+
+We can also do this from a command console.  To do this, open `Anconda
+Powershell Prompt` in **administrator mode**.  (Right click on the program
+in the start menu and select `Run as administrator`.)
+```shell
+conda install numba lz4 pyopengl pyqt
+```
+
+You can also do this from the `Anaconda Navigator Program`.
+
+### Downloading and Installing the Python Module.
+
+You will also need a method to download the Github repository.  There are
+several ways to do this, but perhaps the easiest is to use the programming
+editor [Atom](https://atom.io/).  Once atom is installed, you can check out
+the repository using the following procedure in Atom:
+  * Open the command palette: `Ctrl`+`Shift`+`p`
+  * Type `"clone"` + `Enter`, and select `Github: Clone`
+  * Enter the following URL into the box: https://github.com/klecknerlab/muvi
+  * If you wish, change the target directory and click `Clone`
+
+You have now downloaded the Python repository.  We need to install it, which
+is easiest to do from a console window.  If you are using Anaconda, open the
+`Anconda Powershell Prompt` from the start menu (it should **not** be in
+administrator mode).  Then enter the following commands:
+```shell
+cd github\muvi
+python setup.py develop
+```
+**Note**: This commands assume you cloned the repository into the `[USER]\github\muvi`
+directory, which is the default for Atom.
+
+This will install the module in *developer mode*, which means that it leaves
+all the files in the original directory, instead of copying them to the Python
+directory.  This is recommended currently, as this code is under active
+development, and may have frequent updates.  **Note:** If you update the
+repository or change the code while in developed mode, it will affect the
+module when imported by other scripts!  In this case, this is desirable, but
+don't delete this directory after installing!
+
+You can now run the examples below from the powershell prompt.  If you used
+the defaults, your muvi directory is  `~\github\muvi`
+
 ## Mac / Linux
 
 ### Dependencies
@@ -38,21 +94,6 @@ $ cd muvi
 $ python setup.py install
 ```
 
-## Windows
-
-You should be able to download the package directly from the Git repo and run `setup.py` as above.  
-
-Alternatively, if you have Atom (https://atom.io/) installed, you can use it to clone the repository and install this way.
-
-To do this, from within Atom:
- - `Ctrl+Shift+P` (Note: `Command+Shift+P` on Mac)
- - Enter `Github: Clone` into the dialog, and hit enter
- - Add the address of this page (`https://github.com/klecknerlab/muvi.git`)
- - Select a folder, and navigate there in an Anaconda prompt
- - Run `setup.py` as above.
-
----
-
 # Usage
 
 ## Simple Example
@@ -75,6 +116,10 @@ $ python view.py ../samples/sample_frame.vti
 ```
 
 ## Converting a 2D Movie to 3D
+
+**Note: this instructions are outdated; `Nz` and `Nz` are determined automatically
+if converting from Cines files which are triggered only during the active scan
+region.**
 
 To convert a Phantom CINE file to compressed VTI volume, you need to first generate a XML file which contains the VolumeProperties info.  This will allow you to define the number of frames per volume and other important properties.  To do this, copy the `samples/muvi_setup.xml` file (copied below) to the same directory as your 2D movie source files.  If you leave the name as is, it will be automatically used by every file conversion in that directory.  Alternatively, if you give it the same name as your source file (apart from the extension), this will be used for that specific file only.
 

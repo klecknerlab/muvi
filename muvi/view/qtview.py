@@ -30,6 +30,8 @@ from .view import View
 
 GAMMA_CORRECT = 2.2
 
+ORG_NAME = "MUVI Lab"
+APP_NAME = "QT viewer"
 
 class BoolViewSetting(QCheckBox):
     def __init__(self, gl_display, varname, default, parent=None):
@@ -371,6 +373,8 @@ class ViewerApp(QMainWindow):
         self.v_box = QVBoxLayout()
         self.v_box.setContentsMargins(0, 0, 0, 0)
 
+        self.settings = QSettings(ORG_NAME, APP_NAME)
+
 
         # for n in range(1, 4):
         #     # cb = QVBoxLayout()
@@ -399,6 +403,9 @@ class ViewerApp(QMainWindow):
         # self.view_options.add_row("Frame:")
         self.view_options.add_row(self.play_pause, self.gl_display.frame_setting)
 
+        self.view_options.add_row("Exposure (stops)",
+            LinearViewSetting(self.gl_display, "exposure", View.uniform_defaults['exposure'], -5, 5, 0.5))
+
         self.view_options.add_row("Cloud Opacity:",
             LogViewSetting(self.gl_display, "opacity", View.uniform_defaults['opacity'], 1E-3, 2, 10**(1/8)))
 
@@ -408,12 +415,17 @@ class ViewerApp(QMainWindow):
         self.view_options.add_row("Cloud Color:", OptionsViewSetting(self.gl_display, "cloud_color"))
         self.view_options.add_row("Colormap:", OptionsViewSetting(self.gl_display, "colormap"))
 
+        self.view_options.add_row("Perspective X Coefficient",
+            LinearViewSetting(self.gl_display, "perspective_xfact", View.uniform_defaults['perspective_xfact'], -0.25, 0.25, 0.01))
 
-        self.view_options.add_row("Show Isosurface:",
-            BoolViewSetting(self.gl_display, "show_isosurface", View.shader_defaults["show_isosurface"]))
+        self.view_options.add_row("Perspective Z Coefficient",
+            LinearViewSetting(self.gl_display, "perspective_zfact", View.uniform_defaults['perspective_zfact'], -0.25, 0.25, 0.01))
 
-        self.view_options.add_row("Isosurface Level:",
-            LinearViewSetting(self.gl_display, "iso_offset", View.uniform_defaults['iso_offset'], 0.0, 1.0, 0.1))
+        # self.view_options.add_row("Show Isosurface:",
+        #     BoolViewSetting(self.gl_display, "show_isosurface", View.shader_defaults["show_isosurface"]))
+        #
+        # self.view_options.add_row("Isosurface Level:",
+        #     LinearViewSetting(self.gl_display, "iso_offset", View.uniform_defaults['iso_offset'], 0.0, 1.0, 0.1))
 
 
         # self.view_options.add_row("Isosurface Color:",
@@ -447,12 +459,12 @@ class ViewerApp(QMainWindow):
         self.v_scroll = QScrollArea()
         self.v_widget = QWidget()
         self.v_widget.setLayout(self.v_box)
-        self.v_scroll.setFixedWidth(300)
+        # self.v_scroll.setSizeHint(int(self.settings.value("settings width", 300)))
         self.v_scroll.setWidget(self.v_widget)
 
         self.h_box = QHBoxLayout()
-        self.h_box.addWidget(self.gl_display)
-        self.h_box.addWidget(self.v_scroll)
+        self.h_box.addWidget(self.gl_display, 1)
+        self.h_box.addWidget(self.v_scroll, 0)
         self.h_box.setContentsMargins(0, 0, 0, 0)
         self.h_widget = QWidget()
         self.h_widget.setLayout(self.h_box)

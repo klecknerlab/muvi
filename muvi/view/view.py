@@ -40,6 +40,7 @@ import xml.etree.ElementTree as ET
 import base64
 import glob
 from collections import OrderedDict
+import warnings
 
 # ----------------------------------------------------------
 # Paths for finding critical files
@@ -136,6 +137,9 @@ class View:
         'opacity': 0.5,
         'step_size': 1.0,
         'iso_offset': 0.5,
+        'exposure': 0.0,
+        'perspective_xfact': 0.0,
+        'perspective_zfact': 0.0,
     }
 
     shader_defaults = {
@@ -273,7 +277,9 @@ class View:
             if distortion_model is None:
                 distortion_model = '''
                     vec3 distortion_map(in vec3 U) {
-                        return U;
+                        float ez = perspective_zfact * (1.0 - 2.0 * U.z);
+                        float ex = perspective_xfact * (1.0 - 2.0 * U.x);
+                        return vec3((U.x + ez) / (1.0 + 2.0*ez), (U.y + ez) / (1.0 + 2.0*ez), (U.z + ex) / (1.0 + 2.0*ex));
                     }
 
                     mat4x3 distortion_map_gradient(in vec3 X){
@@ -492,7 +498,8 @@ class View:
                 # kwargs.pop(k)
                 pop_keys.append(k)
             elif k not in self.view_defaults:
-                raise KeyError("unknown view parameter '%s'" % k)
+                # raise KeyError"unknown view parameter '%s'" % k()
+                warnings.warn("unknown view parameter '%s', ignoring" % k)
 
         for k in pop_keys:
             kwargs.pop(k)

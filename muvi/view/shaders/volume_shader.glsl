@@ -42,6 +42,7 @@ uniform vec3 vol_size = vec3(256.0, 256.0, 256.0);
 uniform vec3 vol_delta = vec3(1.0/256.0, 1.0/256.0, 1.0/256.0);
 uniform float grad_step = 1.0;
 uniform float gamma_correct = 1.0/2.2;
+uniform float exposure = 0.0;
 
 uniform float opacity = 0.1; // VIEW_VAR: logfloat(0.05, 1E-4, 1.0, 2, 2)
 uniform float step_size = 1.0; // VIEW_VAR: logfloat(1.0, 0.125, 1.0, 2, 2)
@@ -54,11 +55,16 @@ uniform float iso_offset = 0.5;
 // uniform float grid_spacing; // VIEW_VAR: logfloat(8.0, 1.0, 1024.0, 2, 1)
 // uniform vec4 grid_color; // VIEW_VAR: color(0.0, 0.0, 0.0, 1.0)
 
+uniform float perspective_xfact = 0.0;
+uniform float perspective_zfact = 0.0;
+
+
 vec3 distortion_map(in vec3 U);
 mat4x3 distortion_map_gradient(in vec3 U);
 vec4 iso_color(in vec4 voxel_color, in mat4x3 grad, in int level);
 int iso_level(in vec4 color);
 vec4 cloud_color(in vec4 color, in vec3 X);
+
 
 // !! The following line is used to insert code from Python, do not remove !!
 <<VOL INIT>>
@@ -153,6 +159,8 @@ void main() {
     int num_steps = int(l / step_size + 0.8);
     float last_step_size = l - (num_steps - 1) * step_size;
 
+    float color_mult = pow(2.0, exposure);
+
     // Start 1/2 a step in
     X += + 0.5 * dX;
 
@@ -166,14 +174,15 @@ void main() {
 
             // Map the coordinates, and get the texture at the current location
             Xm = distortion_map(X);
-            voxel_color = texture3D(vol_texture, Xm);
+            voxel_color = color_mult * texture3D(vol_texture, Xm);
+            // voxel_color.a = clamp(voxel_color.a, 0.0, 1.0);
 
             // #ifdef VOL_SHOW_ISOSURFACE
             //
             // #endif
 
             vec4 cc = cloud_color(voxel_color, X);
-            cc.a *= mod_opacity * (1.0 - color.a);
+            cc.a *= mod_opacity * (1.0 - clamp(color.a, 0.0, 1.0));
             cc.rgb *= cc.a;
             color += cc;
 
