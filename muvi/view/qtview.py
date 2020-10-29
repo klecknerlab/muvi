@@ -25,6 +25,7 @@ import sys
 import traceback
 import math
 import glob
+import numpy as np
 
 from .view import View
 
@@ -42,17 +43,24 @@ class BoolViewSetting(QCheckBox):
 
 
 class LinearViewSetting(QDoubleSpinBox):
-    def __init__(self, gl_display, varname, default, minval, maxval, step, decimals=None, parent=None):
+    def __init__(self, gl_display, varname, default, minval, maxval, step, index=None, decimals=None, parent=None):
         super().__init__(parent)
-        self.setValue(default)
         self.setRange(minval, maxval)
+        self.setValue(default)
         self.setMaximum(maxval)
         self.setSingleStep(step)
         if decimals is None: decimals= math.ceil(0.5-math.log10(step))
         self.setDecimals(decimals)
 
-        self.valueChanged.connect(lambda val: gl_display.update_params(
-            **{varname:val}))
+        if index is not None:
+            def change_func(val):
+                par = gl_display.view.params[varname].copy()
+                par[index] = val
+                gl_display.update_params(**{varname:par})
+        else:
+            change_func = lambda val: gl_display.update_params(**{varname:val})
+
+        self.valueChanged.connect(change_func)
 
 
     def set_from_slider(self, val, slider_max):
@@ -278,25 +286,27 @@ class ViewWidget(QOpenGLWidget):
         return self.view.params[varname]
 
 
-    def save_image(self):
-        # fn = 'test.png'
-        fns = glob.glob('muvi_screenshot_*.png')
-        for i in range(10**4):
-            fn = 'muvi_screenshot_%08d.png' % i
-            if fn not in fns:
-                break
-
-
-        # self.view.next_offscreen = True
-        # self.view.next_save_fn = fn
-        # self.update()
+    def preview_image(self):
         self.makeCurrent()
-        self.view.draw(offscreen=True, save_image=fn)
+        img = self.view.draw(offscreen=True, return_image=True)
         self.doneCurrent()
-        # self.view.next_offscreen = False
 
-        # self.view.save_offscreen_image(fn)
-        # self.view.save_image(fn)
+        return img
+
+    def save_image(self, fn=None):
+        # fn = 'test.png'
+        if fn is None:
+            fns = glob.glob('muvi_screenshot_*.png')
+            for i in range(10**4):
+                fn = 'muvi_screenshot_%08d.png' % i
+                if fn not in fns:
+                    break
+
+        self.makeCurrent()
+        img = self.view.draw(offscreen=True, save_image=fn)
+        self.doneCurrent()
+
+        return fn, img
 
 
 class CollapsableVBox(QWidget):
@@ -363,6 +373,17 @@ class PlayButton(QPushButton):
             self.setText(self.labels[1])
 
 
+
+class ExportWindow(QMainWindow):
+    def __init__(self, parent):
+        super().__init__(parent=parent, flags=Qt.Tool)
+        self.setWindowTitle("Image Export")
+        self.parent = parent
+
+    def closeEvent(self, e):
+        self.parent.toggle_export()
+
+
 class ViewerApp(QMainWindow):
     def __init__(self, window_name="Volumetric Viewer", volume=None):
         super().__init__()
@@ -415,11 +436,15 @@ class ViewerApp(QMainWindow):
         self.view_options.add_row("Cloud Color:", OptionsViewSetting(self.gl_display, "cloud_color"))
         self.view_options.add_row("Colormap:", OptionsViewSetting(self.gl_display, "colormap"))
 
-        self.view_options.add_row("Perspective X Coefficient",
-            LinearViewSetting(self.gl_display, "perspective_xfact", View.uniform_defaults['perspective_xfact'], -0.25, 0.25, 0.01))
+        self.view_options.add_row("Left Edge:", LinearViewSetting(self.gl_display, "X0", 0, 0, volume.shape[2], 64, index=0))
+        self.view_options.add_row("Right Edge:", LinearViewSetting(self.gl_display, "X1", volume.shape[2], 0, volume.shape[2], 64, index=0))
 
-        self.view_options.add_row("Perspective Z Coefficient",
-            LinearViewSetting(self.gl_display, "perspective_zfact", View.uniform_defaults['perspective_zfact'], -0.25, 0.25, 0.01))
+        self.view_options.add_row("Bottom Edge:", LinearViewSetting(self.gl_display, "X0", 0, 0, volume.shape[1], 64, index=1))
+        self.view_options.add_row("Top Edge:", LinearViewSetting(self.gl_display, "X1", volume.shape[1], 0, volume.shape[1], 64, index=1))
+
+        self.view_options.add_row("Back Edge:", LinearViewSetting(self.gl_display, "X0", 0, 0, volume.shape[0], 64, index=2))
+        self.view_options.add_row("Front Edge:", LinearViewSetting(self.gl_display, "X1", volume.shape[0], 0, volume.shape[0], 64, index=2))
+
 
         # self.view_options.add_row("Show Isosurface:",
         #     BoolViewSetting(self.gl_display, "show_isosurface", View.shader_defaults["show_isosurface"]))
@@ -443,16 +468,12 @@ class ViewerApp(QMainWindow):
         self.adv_view_options.add_row("Render Step:",
             LogViewSetting(self.gl_display, "step_size", View.uniform_defaults['step_size'], 0.125, 2, 2**0.5))
 
-        self.ss_button = QPushButton("Save View")
-        self.ss_button.clicked.connect(self.gl_display.save_image)
-        self.view_options.add_row(self.ss_button)
+        self.adv_view_options.add_row("Perspective X Coefficient",
+            LinearViewSetting(self.gl_display, "perspective_xfact", View.uniform_defaults['perspective_xfact'], -0.25, 0.25, 0.01))
 
-        self.ss_sizes = [100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000]
+        self.adv_view_options.add_row("Perspective Z Coefficient",
+            LinearViewSetting(self.gl_display, "perspective_zfact", View.uniform_defaults['perspective_zfact'], -0.25, 0.25, 0.01))
 
-        self.view_options.add_row("Saved Width:",
-            ListViewSetting(self.gl_display, "os_width", 1500, self.ss_sizes, force_update=False))
-        self.view_options.add_row("Saved Height:",
-            ListViewSetting(self.gl_display, "os_height", 1000, self.ss_sizes, force_update=False))
 
         self.v_box.addStretch()
 
@@ -483,16 +504,95 @@ class ViewerApp(QMainWindow):
         self.file_menu.addAction(quit_button)
 
         self.view_menu = menu.addMenu("View")
-        show_button = QAction('Show Settings', self)
-        show_button.setShortcut('Tab')
-        show_button.setStatusTip('Show Settings')
-        show_button.triggered.connect(self.toggle_view)
-        self.view_menu.addAction(show_button)
+        self.show_settings = QAction('Hide View Settings', self)
+        self.show_settings.setShortcut('Tab')
+        self.show_settings.setStatusTip('Show or hide settings option on right side of main window')
+        self.show_settings.triggered.connect(self.toggle_settings)
+        self.view_menu.addAction(self.show_settings)
+
+        self.show_export = QAction('Show Export Window', self)
+        self.show_export.setShortcut(QKeySequence('Ctrl+E'))
+        self.show_export.setStatusTip('Show or hide the export window, used to take screenshots or make movies')
+        self.show_export.triggered.connect(self.toggle_export)
+        self.view_menu.addAction(self.show_export)
+
+
+        self.export_window = ExportWindow(self)
+        self.export_window_vbox = QVBoxLayout()
+
+        e_widget = QWidget()
+        e_widget.setLayout(self.export_window_vbox)
+        self.export_window.setCentralWidget(e_widget)
+
+        self.export_window_image = QLabel()
+        # self.export_window_image.sizeHint(QSize(500, 500))
+        self.export_window_vbox.addWidget(self.export_window_image)
+
+        self.export_window_settings = QGridLayout()
+        self.export_window_vbox.addLayout(self.export_window_settings)
+
+        self.export_image = QPushButton("Export Current Frame")
+        self.export_image.clicked.connect(self.save_frame)
+        self.export_window_settings.addWidget(self.export_image, 1, 1, 1, 2)
+
+        self.preview_image = QPushButton("Preview Current Frame")
+        self.preview_image.clicked.connect(self.preview_frame)
+        self.export_window_settings.addWidget(self.preview_image, 1, 3, 1, 2)
+
+        # self.ss_button = QPushButton("Save View")
+        # self.ss_button.clicked.connect(self.gl_display.save_image)
+        # self.view_options.add_row(self.ss_button)
+
+        self.ss_sizes = [256, 384, 512, 640, 768, 1024, 1080, 1280, 1920, 2048, 2160, 3072, 3840, 4096]
+        self.export_window_settings.setColumnStretch(0, 1)
+        self.export_window_settings.setColumnStretch(5, 1)
+        self.export_window_settings.addWidget(QLabel("Export Width:"), 0, 1)
+        self.export_window_settings.addWidget(ListViewSetting(self.gl_display, "os_width", 1920, self.ss_sizes, force_update=False), 0, 2)
+        self.export_window_settings.addWidget(QLabel("Export Height:"), 0, 3)
+        self.export_window_settings.addWidget(ListViewSetting(self.gl_display, "os_height", 1080, self.ss_sizes, force_update=False), 0, 4)
+        self.export_window_status = self.export_window.statusBar()
+
+
+        # self.view_options.add_row("Saved Width:",
+        #     ListViewSetting(self.gl_display, "os_width", 1920, self.ss_sizes, force_update=False))
+        # self.view_options.add_row("Saved Height:",
+        #     ListViewSetting(self.gl_display, "os_height", 1080, self.ss_sizes, force_update=False))
+
 
         self.show()
 
-    def toggle_view(self):
-        self.v_scroll.setVisible(not self.v_scroll.isVisible())
+    def toggle_settings(self):
+        if self.v_scroll.isVisible():
+            self.v_scroll.setVisible(False)
+            self.show_settings.setText('Show View Settings')
+        else:
+            self.v_scroll.setVisible(True)
+            self.show_settings.setText('Hide View Settings')
+
+
+    def toggle_export(self):
+        if self.export_window.isVisible():
+            self.export_window.hide()
+            self.show_export.setText('Show Export Window')
+        else:
+            self.export_window.show()
+            self.show_export.setText('Hide Export Window')
+
+
+    def save_frame(self, e):
+        fn, img = self.gl_display.save_image()
+        self.export_window_status.showMessage('Saved image: ' + fn)
+        # print(img.shape, img.dtype)
+        self.update_preview(img)
+
+    def preview_frame(self, e):
+        self.update_preview(self.gl_display.preview_image())
+
+
+
+    def update_preview(self, img):
+        img = QImage(np.require(img[::-1, :, :3], np.uint8, 'C'), img.shape[1], img.shape[0], QImage.Format_RGB888)
+        self.export_window_image.setPixmap(QPixmap(img).scaledToWidth(1024))
 
     def keyPressEvent(self, event):
         """Close application from escape key.

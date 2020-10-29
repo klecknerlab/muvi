@@ -160,7 +160,7 @@ class View:
     }
 
     subshader_names = ('cloud_color', )
-    def __init__(self, volume=None, width=100, height=100, os_width=1500, os_height=1000, params={}, source_dir=None):
+    def __init__(self, volume=None, width=100, height=100, os_width=1920, os_height=1080, params={}, source_dir=None):
 
         self.source_dir = _shader_path if source_dir is None else source_dir
 
@@ -524,7 +524,7 @@ class View:
         return np.tan(self.params['fov']*np.pi/360) if self.params['fov'] > 0 else 1.
 
 
-    def draw(self, z0=0.01, z1=10.0, offscreen=False, save_image=False):
+    def draw(self, z0=0.01, z1=10.0, offscreen=False, save_image=False, return_image=True):
         '''Draw the volume, creating all objects as required.  Has two
         parameters, but normally the defaults are fine.
 
@@ -669,13 +669,15 @@ class View:
         # Do it!
         self._texture_cube()
 
-        if save_image:
+        if save_image or return_image:
             img = np.frombuffer(glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE), dtype='u1').reshape(height, width, -1)
-            Image.fromarray(img).save(save_image)
+            if save_image: Image.fromarray(img[::-1]).save(save_image)
 
         if display_buffer_id != default_fbo:
             glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)
 
+        if save_image or return_image:
+            return img
 
     #
     # def save_offscreen_image(self, fn):
