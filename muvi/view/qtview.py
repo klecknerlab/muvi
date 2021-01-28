@@ -26,6 +26,11 @@ import traceback
 import math
 import glob
 import numpy as np
+from .. import VolumetricMovie, open_3D_movie
+import os
+
+# if platform.system() == 'Darwin':
+#     from Foundation import NSURL
 
 from .view import View
 
@@ -207,17 +212,18 @@ class ViewWidget(QOpenGLWidget):
 
         self.view = View(volume=self.volume, )
 
-        # if hasattr(self, "frame_setting"):
-        #     self.frame_setting.setMaximum(len(self.volume)-1)
-
+    def attach_volume(self, volume):
+        self.makeCurrent()
+        self.volume = volume
+        self.view.attach_volume(volume)
+        self.view.draw()
+        self.doneCurrent()
 
     def minimumSizeHint(self):
         return QSize(300, 300)
 
-
     def sizeHint(self):
         return QSize(800, 600)
-
 
     def initializeGL(self):
         try:
@@ -228,7 +234,6 @@ class ViewWidget(QOpenGLWidget):
             traceback.print_exc()
             self.parent.close()
 
-
     def paintGL(self):
         try:
             # if hasattr(self, 'view'):
@@ -237,22 +242,18 @@ class ViewWidget(QOpenGLWidget):
             traceback.print_exc()
             self.parent.close()
 
-
     def resizeGL(self, width, height):
         if hasattr(self, 'view'):
             self.view.resize(width*self.dpr, height*self.dpr)
-
 
     def mousePressEvent(self, event):
         self.lastPos = event.pos()
         self.view.buttons_pressed = int(event.buttons())
         self.update()
 
-
     def mouseReleaseEvent(self, event):
         self.view.buttons_pressed = int(event.buttons())
         self.update()
-
 
     def mouseMoveEvent(self, event):
         x = event.x()
@@ -264,11 +265,9 @@ class ViewWidget(QOpenGLWidget):
         self.view.mouse_move(x*self.dpr, y*self.dpr, dx*self.dpr, dy*self.dpr)
         self.update()
 
-
     def wheelEvent(self, event):
         self.view.params['scale'] *= 1.25**(event.angleDelta().y()/120)
         self.update()
-
 
     def update_params(self, force_update=True, **kwargs):
         # print(kwargs)
@@ -277,14 +276,11 @@ class ViewWidget(QOpenGLWidget):
         if force_update:
             self.update()
 
-
     def get_options(self, varname):
         return self.view.get_options(varname)
 
-
     def get(self, varname):
         return self.view.params[varname]
-
 
     def preview_image(self):
         self.makeCurrent()
@@ -389,30 +385,19 @@ class ViewerApp(QMainWindow):
         super().__init__()
         self.setWindowTitle(window_name)
 
-        self.gl_display = ViewWidget(self, volume=volume)
+        self.gl_display = ViewWidget(self)
 
         self.v_box = QVBoxLayout()
         self.v_box.setContentsMargins(0, 0, 0, 0)
 
         self.settings = QSettings(ORG_NAME, APP_NAME)
-
-
-        # for n in range(1, 4):
-        #     # cb = QVBoxLayout()
-        #     c = CollapsableVBox(self, title="Test Collapse %d" % n, isOpen=bool(n%2))
-        #     # c.setContentLayout(cb)
-        #
-        #
-        #     for n in range(1, 11):
-        #         c.addWidget(QPushButton('Button %d' % n))
-        #
-        #     c.contentsWidget.setFixedWidth(200)
-        #     self.v_box.addWidget(c)
+        self.control_widgets = {}
 
         self.view_options = CollapsableVBox(self, "View Options", isOpen=True)
         self.v_box.addWidget(self.view_options)
 
-        self.gl_display.frame_setting = IntViewSetting(self.gl_display, "frame", 0, 0, len(volume))
+        self.control_widgets['frame'] = IntViewSetting(self.gl_display, "frame", 0, 0, 0)
+        self.gl_display.frame_setting = self.control_widgets['frame']
         # self.view_options.add_row("Frame:", self.gl_display.frame_setting)
 
         self.frame_timer = QTimer()
@@ -436,14 +421,17 @@ class ViewerApp(QMainWindow):
         self.view_options.add_row("Cloud Color:", OptionsViewSetting(self.gl_display, "cloud_color"))
         self.view_options.add_row("Colormap:", OptionsViewSetting(self.gl_display, "colormap"))
 
-        self.view_options.add_row("Left Edge:", LinearViewSetting(self.gl_display, "X0", 0, 0, volume.shape[2], 64, index=0))
-        self.view_options.add_row("Right Edge:", LinearViewSetting(self.gl_display, "X1", volume.shape[2], 0, volume.shape[2], 64, index=0))
+        for i, label in enumerate(['x', 'y', 'z']):
+            dim = 256
+            self.control_widgets[label + '0'] = LinearViewSetting(self.gl_display, "X0", 0, 0, dim, 64, index=i)
+            self.control_widgets[label + '1'] = LinearViewSetting(self.gl_display, "X1", dim, 0, dim, 64, index=i)
 
-        self.view_options.add_row("Bottom Edge:", LinearViewSetting(self.gl_display, "X0", 0, 0, volume.shape[1], 64, index=1))
-        self.view_options.add_row("Top Edge:", LinearViewSetting(self.gl_display, "X1", volume.shape[1], 0, volume.shape[1], 64, index=1))
-
-        self.view_options.add_row("Back Edge:", LinearViewSetting(self.gl_display, "X0", 0, 0, volume.shape[0], 64, index=2))
-        self.view_options.add_row("Front Edge:", LinearViewSetting(self.gl_display, "X1", volume.shape[0], 0, volume.shape[0], 64, index=2))
+        self.view_options.add_row("Left Edge:", self.control_widgets['x0'])
+        self.view_options.add_row("Right Edge:", self.control_widgets['x1'])
+        self.view_options.add_row("Bottom Edge:", self.control_widgets['y0'])
+        self.view_options.add_row("Top Edge:", self.control_widgets['y1'])
+        self.view_options.add_row("Back Edge:", self.control_widgets['z0'])
+        self.view_options.add_row("Front Edge:", self.control_widgets['z1'])
 
 
         # self.view_options.add_row("Show Isosurface:",
@@ -503,6 +491,11 @@ class ViewerApp(QMainWindow):
         quit_button.triggered.connect(self.close)
         self.file_menu.addAction(quit_button)
 
+        open_file = QAction('&Open Volumetric Movie', self)
+        open_file.setShortcut('Ctrl+O')
+        open_file.triggered.connect(self.open_file)
+        self.file_menu.addAction(open_file)
+
         self.view_menu = menu.addMenu("View")
         self.show_settings = QAction('Hide View Settings', self)
         self.show_settings.setShortcut('Tab')
@@ -558,8 +551,62 @@ class ViewerApp(QMainWindow):
         # self.view_options.add_row("Saved Height:",
         #     ListViewSetting(self.gl_display, "os_height", 1080, self.ss_sizes, force_update=False))
 
+        if volume:
+            self.open_volume(volume)
+
+        self.setAcceptDrops(True)
 
         self.show()
+
+
+    def open_file(self):
+        try:
+            fn, ext = QFileDialog.getOpenFileName(self, 'Open Volumetric Movie', os.path.expanduser('~'), "VTI (*.vti)")
+            vol = open_3D_movie(fn)
+        except:
+            QMessageBox.critical(self, "ERROR", f'"{fn}" does not appear to be a 3D movie file!')
+        else:
+            if fn:
+                self.open_volume(vol)
+
+
+    def open_volume(self, vol):
+        if isinstance(vol, str):
+            try:
+                vv = open_3D_movie(vol)
+            except Exception as e:
+                ec = e.__class__.__name__
+                QMessageBox.critical(self, ec, str(e))
+                return
+            else:
+                self.setWindowTitle(vol)
+                vol = vv
+        elif isinstance(vol, np.ndarray):
+            vol = VolumetricMovie(vol)
+
+        if isinstance(vol, VolumetricMovie):
+            shape = vol[0].shape
+            frames = len(vol)
+
+            self.control_widgets['frame'].setMaximum(len(vol))
+            self.control_widgets['frame'].setValue(0)
+
+            for i, label in enumerate(['x', 'y', 'z']):
+                dim = shape[2-i]
+                x0 = self.control_widgets[label+'0']
+                x1 = self.control_widgets[label+'1']
+
+                x0.setMaximum(dim)
+                x0.setValue(0)
+                x1.setMaximum(dim)
+                x1.setValue(dim)
+
+            self.gl_display.attach_volume(vol)
+
+        else:
+            raise ValueError('Volume must be a VolumetricMovie object or convertable to one (a filename or numpy array)')
+
+
 
     def toggle_settings(self):
         if self.v_scroll.isVisible():
@@ -594,16 +641,55 @@ class ViewerApp(QMainWindow):
         img = QImage(np.require(img[::-1, :, :3], np.uint8, 'C'), img.shape[1], img.shape[0], QImage.Format_RGB888)
         self.export_window_image.setPixmap(QPixmap(img).scaledToWidth(1024))
 
-    def keyPressEvent(self, event):
-        """Close application from escape key.
+    # def keyPressEvent(self, event):
+    #     if event.key() == Qt.Key_Escape:
+    #         self.close()
 
-        results in QMessageBox dialog from closeEvent, good but how/why?
-        """
-        if event.key() == Qt.Key_Escape:
-            self.close()
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls:
+            e.accept()
+        else:
+            e.ignore()
 
-def view_volume(vol, window_name="Volumetric Viewer"):
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls:
+            event.setDropAction(Qt.CopyAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls:
+            event.setDropAction(Qt.CopyAction)
+            event.accept()
+            l = []
+            if len(event.mimeData().urls()):
+                self.open_volume(event.mimeData().urls()[0].toLocalFile())
+        else:
+            event.ignore()
+
+
+def view_volume(vol=None, window_name="MUVI Volumetric Viewer"):
     app = QApplication(sys.argv)
+    app.setStyle('Fusion')
+    app.setApplicationDisplayName(window_name)
+    ex = ViewerApp(volume=vol, window_name=window_name)
+    return(app.exec_())
+
+
+def qt_viewer(args=None, window_name="MUVI Volumetric Viewer"):
+    from muvi import open_3D_movie
+
+    if args is None:
+        args = sys.argv
+
+    if len(args) > 1:
+        vol = args[1]
+    else:
+        vol = None
+
+    app = QApplication(args)
     app.setStyle('Fusion')
     app.setApplicationDisplayName(window_name)
     ex = ViewerApp(volume=vol, window_name=window_name)

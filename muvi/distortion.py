@@ -22,6 +22,32 @@
 import numpy as np
 
 class DistortionModel:
+    '''Used to convert betwenn coordinate systems for distorted volumes.
+    There are three basic coordinate systems you should be aware of:
+
+    * Physical: The real coordinates in physical space
+        - x = (-Lx/2 -- +Lx/2) = (u - 1/2) * Lx
+        - y = (-Ly/2 -- +Ly/2) = (v - 1/2) * Ly
+        - z = (-Lz/2 -- +Lz/2) = (w - 1/2) * Lz
+
+    * Raw: A normalized coordinate in the raw imaged volume (corresponds directly
+        to a pixel in a volume).
+        - u' = up = (0 -- 1)
+        - v' = vp = (0 -- 1)
+        - w' = wp = (0 -- 1)
+
+    * Corrected: A normalized coordinate in a distortion corrected space.
+        - u = (0 -- 1)
+        - v = (0 -- 1)
+        - w = (0 -- 1)
+
+    The main job of this class is to connect raw to corrected coordinates,
+    which in general depends on the physical camera setup.  This class can
+    also generate C code used to compile the viewing shader.
+
+    The base model assume *no* distortion for compatbility reasons.  More
+    complicated distortion models derive from this class.
+    '''
     # C code to obtain raw coordinates for corrected
     c_defs = []
     c_u = 'u'
@@ -48,53 +74,72 @@ class DistortionModel:
         self.Lz = info.get('Lz', info.get('Nz', 1))
 
 
-    def raw_to_corrected(self, up, vp=None, wp=None):
+    def raw_to_corrected(self, Xr):
         '''Converted raw coordinates to idealized coordinates ('corrected')
         in normalized volume space.
 
-        Can be called by passing each coordinate separately or a numpy array
-        with all coordinates.
-        '''
-        if vp is None:
-            u, v, w = self._raw_to_corrected(up[..., 0], up[..., 1], up[..., 2])
-            result = np.empty_like(up)
-            result[..., 0] = u
-            result[..., 1] = v
-            result[..., 2] = w
-            return result
+        Parameters
+        ----------
+        Xr : (N, 3) shaped array
 
-        else:
-            return self._raw_to_corrected(up, vp, wp)
+        Returns
+        -------
+        Xc : (N, 3) shaped array
+        '''
+        return np.stack(self._raw_to_corrected(Xr[..., 0], Xr[..., 1], Xr[..., 2]), axis=-1)
 
 
     def _raw_to_corrected(self, up, vp, wp):
         return (up, vp, wp)
 
 
-    def corrected_to_raw(self, u, v=None, w=None):
+    def corrected_to_raw(self, Xc):
         '''Converted idealized coordinates ('corrected') to raw coordinates
         in normalized volume space.
 
-        Can be called by passing each coordinate separately or a numpy array
-        with all coordinates.
+        Parameters
+        ----------
+        Xc : (N, 3) shaped array
+
+        Returns
+        -------
+        Xr : (N, 3) shaped array
         '''
-        if v is None:
-            up, vp, wp = self._corrected_to_raw(u[..., 0], u[..., 1], u[..., 2])
-            result = np.empty_like(u)
-            result[..., 0] = up
-            result[..., 1] = vp
-            result[..., 2] = wp
-            return result
-        else:
-            return self._corrected_to_raw(u, v, w)
+        return np.stack(self._corrected_to_raw(Xc[..., 0], Xc[..., 1], Xc[..., 2]), axis=-1)
 
 
     def _corrected_to_raw(self, u, v, w):
         return (u, v, w)
 
 
-    def raw_to_physical(self, u, v=None, w=None):
-        pass
+    def raw_to_physical(self, Xr):
+        '''Converted raw coordinates to physical coordinates.
+
+        Parameters
+        ----------
+        Xr : (N, 3) shaped array
+
+        Returns
+        -------
+        Xp : (N, 3) shaped array
+        '''
+
+        return (self.raw_to_corrected(Xr) - 0.5) * (self.Lx, self.Ly, self.Lz)
+
+
+    def physical_to_raw(self, Xp):
+        '''Converted physical coordinates to raw coordinates.
+
+        Parameters
+        ----------
+        Xp : (N, 3) shaped array
+
+        Returns
+        -------
+        Xr : (N, 3) shaped array
+        '''
+        return self.corrected_to_raw(Xp / (self.Lx, self.Ly, self.Lz) + 0.5)
+
 
     def glsl_funcs(self):
         fmt = {

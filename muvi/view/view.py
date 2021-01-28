@@ -116,10 +116,10 @@ class View:
     X0 : [3] vector, lower edge of volume view (default: [0, 0, 0]).
     X1 : [3] vector, upper edge of volume view (default: None, set on
             first display to be entire volume)
-    width : int (default: 100), the width of the view
-    height : int (default: 100), the height of the view
-    os_width : int (default: 1000), the width of the off-screen view (used for screenshots)
-    os_height : int (default: 1000), the height of the off-screen view
+    width : int (default: 1000), the width of the view
+    height : int (default: 1000), the height of the view
+    os_width : int (default: 1920), the width of the off-screen view (used for screenshots)
+    os_height : int (default: 1080), the height of the off-screen view
     '''
 
     view_defaults = {
@@ -129,7 +129,7 @@ class View:
         'center': np.ones(3, dtype='f') * 128,
         'scale': 1.0,
         'frame': 0,
-        'fov': 30,
+        'fov': 30.0,
         'colormap': 'inferno',
     }
 
@@ -160,7 +160,7 @@ class View:
     }
 
     subshader_names = ('cloud_color', )
-    def __init__(self, volume=None, width=100, height=100, os_width=1920, os_height=1080, params={}, source_dir=None):
+    def __init__(self, volume=None, width=1000, height=1000, os_width=1920, os_height=1080, params={}, source_dir=None):
 
         self.source_dir = _shader_path if source_dir is None else source_dir
 
