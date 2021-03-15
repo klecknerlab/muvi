@@ -17,8 +17,24 @@
 # Reference: http://qt.apidoc.info/5.2.0/qtopengl/qtopengl-framebufferobject2-example.html
 
 
+try:
+    # this fails in <=2020 versions of Python on OS X 11.x
+    from OpenGL.GL import *
+except ImportError:
+    print('Patching ctypes for OS X 11.x...')
+
+    from ctypes import util
+    orig_util_find_library = util.find_library
+    def new_util_find_library(name):
+        res = orig_util_find_library(name)
+        if res: return res
+        return f'/System/Library/Frameworks/{name}.framework/{name}'
+    util.find_library = new_util_find_library
+
+    from OpenGL.GL import *
+
 import numpy as np
-from OpenGL.GL import *
+# from OpenGL.GL import *
 from OpenGL.GL import shaders
 import re
 

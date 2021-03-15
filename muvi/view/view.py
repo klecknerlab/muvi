@@ -58,6 +58,7 @@ _shader_path = os.path.join(_module_path, 'shaders')
 
 _colormaps = OrderedDict()
 _colormap_names = OrderedDict()
+_color_remaps = OrderedDict()
 
 class ColorMap:
     def __init__(self, xml):
@@ -76,6 +77,11 @@ for cm in ET.parse(os.path.join(_shader_path, 'colormaps.xml')).getroot():
     _colormaps[cm.short_name] = cm
     _colormap_names[cm.short_name] = cm.name
 
+for i1, c1 in enumerate("rgb"):
+    for i2, c2 in enumerate("rgb"):
+        for i3, c3 in enumerate("rgb"):
+            c = c1 + c2 + c3 + "a"
+            _color_remaps[c] = str((i1+1)*100 + (i2+1)*10 + (i3+1))
 
 #--------------------------------------------------------
 # Constants for drawing boxes
@@ -147,6 +153,7 @@ class View:
         'cloud_color': 'colormap',
         'iso_level': 'single',
         'iso_color': 'shiny',
+        'color_remap': 'rgba',
     }
 
     hidden_uniform_defaults = {
@@ -306,7 +313,7 @@ class View:
                     raise ValueError("Unknown %s shader '%s'" % (subshader, name))
                 code.append(sources[name])
 
-            code = self.source_template.replace('<<VOL INIT>>', '\n'.join(code))
+            code = self.source_template.replace('<<VOL INIT>>', '\n'.join(code)).replace('<<COLOR_REMAP>>', self.params['color_remap'])
 
             self.current_volume_shader = ShaderProgram(fragment_shader=code, uniforms=uniforms)
             self.cached_shaders[key] = self.current_volume_shader
@@ -374,6 +381,8 @@ class View:
             return self.cloud_color_names
         elif var == 'colormap':
             return _colormap_names
+        elif var == 'color_remap':
+            return _color_remaps
         else:
             raise ValueError("parameter '%s' does not exist or does not have a list of options" % var)
 

@@ -289,12 +289,14 @@ class ViewWidget(QOpenGLWidget):
 
         return img
 
-    def save_image(self, fn=None):
+    def save_image(self, fn=None, dir=None):
         # fn = 'test.png'
+        if dir is None:
+            dir = os.getcwd()
         if fn is None:
-            fns = glob.glob('muvi_screenshot_*.png')
+            fns = glob.glob(os.path.join(dir, 'muvi_screenshot_*.png'))
             for i in range(10**4):
-                fn = 'muvi_screenshot_%08d.png' % i
+                fn = os.path.join(dir, 'muvi_screenshot_%08d.png' % i)
                 if fn not in fns:
                     break
 
@@ -462,6 +464,7 @@ class ViewerApp(QMainWindow):
         self.adv_view_options.add_row("Perspective Z Coefficient",
             LinearViewSetting(self.gl_display, "perspective_zfact", View.uniform_defaults['perspective_zfact'], -0.25, 0.25, 0.01))
 
+        self.adv_view_options.add_row("Color Remap:", OptionsViewSetting(self.gl_display, "color_remap"))
 
         self.v_box.addStretch()
 
@@ -531,6 +534,15 @@ class ViewerApp(QMainWindow):
         self.preview_image = QPushButton("Preview Current Frame")
         self.preview_image.clicked.connect(self.preview_frame)
         self.export_window_settings.addWidget(self.preview_image, 1, 3, 1, 2)
+
+        halign = QHBoxLayout()
+        self.export_folder = os.getcwd()
+        self.export_folder_label = QLabel(self.export_folder)
+        self.export_folder_button = QPushButton()
+        self.export_folder_button.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
+        halign.addWidget(self.export_folder_button, 0)
+        self.export_window_settings.addLayout(halign, 2, 1, 1, 4)
+        halign.addWidget(self.export_folder_label, 1)
 
         # self.ss_button = QPushButton("Save View")
         # self.ss_button.clicked.connect(self.gl_display.save_image)
@@ -626,11 +638,15 @@ class ViewerApp(QMainWindow):
             self.show_export.setText('Hide Export Window')
 
 
+    def select_export_folder(self):
+        pass
+
     def save_frame(self, e):
-        fn, img = self.gl_display.save_image()
+        fn, img = self.gl_display.save_image(self.export_folder)
         self.export_window_status.showMessage('Saved image: ' + fn)
         # print(img.shape, img.dtype)
         self.update_preview(img)
+
 
     def preview_frame(self, e):
         self.update_preview(self.gl_display.preview_image())

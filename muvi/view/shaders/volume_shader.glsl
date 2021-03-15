@@ -174,7 +174,7 @@ void main() {
 
             // Map the coordinates, and get the texture at the current location
             Xm = distortion_map(X);
-            voxel_color = color_mult * texture3D(vol_texture, Xm);
+            voxel_color = color_mult * texture3D(vol_texture, Xm).<<COLOR_REMAP>>;
             // voxel_color.a = clamp(voxel_color.a, 0.0, 1.0);
 
             // #ifdef VOL_SHOW_ISOSURFACE

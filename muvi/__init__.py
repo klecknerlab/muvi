@@ -940,16 +940,17 @@ class VolumetricMovieFrom2D(VolumetricMovie):
             elif di.min() != di.max():
                 warnings.warn('Auto offset failed: inconsistent volume sizing detected.\n(size of triggered blocks was not consistent, most likely a triggering issue.)')
             else:
-                Nz = int(di[0])
+                channels = self.info.get('channels', 1)
+                Nz = int(di[0]) / channels
                 if 'Nz' in self.info and self.info['Nz'] != Nz:
                     warnings.warn(f"Auto offset detection found different volume depth ({Nz}) than specified in setup ({self.info['Nz']})\n(defaulting to auto-detected value)")
                 self.info['Nz'] = Nz
 
                 if 'Ns' in self.info and self.info['Ns'] != Nz:
                     warnings.warn(f"Auto offset detection found different number of scan frames ({Nz}) than specified in setup ({self.info['Ns']})\n(defaulting to auto-detected value)")
-                self.info['Ns'] = Nz
+                self.info['Ns'] = Nz * channels
 
-                self.info['offset'] = (int(i[0]) + 1) % Nz
+                self.info['offset'] = (int(i[0]) + 1) % (Nz * channels)
 
         if 'Nz' not in self.info:
             raise ValueError("if deriving volumes from 2D data, 'Nz' must be defined")
@@ -957,7 +958,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         if 'Ns' not in self.info:
             warnings.warn("'Ns' not defined for volumes derived from 2D data\n   Will default to Ns=Nz, but this is probably wrong!")
 
-        if self.info['Ns'] < self.info['Nz']:
+        if self.info['Ns'] < (channels * self.info['Nz']):
             raise ValueError("Ns must be >= Nz")
 
         dead_frames = self.info['Ns'] - self.info['Nz']
@@ -1000,7 +1001,9 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         offset = self.info.get('offset', 0) + i * self.info['Ns']
 
         if len(self.vol_shape) == 4:
-            raise ValueError('color reading not (yet) supported')
+            channels = self.vol_shape[3]
+            for i in range(self.vol_shape[0] * channels):
+                vol[i//channels, ::y_step, :, i % channels] = self.get_frame(offset + i)
         else:
             for z in range(self.vol_shape[0]):
                 vol[z, ::y_step] = self.get_frame(offset + z)
