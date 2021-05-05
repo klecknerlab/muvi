@@ -961,7 +961,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         if self.info['Ns'] < (channels * self.info['Nz']):
             raise ValueError("Ns must be >= Nz")
 
-        dead_frames = self.info['Ns'] - self.info['Nz']
+        dead_frames = self.info['Ns'] - (channels * self.info['Nz'])
         if 'offset' not in self.info:
             self.info['offset'] = 0
 
