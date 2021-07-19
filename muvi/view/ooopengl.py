@@ -18,7 +18,7 @@
 
 
 try:
-    # this fails in <=2020 versions of Python on OS X 11.x
+    # this fails in <= 2020 versions of Python on OS X 11.x
     from OpenGL.GL import *
 except ImportError:
     print('Patching ctypes for OS X 11.x...')
