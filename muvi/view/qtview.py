@@ -32,7 +32,8 @@ import os
 # if platform.system() == 'Darwin':
 #     from Foundation import NSURL
 
-from .view import View
+# from .view import View, PARAMS
+from . import view
 
 GAMMA_CORRECT = 2.2
 
@@ -158,7 +159,6 @@ class OptionsViewSetting(QComboBox):
             if sn == selected:
                 self.setCurrentIndex(i)
 
-
 def fromQColor(qc, has_alpha):
     if has_alpha:
         return (qc.redF()**GAMMA_CORRECT, qc.greenF()**GAMMA_CORRECT,
@@ -210,7 +210,7 @@ class ViewWidget(QOpenGLWidget):
         self.lastPos = QPoint()
         self.volume = volume
 
-        self.view = View(volume=self.volume, )
+        self.view = view.View(volume=self.volume, )
 
     def attach_volume(self, volume):
         self.makeCurrent()
@@ -383,6 +383,9 @@ class ExportWindow(QMainWindow):
 
 
 class ViewerApp(QMainWindow):
+
+
+
     def __init__(self, window_name="Volumetric Viewer", volume=None):
         super().__init__()
         self.setWindowTitle(window_name)
@@ -400,7 +403,6 @@ class ViewerApp(QMainWindow):
 
         self.control_widgets['frame'] = IntViewSetting(self.gl_display, "frame", 0, 0, 0)
         self.gl_display.frame_setting = self.control_widgets['frame']
-        # self.view_options.add_row("Frame:", self.gl_display.frame_setting)
 
         self.frame_timer = QTimer()
         self.frame_timer.setSingleShot(False)
@@ -408,20 +410,10 @@ class ViewerApp(QMainWindow):
         self.frame_timer.timeout.connect(self.gl_display.frame_setting.advance)
         self.play_pause = PlayButton(self.frame_timer)
 
-        # self.view_options.add_row("Frame:")
         self.view_options.add_row(self.play_pause, self.gl_display.frame_setting)
 
-        self.view_options.add_row("Exposure (stops)",
-            LinearViewSetting(self.gl_display, "exposure", View.uniform_defaults['exposure'], -5, 5, 0.5))
-
-        self.view_options.add_row("Cloud Opacity:",
-            LogViewSetting(self.gl_display, "opacity", View.uniform_defaults['opacity'], 1E-3, 2, 10**(1/8)))
-
-        # self.view_options.add_row("Cloud Tint:",
-        #     ColorViewSetting(self.gl_display, "tint", (0.0, 0.3, 0.3)))
-
-        self.view_options.add_row("Cloud Color:", OptionsViewSetting(self.gl_display, "cloud_color"))
-        self.view_options.add_row("Colormap:", OptionsViewSetting(self.gl_display, "colormap"))
+        self.add_param('exposure', self.view_options)
+        self.add_param('fov', self.view_options)
 
         for i, label in enumerate(['x', 'y', 'z']):
             dim = 256
@@ -435,36 +427,20 @@ class ViewerApp(QMainWindow):
         self.view_options.add_row("Back Edge:", self.control_widgets['z0'])
         self.view_options.add_row("Front Edge:", self.control_widgets['z1'])
 
+        self.render_options = CollapsableVBox(self, 'Render Options',
+                                              isOpen=True)
+        self.v_box.addWidget(self.render_options)
 
-        # self.view_options.add_row("Show Isosurface:",
-        #     BoolViewSetting(self.gl_display, "show_isosurface", View.shader_defaults["show_isosurface"]))
-        #
-        # self.view_options.add_row("Isosurface Level:",
-        #     LinearViewSetting(self.gl_display, "iso_offset", View.uniform_defaults['iso_offset'], 0.0, 1.0, 0.1))
+        self.advanced_options = CollapsableVBox(self, "Advanced View Options",
+                                                isOpen=True)
+        self.v_box.addWidget(self.advanced_options)
 
+        for name, param in view.PARAMS.items():
+            if param.cat == 'render':
+                self.add_param(name, self.render_options)
+            elif param.cat == 'advanced':
+                self.add_param(name, self.advanced_options)
 
-        # self.view_options.add_row("Isosurface Color:",
-        #     ColorViewSetting(self.gl_display, "surface_color", (1.0, 0.0, 0.0, 0.5)))
-
-        self.adv_view_options = CollapsableVBox(self, "Advanced View Options", isOpen=True)
-        self.v_box.addWidget(self.adv_view_options)
-
-        # self.adv_view_options.add_row("Shine:",
-        #     LinearViewSetting(self.gl_display, "shine", 0.2, 0, 1, 0.1))
-
-        # self.adv_view_options.add_row("Show Grid:",
-        #     BoolViewSetting(self.gl_display, "show_grid", False))
-
-        self.adv_view_options.add_row("Render Step:",
-            LogViewSetting(self.gl_display, "step_size", View.uniform_defaults['step_size'], 0.125, 2, 2**0.5))
-
-        self.adv_view_options.add_row("Perspective X Coefficient",
-            LinearViewSetting(self.gl_display, "perspective_xfact", View.uniform_defaults['perspective_xfact'], -0.25, 0.25, 0.01))
-
-        self.adv_view_options.add_row("Perspective Z Coefficient",
-            LinearViewSetting(self.gl_display, "perspective_zfact", View.uniform_defaults['perspective_zfact'], -0.25, 0.25, 0.01))
-
-        self.adv_view_options.add_row("Color Remap:", OptionsViewSetting(self.gl_display, "color_remap"))
 
         self.v_box.addStretch()
 
@@ -557,18 +533,40 @@ class ViewerApp(QMainWindow):
         self.export_window_settings.addWidget(ListViewSetting(self.gl_display, "os_height", 1080, self.ss_sizes, force_update=False), 0, 4)
         self.export_window_status = self.export_window.statusBar()
 
-
         # self.view_options.add_row("Saved Width:",
         #     ListViewSetting(self.gl_display, "os_width", 1920, self.ss_sizes, force_update=False))
         # self.view_options.add_row("Saved Height:",
         #     ListViewSetting(self.gl_display, "os_height", 1080, self.ss_sizes, force_update=False))
 
-        if volume:
-            self.open_volume(volume)
-
         self.setAcceptDrops(True)
 
         self.show()
+
+        if volume:
+            self.open_volume(volume)
+
+
+    def add_param(self, name, vbox):
+        param = view.PARAMS[name]
+
+        if param.type == float:
+            if hasattr(param, 'logstep'):
+                setting = LogViewSetting(self.gl_display, name, param.default,
+                                         param.min, param.max, param.logstep)
+            else:
+                setting = LinearViewSetting(self.gl_display, name, param.default,
+                                            param.min, param.max, param.step)
+        elif param.type == int:
+            setting = IntViewSetting(self.gl_display, name, param.default,
+                                     param.min, param.max, param.step)
+        elif param.type == str and hasattr(param, 'options'):
+            setting = OptionsViewSetting(self.gl_display, name, param.default)
+        elif param.type == bool:
+            setting = BoolViewSetting(self.gl_display, name, param.default)
+        else:
+            raise ValueError(f'Incorrect parameter type ({param.type.__name__}) for view setting')
+
+        vbox.add_row(param.display_name + ":", setting)
 
 
     def open_file(self):

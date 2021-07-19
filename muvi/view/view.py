@@ -83,6 +83,45 @@ for i1, c1 in enumerate("rgb"):
             c = c1 + c2 + c3 + "a"
             _color_remaps[c] = str((i1+1)*100 + (i2+1)*10 + (i3+1))
 
+
+# -------------------------------------------------------
+# Get a list of Shaders
+# -------------------------------------------------------
+
+SUBSHADER_TYPES = ('cloud_color', )
+SUBSHADER_NAMES = {}
+SUBSHADER_SOURCE = {}
+
+def refresh_shaders():
+    '''Load shaders from the shader directory.
+
+    Normally not called by the user, but can be used to udpate sources,
+    if they are being edited while a program is being run.
+    '''
+
+    for subshader in SUBSHADER_TYPES:
+        ds = {}
+        dn = {}
+
+        for fn in sorted(glob.glob(os.path.join(_shader_path, subshader + "_*.glsl"))):
+            short_name = re.match('.*' + subshader + '_(.*).glsl', fn).group(1)
+
+            with open(fn) as f:
+                code = f.read()
+
+            m = re.match(r'^\s*//\s*NAME:\s*(.*)\s*$', code, flags=re.MULTILINE)
+            long_name = m.group(1) if m else short_name
+            ds[short_name] = code
+            dn[short_name] = long_name
+
+        SUBSHADER_NAMES[subshader] = dn
+        SUBSHADER_SOURCE[subshader] = ds
+
+        # setattr(self, subshader + "_source", ds)
+        # setattr(self, subshader + "_names", dn)
+
+refresh_shaders()
+
 #--------------------------------------------------------
 # Constants for drawing boxes
 #--------------------------------------------------------
@@ -99,6 +138,71 @@ _BOX_FACES = np.array([
 ], dtype='u4')
 
 _BOX_EDGES = [(i, j) for i in range(8) for j in range(8) if ((i < j) and sum((_UNIT_BOX[i] - _UNIT_BOX[j])**2) == 1.)]
+
+#--------------------------------------------------------
+# List of Parameters for Display
+#--------------------------------------------------------
+# Previously this data was stored in the View class, but this is a cleaner
+#   solution because we shouldn't need to create an instance to get the
+#   parameter names, limits, etc.  (which are used to build GUIs)
+
+PARAMS = OrderedDict()
+
+class Param:
+    def __init__(self, name, display_name,  cat, vcat, default, min=None, max=None, step=None, logstep=None, options=None):
+        self.name = name
+        self.display_name = display_name
+        self.cat = cat
+        self.vcat = vcat
+        self.default = default
+
+        if min is not None:
+            self.min = min
+        if max is not None:
+            self.max = max
+        if step is not None:
+            self.step = step
+        if logstep is not None:
+            self.logstep = logstep
+        if options is not None:
+            self.options = options
+
+        PARAMS[name] = self
+
+    type = property(lambda self: type(self.default))
+
+
+Param('exposure', 'Exposure (stops)', 'view', 'uniform',
+        0.0, min=-5, max=5, step=0.5)
+Param('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'))
+Param('X0', 'X0', 'view', 'view', np.zeros(3, dtype='f'))
+Param('X1', 'X1', 'view', 'view', np.ones(3, dtype='f') * 256)
+Param('center', 'Center', 'view', 'view', np.ones(3, dtype='f') * 128)
+Param('scale', 'Scale', 'view', 'view', 1.0, logstep=1.25)
+Param('fov', 'FOV', 'view', 'view', 30.0, min=0.0, max=120.0, step=5.0)
+
+Param('frame', 'Frame', 'playback', 'view', 0)
+
+Param('opacity', 'Cloud Opacity', 'render', 'uniform',
+        0.5, min=1E-3, max=2, logstep=10**(1/8))
+Param('cloud_color', 'Cloud Color', 'render', 'shader', 'colormap',
+        options=SUBSHADER_NAMES['cloud_color'])
+Param('colormap', 'Colormap', 'render', 'view', 'inferno',
+        options=_colormap_names)
+        
+Param('show_isosurface', 'Show Isosurface', 'hidden', 'shader', False)
+Param('iso_offset', 'Isosurface Offset', 'hidden', 'uniform', 0.5)
+Param('iso_level', 'Isosurface Level', 'hidden', 'shader', 'single')
+Param('iso_color', 'Isosurface Color', 'hidden', 'shader', 'shiny')
+
+Param('step_size', 'Render Step', 'advanced', 'uniform', 1.0,
+        min=0.1, max=2, logstep=2**(1/2))
+Param('perspective_xfact', 'Perspective X Coeff.', 'advanced', 'uniform', 0.0,
+        min=-.5, max=.5, step=1E-2)
+Param('perspective_zfact', 'Perspective Z Coeff.', 'advanced', 'uniform', 0.0,
+        min=-.5, max=.5, step=1E-2)
+Param('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba',
+            options=_color_remaps)
 
 
 #--------------------
@@ -128,33 +232,37 @@ class View:
     os_height : int (default: 1080), the height of the off-screen view
     '''
 
-    view_defaults = {
-        'X0': np.zeros(3, dtype='f'),
-        'X1': np.ones(3, dtype='f') * 256,
-        'R': np.eye(3, dtype='f'),
-        'center': np.ones(3, dtype='f') * 128,
-        'scale': 1.0,
-        'frame': 0,
-        'fov': 30.0,
-        'colormap': 'inferno',
-    }
+    view_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='view'}
+    uniform_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='uniform'}
+    shader_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='shader'}
 
-    uniform_defaults = {
-        'opacity': 0.5,
-        'step_size': 1.0,
-        'iso_offset': 0.5,
-        'exposure': 0.0,
-        'perspective_xfact': 0.0,
-        'perspective_zfact': 0.0,
-    }
-
-    shader_defaults = {
-        'show_isosurface': False,
-        'cloud_color': 'colormap',
-        'iso_level': 'single',
-        'iso_color': 'shiny',
-        'color_remap': 'rgba',
-    }
+    # view_defaults = {
+    #     'X0': np.zeros(3, dtype='f'),
+    #     'X1': np.ones(3, dtype='f') * 256,
+    #     'R': np.eye(3, dtype='f'),
+    #     'center': np.ones(3, dtype='f') * 128,
+    #     'scale': 1.0,
+    #     'frame': 0,
+    #     'fov': 30.0,
+    #     'colormap': 'inferno',
+    # }
+    #
+    # uniform_defaults = {
+    #     'opacity': 0.5,
+    #     'step_size': 1.0,
+    #     'iso_offset': 0.5,
+    #     'exposure': 0.0,
+    #     'perspective_xfact': 0.0,
+    #     'perspective_zfact': 0.0,
+    # }
+    #
+    # shader_defaults = {
+    #     'show_isosurface': False,
+    #     'cloud_color': 'colormap',
+    #     'iso_level': 'single',
+    #     'iso_color': 'shiny',
+    #     'color_remap': 'rgba',
+    # }
 
     hidden_uniform_defaults = {
         'vol_texture': 0,
@@ -166,10 +274,7 @@ class View:
         'gamma_correct': 1/2.2,
     }
 
-    subshader_names = ('cloud_color', )
     def __init__(self, volume=None, width=1000, height=1000, os_width=1920, os_height=1080, params={}, source_dir=None):
-
-        self.source_dir = _shader_path if source_dir is None else source_dir
 
         self.width = width
         self.height = height
@@ -193,7 +298,7 @@ class View:
         else:
             self.volume = None
 
-        self.refresh_shaders()
+        self.reload_shaders()
 
 
     def init_gl(self):
@@ -235,32 +340,36 @@ class View:
             self.attach_volume(self.volume)
 
 
-    def refresh_shaders(self):
+    def reload_shaders(self):
         '''Load shaders from the shader directory.
 
         Normally not called by the user, but can be used to udpate sources,
         if they are being edited while a program is being run.
+
+        If you are doing this, you should also call the `refresh_shaders`
+        function first.  (Note: this is *not* a method of the view class, but
+        is in the view module.)
         '''
-        with open(os.path.join(self.source_dir, 'volume_shader.glsl')) as f:
+        with open(os.path.join(_shader_path, 'volume_shader.glsl')) as f:
             self.source_template = f.read()
 
-        for subshader in self.subshader_names:
-            ds = {}
-            dn = {}
-
-            for fn in sorted(glob.glob(os.path.join(self.source_dir, subshader + "_*.glsl"))):
-                short_name = re.match('.*' + subshader + '_(.*).glsl', fn).group(1)
-
-                with open(fn) as f:
-                    code = f.read()
-
-                m = re.match(r'^\s*//\s*NAME:\s*(.*)\s*$', code, flags=re.MULTILINE)
-                long_name = m.group(1) if m else short_name
-                ds[short_name] = code
-                dn[short_name] = long_name
-
-            setattr(self, subshader + "_source", ds)
-            setattr(self, subshader + "_names", dn)
+        # for subshader in self.subshader_names:
+        #     ds = {}
+        #     dn = {}
+        #
+        #     for fn in sorted(glob.glob(os.path.join(self.source_dir, subshader + "_*.glsl"))):
+        #         short_name = re.match('.*' + subshader + '_(.*).glsl', fn).group(1)
+        #
+        #         with open(fn) as f:
+        #             code = f.read()
+        #
+        #         m = re.match(r'^\s*//\s*NAME:\s*(.*)\s*$', code, flags=re.MULTILINE)
+        #         long_name = m.group(1) if m else short_name
+        #         ds[short_name] = code
+        #         dn[short_name] = long_name
+        #
+        #     setattr(self, subshader + "_source", ds)
+        #     setattr(self, subshader + "_names", dn)
 
         self.cached_shaders = {}
 
@@ -306,9 +415,11 @@ class View:
                 code.append('#define VOL_SHOW_ISOSURFACE 1')
 
             # Find the cloud_color, iso_level, and iso_color sources
-            for subshader in self.subshader_names:
-                sources = getattr(self, subshader + '_source')
+            for subshader in SUBSHADER_TYPES:
+                # sources = getattr(self, subshader + '_source')
+                sources = SUBSHADER_SOURCE[subshader]
                 name = self.params[subshader]
+
                 if name not in sources:
                     raise ValueError("Unknown %s shader '%s'" % (subshader, name))
                 code.append(sources[name])
@@ -377,12 +488,14 @@ class View:
 
 
     def get_options(self, var):
-        if var == 'cloud_color':
-            return self.cloud_color_names
-        elif var == 'colormap':
-            return _colormap_names
-        elif var == 'color_remap':
-            return _color_remaps
+        if var in PARAMS and hasattr(PARAMS[var], 'options'):
+            return PARAMS[var].options
+        # if var == 'cloud_color':
+        #     return self.cloud_color_names
+        # elif var == 'colormap':
+        #     return _colormap_names
+        # elif var == 'color_remap':
+        #     return _color_remaps
         else:
             raise ValueError("parameter '%s' does not exist or does not have a list of options" % var)
 
@@ -598,11 +711,11 @@ class View:
         glLoadIdentity()
 
         aspect = width/height
-        if self.params['fov'] > 0:
+        if self.params['fov'] > 1E-6:
             ymax = z0 * np.tan(self.params['fov']*np.pi/360)
             glFrustum(-ymax*aspect, ymax*aspect, -ymax, ymax, z0, z1)
         else:
-            glOrtho(-aspect_ratio, aspect_ratio, -1, 1, z0, z1)
+            glOrtho(-aspect, aspect, -1, 1, z0, z1)
 
         # Clear the display and set the view matrix
         glMatrixMode(GL_MODELVIEW)
