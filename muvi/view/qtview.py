@@ -382,10 +382,8 @@ class ExportWindow(QMainWindow):
         self.parent.toggle_export()
 
 
+
 class ViewerApp(QMainWindow):
-
-
-
     def __init__(self, window_name="Volumetric Viewer", volume=None):
         super().__init__()
         self.setWindowTitle(window_name)
@@ -512,10 +510,11 @@ class ViewerApp(QMainWindow):
         self.export_window_settings.addWidget(self.preview_image, 1, 3, 1, 2)
 
         halign = QHBoxLayout()
-        self.export_folder = os.getcwd()
-        self.export_folder_label = QLabel(self.export_folder)
+        # self.export_folder = os.getcwd()
+        self.export_folder_label = QLabel(os.getcwd())
         self.export_folder_button = QPushButton()
         self.export_folder_button.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
+        self.export_folder_button.clicked.connect(self.select_export_folder)
         halign.addWidget(self.export_folder_button, 0)
         self.export_window_settings.addLayout(halign, 2, 1, 1, 4)
         halign.addWidget(self.export_folder_label, 1)
@@ -637,10 +636,11 @@ class ViewerApp(QMainWindow):
 
 
     def select_export_folder(self):
-        pass
+        self.export_folder_label.setText(QFileDialog.getExistingDirectory(self, "Select Export Folder", self.export_folder_label.text()))
+
 
     def save_frame(self, e):
-        fn, img = self.gl_display.save_image(self.export_folder)
+        fn, img = self.gl_display.save_image(dir=self.export_folder_label.text())
         self.export_window_status.showMessage('Saved image: ' + fn)
         # print(img.shape, img.dtype)
         self.update_preview(img)

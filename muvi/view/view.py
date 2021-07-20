@@ -189,7 +189,7 @@ Param('cloud_color', 'Cloud Color', 'render', 'shader', 'colormap',
         options=SUBSHADER_NAMES['cloud_color'])
 Param('colormap', 'Colormap', 'render', 'view', 'inferno',
         options=_colormap_names)
-        
+
 Param('show_isosurface', 'Show Isosurface', 'hidden', 'shader', False)
 Param('iso_offset', 'Isosurface Offset', 'hidden', 'uniform', 0.5)
 Param('iso_level', 'Isosurface Level', 'hidden', 'shader', 'single')
