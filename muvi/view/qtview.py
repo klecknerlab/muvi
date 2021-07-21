@@ -410,7 +410,7 @@ class ViewerApp(QMainWindow):
 
         self.view_options.add_row(self.play_pause, self.gl_display.frame_setting)
 
-        self.add_param('exposure', self.view_options)
+        # self.add_param('exposure', self.view_options)
         self.add_param('fov', self.view_options)
 
         for i, label in enumerate(['x', 'y', 'z']):
@@ -541,6 +541,8 @@ class ViewerApp(QMainWindow):
 
         self.show()
 
+        print(self.control_widgets.keys())
+
         if volume:
             self.open_volume(volume)
 
@@ -567,10 +569,12 @@ class ViewerApp(QMainWindow):
 
         vbox.add_row(param.display_name + ":", setting)
 
+        self.control_widgets[name] = setting
+
 
     def open_file(self):
         try:
-            fn, ext = QFileDialog.getOpenFileName(self, 'Open Volumetric Movie', os.path.expanduser('~'), "VTI (*.vti)")
+            fn, ext = QFileDialog.getOpenFileName(self, 'Open Volumetric Movie', os.getcwd(), "VTI (*.vti)")
             vol = open_3D_movie(fn)
         except:
             QMessageBox.critical(self, "ERROR", f'"{fn}" does not appear to be a 3D movie file!')
@@ -609,6 +613,11 @@ class ViewerApp(QMainWindow):
                 x0.setValue(0)
                 x1.setMaximum(dim)
                 x1.setValue(dim)
+
+            n_channels = vol.info.get('channels', 1)
+
+            for n in range(1, view.MAX_CHANNELS):
+                self.control_widgets[f'channel{n}'].setChecked(n <= n_channels)
 
             self.gl_display.attach_volume(vol)
 

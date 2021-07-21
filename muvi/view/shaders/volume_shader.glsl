@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Dustin Kleckner
+Copyright 2021 Dustin Kleckner
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,14 +37,22 @@ Additionally a block of code defining uniforms and functions gets inserted at
 
 uniform sampler3D vol_texture;
 uniform sampler2DRect back_buffer_texture;
-uniform sampler1D colormap_texture;
+uniform sampler1D colormap1_texture;
+uniform sampler1D colormap2_texture;
+uniform sampler1D colormap3_texture;
+
 uniform vec3 vol_size = vec3(256.0, 256.0, 256.0);
 uniform vec3 vol_delta = vec3(1.0/256.0, 1.0/256.0, 1.0/256.0);
 uniform float grad_step = 1.0;
 uniform float gamma_correct = 1.0/2.2;
 uniform float exposure = 0.0;
+uniform float exposure1 = 0.0;
+uniform float exposure2 = 0.0;
+uniform float exposure3 = 0.0;
 
-uniform float opacity = 0.1; // VIEW_VAR: logfloat(0.05, 1E-4, 1.0, 2, 2)
+// uniform float opacity = 0.1; // VIEW_VAR: logfloat(0.05, 1E-4, 1.0, 2, 2)
+uniform float density = 0.1;
+uniform float glow = 1.0;
 uniform float step_size = 1.0; // VIEW_VAR: logfloat(1.0, 0.125, 1.0, 2, 2)
 uniform float iso_offset = 0.5;
 // uniform float iso_level = 0.5; // VIEW_VAR: float(0.25, 0.0, 1.0, 0.05)
@@ -133,7 +141,7 @@ void main() {
 
     // The overall appearance shouldn't change with step size -- this adjust
     //   the opacity accordingly.
-    float mod_opacity = step_size * opacity;
+    float mod_opacity = step_size * density / glow;
 
     vec4 voxel_color;
     vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
@@ -159,7 +167,12 @@ void main() {
     int num_steps = int(l / step_size + 0.8);
     float last_step_size = l - (num_steps - 1) * step_size;
 
-    float color_mult = pow(2.0, exposure);
+    // float color_mult = pow(2.0, exposure);
+    vec4 color_mult = vec4(
+      pow(2, exposure1 + exposure),
+      pow(2, exposure2 + exposure),
+      pow(2, exposure3 + exposure),
+      1.0);
 
     // Start 1/2 a step in
     X += + 0.5 * dX;
@@ -170,7 +183,7 @@ void main() {
         for (int i = num_steps; i > 0; i --) {
             // Since the last step is a little differently sized, adjust
             //    the opacity accordingly.
-            if (i == 1) {mod_opacity = last_step_size * opacity;}
+            if (i == 1) {mod_opacity = last_step_size * density / glow;}
 
             // Map the coordinates, and get the texture at the current location
             Xm = distortion_map(X);

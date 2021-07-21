@@ -172,8 +172,7 @@ class Param:
     type = property(lambda self: type(self.default))
 
 
-Param('exposure', 'Exposure (stops)', 'view', 'uniform',
-        0.0, min=-5, max=5, step=0.5)
+
 Param('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'))
 Param('X0', 'X0', 'view', 'view', np.zeros(3, dtype='f'))
 Param('X1', 'X1', 'view', 'view', np.ones(3, dtype='f') * 256)
@@ -183,26 +182,43 @@ Param('fov', 'FOV', 'view', 'view', 30.0, min=0.0, max=120.0, step=5.0)
 
 Param('frame', 'Frame', 'playback', 'view', 0)
 
-Param('opacity', 'Cloud Opacity', 'render', 'uniform',
+# Opacity replaced by "density"
+# Param('opacity', 'Cloud Opacity', 'render', 'uniform',
+        # 0.5, min=1E-3, max=2, logstep=10**(1/8))
+
+Param('density', 'Density', 'render', 'uniform',
         0.5, min=1E-3, max=2, logstep=10**(1/8))
-Param('cloud_color', 'Cloud Color', 'render', 'shader', 'colormap',
-        options=SUBSHADER_NAMES['cloud_color'])
-Param('colormap', 'Colormap', 'render', 'view', 'inferno',
+Param('glow', 'Glow', 'render', 'uniform',
+        1.0, min=1, max=100, logstep=10**(1/4))
+
+
+MAX_CHANNELS = 3
+_default_colormaps = ['inferno', 'viridis', 'cividis']
+
+for n in range(1, MAX_CHANNELS + 1):
+    Param(f'channel{n}', f'Channel {n}', 'render', 'shader', (n == 1))
+    Param(f'colormap{n}', 'Colormap', 'render', 'view', _default_colormaps[n-1],
         options=_colormap_names)
+    Param(f'exposure{n}', 'Exposure', 'render', 'uniform',
+        0.0, min=-5, max=5, step=0.5)
 
 Param('show_isosurface', 'Show Isosurface', 'hidden', 'shader', False)
 Param('iso_offset', 'Isosurface Offset', 'hidden', 'uniform', 0.5)
 Param('iso_level', 'Isosurface Level', 'hidden', 'shader', 'single')
 Param('iso_color', 'Isosurface Color', 'hidden', 'shader', 'shiny')
+Param('exposure', 'Exposure (stops)', 'hidden', 'uniform',
+        0.0, min=-5, max=5, step=0.5)
 
 Param('step_size', 'Render Step', 'advanced', 'uniform', 1.0,
         min=0.1, max=2, logstep=2**(1/2))
-Param('perspective_xfact', 'Perspective X Coeff.', 'advanced', 'uniform', 0.0,
+Param('perspective_xfact', 'Persp. X Coeff.', 'advanced', 'uniform', 0.0,
         min=-.5, max=.5, step=1E-2)
-Param('perspective_zfact', 'Perspective Z Coeff.', 'advanced', 'uniform', 0.0,
+Param('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0,
         min=-.5, max=.5, step=1E-2)
 Param('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba',
             options=_color_remaps)
+Param('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap',
+        options=SUBSHADER_NAMES['cloud_color'])
 
 
 #--------------------
@@ -267,7 +283,9 @@ class View:
     hidden_uniform_defaults = {
         'vol_texture': 0,
         'back_buffer_texture': 1,
-        'colormap_texture': 2,
+        'colormap1_texture': 2,
+        'colormap2_texture': 3,
+        'colormap3_texture': 4,
         'vol_size': np.ones(3, dtype='f')*256,
         'vol_delta': np.ones(3, dtype='f')/256,
         'grad_step': 1.0,
@@ -305,7 +323,7 @@ class View:
         '''Initiliaze OpenGL components.
 
         This will be automatically called on the first draw statement, if not
-        done manuallay.
+        done manually.
         '''
 
         if getattr(self, '_init_gl', False):
@@ -331,7 +349,9 @@ class View:
             }
         ''', uniforms=dict(back_buffer=1, scale=2.0))
 
-        self.update_colormap()
+        for n in range(1, MAX_CHANNELS + 1):
+            self.update_colormap(n)
+
         self.update_shader()
 
         self._init_gl = True
@@ -414,6 +434,10 @@ class View:
             if self.params['show_isosurface']:
                 code.append('#define VOL_SHOW_ISOSURFACE 1')
 
+            for n in range(1, MAX_CHANNELS + 1):
+                if self.params[f'channel{n}']:
+                    code.append(f'#define CLOUD{n}_ACTIVE 1')
+
             # Find the cloud_color, iso_level, and iso_color sources
             for subshader in SUBSHADER_TYPES:
                 # sources = getattr(self, subshader + '_source')
@@ -422,6 +446,7 @@ class View:
 
                 if name not in sources:
                     raise ValueError("Unknown %s shader '%s'" % (subshader, name))
+
                 code.append(sources[name])
 
             code = self.source_template.replace('<<VOL INIT>>', '\n'.join(code)).replace('<<COLOR_REMAP>>', self.params['color_remap'])
@@ -500,7 +525,7 @@ class View:
             raise ValueError("parameter '%s' does not exist or does not have a list of options" % var)
 
 
-    def update_colormap(self):
+    def update_colormap(self, n=1):
         '''Choose the display colormap.
 
         Parameters
@@ -508,17 +533,27 @@ class View:
         name : str (default: "viridis")
             The "short name" of the colormap (corresponds to a key in the
             `_colormaps` global dictionary.
+
+        Keywords
+        --------
+        n : int (default: 1)
+            The channel index we are selecting the color map for
+            (n = 1-MAX_CHANNELS)
         '''
 
-        if not hasattr(self, 'colormap_texture'):
-            self.colormap_texture = Texture(size = (256, ), format=GL_RGB, wrap=GL_CLAMP_TO_EDGE, internal_format=GL_SRGB)
+        if not hasattr(self, 'colormap_textures'):
+            self.colormap_textures = [
+                Texture(size = (256, ), format=GL_RGB, wrap=GL_CLAMP_TO_EDGE,
+                         internal_format=GL_SRGB)
+                for i in range(MAX_CHANNELS)
+            ]
 
-        glActiveTexture(GL_TEXTURE2)
+        glActiveTexture(GL_TEXTURE2 + (n-1))
 
-        name = self.params['colormap']
+        name = self.params['colormap' + str(n)]
         if name not in _colormaps:
             raise ValueError("unknown colormap '%s'" % name)
-        self.colormap_texture.replace(_colormaps[name].data)
+        self.colormap_textures[n-1].replace(_colormaps[name].data)
 
         glActiveTexture(GL_TEXTURE0)
 
@@ -597,9 +632,11 @@ class View:
             self.params['frame'] = kwargs.pop('frame')
             self.frame(self.params['frame'])
 
-        if 'colormap' in kwargs:
-            self.params['colormap'] = kwargs.pop('colormap')
-            self.update_colormap()
+        for n in range(1, MAX_CHANNELS+1):
+            name = f'colormap{n}'
+            if name in kwargs:
+                self.params[name] = kwargs.pop(name)
+                self.update_colormap(n)
 
         for k in ("os_width", "os_height", "width", "height"):
             if k in kwargs:
