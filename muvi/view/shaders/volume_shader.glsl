@@ -16,9 +16,6 @@ limitations under the License.
 
 /*
 This shader is used to render volumes by "view.py".
-The $oc and $cc macros will automatically get updated by the python code to
-  reflect the color components and opacity components (in one channel
-  volumes this is often "rrr" and "r", respectively.)
 Additionally a block of code defining uniforms and functions gets inserted at
   the "VOL INIT" marker.
 */
@@ -26,14 +23,7 @@ Additionally a block of code defining uniforms and functions gets inserted at
 #version 120
 #extension GL_ARB_texture_rectangle : enable
 
-// Any variables that should be adjustable by the user should be specified with
-//   a comment in the format "VIEW_VAR: [value spec]".  This specifies both
-//   defaults and how it changes.
-// "value spec" is in one of several formats:
-//   * float([val], [min], [max], [step (optional)])
-//   * int([val], [min], [max], [step (optional)])
-//   * logfloat([val], [min], [max], [log base], [step]) (actual step is log_base^1/step)
-//   * color([r], [g], [b], [a])
+#define CROP_CUTOFF 0.0000001
 
 uniform sampler3D vol_texture;
 uniform sampler2DRect back_buffer_texture;
@@ -41,8 +31,13 @@ uniform sampler1D colormap1_texture;
 uniform sampler1D colormap2_texture;
 uniform sampler1D colormap3_texture;
 
-uniform vec3 vol_size = vec3(256.0, 256.0, 256.0);
-uniform vec3 vol_delta = vec3(1.0/256.0, 1.0/256.0, 1.0/256.0);
+uniform vec3 vol_L = vec3(100.0, 100.0, 100.0);
+uniform vec3 X0 = vec3(0.0, 0.0, 0.0);
+uniform vec3 X1 = vec3(100.0, 100.0, 100.0);
+uniform vec3 vol_size = vec3(100.0, 100.0, 100.0);
+
+uniform vec3 camera_loc = vec3(0.0, 0.0, 0.0);
+
 uniform float grad_step = 1.0;
 uniform float gamma_correct = 1.0/2.2;
 uniform float exposure = 0.0;
@@ -53,7 +48,7 @@ uniform float exposure3 = 0.0;
 // uniform float opacity = 0.1; // VIEW_VAR: logfloat(0.05, 1E-4, 1.0, 2, 2)
 uniform float density = 0.1;
 uniform float glow = 1.0;
-uniform float step_size = 1.0; // VIEW_VAR: logfloat(1.0, 0.125, 1.0, 2, 2)
+uniform float step_size = 1.0;
 uniform float iso_offset = 0.5;
 // uniform float iso_level = 0.5; // VIEW_VAR: float(0.25, 0.0, 1.0, 0.05)
 // uniform vec4 surface_color = vec4(1.0, 0.0, 0.0, 0.5); // VIEW_VAR: color(1.0, 0.0, 0.0, 0.5)
@@ -64,6 +59,7 @@ uniform float iso_offset = 0.5;
 // uniform vec4 grid_color; // VIEW_VAR: color(0.0, 0.0, 0.0, 1.0)
 
 uniform float perspective_xfact = 0.0;
+uniform float perspective_yfact = 0.0;
 uniform float perspective_zfact = 0.0;
 
 
@@ -73,6 +69,8 @@ vec4 iso_color(in vec4 voxel_color, in mat4x3 grad, in int level);
 int iso_level(in vec4 color);
 vec4 cloud_color(in vec4 color, in vec3 X);
 
+
+// #define GAMMA2_ADJUST 1
 
 // !! The following line is used to insert code from Python, do not remove !!
 <<VOL INIT>>
@@ -108,7 +106,7 @@ vec4 cloud_color(in vec4 color, in vec3 X);
 //     }
 // #endif
 
-#ifdef VOL_SHOW_ISOSURFACE
+// #ifdef VOL_SHOW_ISOSURFACE
     // vec4 surface_color(in int last_level, in int level, vec3 voxel_color, ):
     //     level = vol_iso_lecel(voxel_color);
     //     if (level != last_level) {
@@ -119,33 +117,36 @@ vec4 cloud_color(in vec4 color, in vec3 X);
     //         }
     //     }
     //     last_level = level;
-#endif
+// #endif
 
-void main() {
-    // Get the front of the ray from the plane just drawn -- units here are
-    //   pixel coordinates in the volume, not yet normalized!
-    vec3 P0 = gl_TexCoord[0].xyz;
-    // The back of the ray is determined from a pre-drawn buffer.
-    vec3 P1 = texture2DRect(back_buffer_texture, gl_FragCoord.st).xyz;
 
-    // Length of a ray in pixels
-    float l = length(P0 - P1);
 
-    // The size of a step, converted into normalized coordinates
-    vec3 dP = (P1 - P0) / l * step_size;
-    vec3 dX = dP * vol_delta;
-    // The initial position, also in normalized coordinates
-    vec3 X = P0 * vol_delta;
-    // Position after map
-    vec3 Xm;
-
-    // The overall appearance shouldn't change with step size -- this adjust
-    //   the opacity accordingly.
-    float mod_opacity = step_size * density / glow;
-
-    vec4 voxel_color;
-    vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
-    vec3 light_norm = normalize(dX);
+    //
+    //
+    // // Get the front of the ray from the plane just drawn -- units here are
+    // //   pixel coordinates in the volume, which we convert to 0-1 normalized
+    // vec3 P0 = gl_TexCoord[0].xyz / vol_L;
+    // // The back of the ray is determined from a pre-drawn buffer.
+    // vec3 P1 = texture2DRect(back_buffer_texture, gl_FragCoord.st).xyz / vol_L;
+    //
+    // // Length of a ray
+    // float l = length((P0 - P1)*vol_size);
+    //
+    // // The size of a step, converted into normalized coordinates
+    // vec3 dP = (P1 - P0)*vol_size / l * step_size;
+    // vec3 dX = dP * vol_delta;
+    // // The initial position, also in normalized coordinates
+    // vec3 X = P0;
+    // // Position after map
+    // vec3 Xm;
+    //
+    // // The overall appearance shouldn't change with step size -- this adjusts
+    // //   the opacity accordingly.
+    // float mod_opacity = step_size * density / glow;
+    //
+    // vec4 voxel_color;
+    // vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
+    // vec3 light_norm = normalize(dX);
 
     // #ifdef VOL_SHOW_ISOSURFACE
     //     vec3 last_P = P0;
@@ -162,44 +163,139 @@ void main() {
     //     int level;
     // #endif
 
+void main() {
+    // Build the start and end of the ray, as well as distances along the ray
+    vec4 back_color = texture2DRect(back_buffer_texture, gl_FragCoord.st);
+
+    // Make sure we are even in a region where there is something to draw...
+    if (back_color.a < 1E-3) {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    // vec3 Xf = gl_TexCoord[0].xyz;
+    vec3 Xf = camera_loc;
+    vec3 Xb = back_color.xyz;
+    vec3 delta = Xb - Xf;
+    float d0 = 0;
+    float d1 = length(delta);
+    vec3 N = normalize(delta);
+
+    // Crop the ray segment to the active volume
+    if (abs(N.x) > CROP_CUTOFF) {
+    	float a0 = (X0.x - Xf.x) / N.x;
+    	float a1 = (X1.x - Xf.x) / N.x;
+    	float b0 = min(a0, a1);
+    	float b1 = max(a0, a1);
+    	d0 = clamp(d0, b0, b1);
+    	d1 = clamp(d1, b0, b1);
+    } else {
+    	float m = min(X0.x, X1.x);
+    	float M = max(X0.x, X1.x);
+    	if (Xf.x <= m || Xf.x >= M) {
+    		d0 = 0.0;
+    		d1 = 0.0;
+    	}
+    }
+
+    if (abs(N.y) > CROP_CUTOFF) {
+    	float a0 = (X0.y - Xf.y) / N.y;
+    	float a1 = (X1.y - Xf.y) / N.y;
+    	float b0 = min(a0, a1);
+    	float b1 = max(a0, a1);
+    	d0 = clamp(d0, b0, b1);
+    	d1 = clamp(d1, b0, b1);
+    } else {
+    	float m = min(X0.y, X1.y);
+    	float M = max(X0.y, X1.y);
+    	if (Xf.y<= m || Xf.y >= M) {
+    		d0 = 0.0;
+    		d1 = 0.0;
+    	}
+    }
+
+
+    if (abs(N.z) > CROP_CUTOFF) {
+    	float a0 = (X0.z - Xf.z) / N.z;
+    	float a1 = (X1.z - Xf.z) / N.z;
+    	float b0 = min(a0, a1);
+    	float b1 = max(a0, a1);
+    	d0 = clamp(d0, b0, b1);
+    	d1 = clamp(d1, b0, b1);
+    } else {
+    	float m = min(X0.z, X1.z);
+    	float M = max(X0.z, X1.z);
+    	if (Xf.z <= m || Xf.z >= M) {
+    		d0 = 0.0;
+    		d1 = 0.0;
+    	}
+    }
+
+    // Find the location of the segment ends in texture space
+    vec3 U0 = (Xf + d0 * N) / vol_L;
+    vec3 U1 = (Xf + d1 * N) / vol_L;
+    delta = U1 - U0;
+
+    // Length of the ray in voxels
+    float Lv = length(delta * vol_size);
+    delta *= step_size / Lv;
+
     // Round up the number of steps... sort of.  If needed, the last step can
     //  be 20% bigger to cover the volume.
-    int num_steps = int(l / step_size + 0.8);
-    float last_step_size = l - (num_steps - 1) * step_size;
+    int num_steps = int(Lv / step_size + 0.8);
+    float last_step_size = Lv - (num_steps - 1) * step_size;
 
-    // float color_mult = pow(2.0, exposure);
+    // Exposure adjustment
     vec4 color_mult = vec4(
       pow(2, exposure1 + exposure),
       pow(2, exposure2 + exposure),
       pow(2, exposure3 + exposure),
       1.0);
 
-    // Start 1/2 a step in
-    X += + 0.5 * dX;
+    // Start 1/2 a step in, and with no color
+    vec3 U = U0 + 0.5 * delta;
+    vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
+
+    // Modified opacity
+    float mod_opacity = step_size * density / glow;
+
+    // Shortcut for testing the ray
+    // float x = Lv / 100;
+    // vec3 int_color = sin(vec3(x*6.15, x*7.55, x*8.51));
+    // int_color = int_color * int_color;
+    // gl_FragColor = vec4(int_color, 1.0);
+    // return;
 
     // Check to make sure that our ray makes sense; if not abort to
     //    avoid ending up in a super long loop.
-    if (l < 1.1*length(vol_size)) {
+    if (Lv < 1.1*length(vol_size)) {
         for (int i = num_steps; i > 0; i --) {
             // Since the last step is a little differently sized, adjust
             //    the opacity accordingly.
             if (i == 1) {mod_opacity = last_step_size * density / glow;}
 
             // Map the coordinates, and get the texture at the current location
-            Xm = distortion_map(X);
-            voxel_color = color_mult * texture3D(vol_texture, Xm).<<COLOR_REMAP>>;
-            // voxel_color.a = clamp(voxel_color.a, 0.0, 1.0);
+            vec3 Uc = distortion_map(U);
+            vec4 voxel_color = texture3D(vol_texture, Uc).<<COLOR_REMAP>>;
 
-            // #ifdef VOL_SHOW_ISOSURFACE
-            //
-            // #endif
+            // Often the volumes are given with gamma=2 for optimal storage
+            #ifdef GAMMA2_ADJUST
+                voxel_color *= voxel_color;
+            #endif
 
-            vec4 cc = cloud_color(voxel_color, X);
+            // Exposure adjustment
+            voxel_color *= color_mult;
+
+            // Compute cloud color at this locations
+            vec4 cc = cloud_color(voxel_color, U);
+
+            // Accumulate the cloud color
             cc.a *= mod_opacity * (1.0 - clamp(color.a, 0.0, 1.0));
             cc.rgb *= cc.a;
             color += cc;
 
-            X += dX;
+            // Step forward
+            U += delta;
         }
     }
 
@@ -235,5 +331,4 @@ void main() {
     // }
 
     gl_FragColor = pow(color, vec4(gamma_correct, gamma_correct, gamma_correct, 1.0));
-    // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
 }

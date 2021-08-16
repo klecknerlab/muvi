@@ -47,6 +47,11 @@ class BoolViewSetting(QCheckBox):
         self.stateChanged.connect(lambda state: gl_display.update_params(
             **{varname:(state==Qt.Checked)}))
 
+    def silent_update(self, val):
+        self.blockSignals(True)
+        self.setChecked(val)
+        self.blockSignals(False)
+
 
 class LinearViewSetting(QDoubleSpinBox):
     def __init__(self, gl_display, varname, default, minval, maxval, step, index=None, decimals=None, parent=None):
@@ -68,6 +73,10 @@ class LinearViewSetting(QDoubleSpinBox):
 
         self.valueChanged.connect(change_func)
 
+    def silent_change(self, val):
+        self.blockSignals(True)
+        self.setValue(val)
+        self.blockSignals(False)
 
     def set_from_slider(self, val, slider_max):
         minval = self.minumum()
@@ -86,6 +95,11 @@ class IntViewSetting(QSpinBox):
 
         self.valueChanged.connect(lambda val: gl_display.update_params(
             **{varname:val, 'force_update':force_update}))
+
+    def silent_change(self, val):
+        self.blockSignals(True)
+        self.setValue(val)
+        self.blockSignals(False)
 
     def advance(self):
         maxval = self.maximum()
@@ -144,7 +158,6 @@ class OptionsViewSetting(QComboBox):
         self.currentIndexChanged.connect(lambda index: gl_display.update_params(
              **{varname:self.options[index], 'force_update':force_update}))
 
-
     def update_options(self, selected=None):
         if selected is None:
             selected = self.options[self.currentIndex()]
@@ -158,6 +171,12 @@ class OptionsViewSetting(QComboBox):
 
             if sn == selected:
                 self.setCurrentIndex(i)
+
+    def silent_change(self, val):
+        self.blockSignals(True)
+        self.update_options(selected=self.gl_display.get(self.varname))
+        self.blockSignals(False)
+
 
 def fromQColor(qc, has_alpha):
     if has_alpha:
@@ -415,8 +434,8 @@ class ViewerApp(QMainWindow):
 
         for i, label in enumerate(['x', 'y', 'z']):
             dim = 256
-            self.control_widgets[label + '0'] = LinearViewSetting(self.gl_display, "X0", 0, 0, dim, 64, index=i)
-            self.control_widgets[label + '1'] = LinearViewSetting(self.gl_display, "X1", dim, 0, dim, 64, index=i)
+            self.control_widgets[label + '0'] = LinearViewSetting(self.gl_display, "X0", 0, 0, dim, 10, index=i)
+            self.control_widgets[label + '1'] = LinearViewSetting(self.gl_display, "X1", dim, 0, dim, 10, index=i)
 
         self.view_options.add_row("Left Edge:", self.control_widgets['x0'])
         self.view_options.add_row("Right Edge:", self.control_widgets['x1'])
@@ -541,7 +560,7 @@ class ViewerApp(QMainWindow):
 
         self.show()
 
-        print(self.control_widgets.keys())
+        # print(self.control_widgets.keys())
 
         if volume:
             self.open_volume(volume)
@@ -598,7 +617,8 @@ class ViewerApp(QMainWindow):
             vol = VolumetricMovie(vol)
 
         if isinstance(vol, VolumetricMovie):
-            shape = vol[0].shape
+            # shape = vol[0].shape
+            shape = vol.info.get_list('Lx', 'Ly', 'Lz')
             frames = len(vol)
 
             self.control_widgets['frame'].setMaximum(len(vol))

@@ -41,6 +41,7 @@ import base64
 import glob
 from collections import OrderedDict
 import warnings
+# import time
 
 # ----------------------------------------------------------
 # Paths for finding critical files
@@ -139,6 +140,14 @@ _BOX_FACES = np.array([
 
 _BOX_EDGES = [(i, j) for i in range(8) for j in range(8) if ((i < j) and sum((_UNIT_BOX[i] - _UNIT_BOX[j])**2) == 1.)]
 
+_FS_QUAD = np.array([
+    (-1, -1, 0),
+    (+1, -1, 0),
+    (+1, +1, 0),
+    (-1, +1, 0),
+], dtype='f')
+_FS_QUAD_FACES = np.arange(4, dtype='u4')
+
 #--------------------------------------------------------
 # List of Parameters for Display
 #--------------------------------------------------------
@@ -174,8 +183,8 @@ class Param:
 
 
 Param('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'))
-Param('X0', 'X0', 'view', 'view', np.zeros(3, dtype='f'))
-Param('X1', 'X1', 'view', 'view', np.ones(3, dtype='f') * 256)
+Param('X0', 'X0', 'view', 'uniform', np.zeros(3, dtype='f'))
+Param('X1', 'X1', 'view', 'uniform', np.ones(3, dtype='f') * 100)
 Param('center', 'Center', 'view', 'view', np.ones(3, dtype='f') * 128)
 Param('scale', 'Scale', 'view', 'view', 1.0, logstep=1.25)
 Param('fov', 'FOV', 'view', 'view', 30.0, min=0.0, max=120.0, step=5.0)
@@ -213,12 +222,15 @@ Param('step_size', 'Render Step', 'advanced', 'uniform', 1.0,
         min=0.1, max=2, logstep=2**(1/2))
 Param('perspective_xfact', 'Persp. X Coeff.', 'advanced', 'uniform', 0.0,
         min=-.5, max=.5, step=1E-2)
+Param('perspective_yfact', 'Persp. Y Coeff.', 'advanced', 'uniform', 0.0,
+                min=-.5, max=.5, step=1E-2)
 Param('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0,
         min=-.5, max=.5, step=1E-2)
 Param('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba',
             options=_color_remaps)
 Param('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap',
         options=SUBSHADER_NAMES['cloud_color'])
+Param('gamma2', 'Raw Data Gamma 2', 'advanced', 'shader', False)
 
 
 #--------------------
@@ -246,6 +258,9 @@ class View:
     height : int (default: 1000), the height of the view
     os_width : int (default: 1920), the width of the off-screen view (used for screenshots)
     os_height : int (default: 1080), the height of the off-screen view
+
+    Note that X0, X1, and center are in physical units, i.e. the units used
+    by Lx, Ly, and Lz in the volume.
     '''
 
     view_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='view'}
@@ -287,7 +302,7 @@ class View:
         'colormap2_texture': 3,
         'colormap3_texture': 4,
         'vol_size': np.ones(3, dtype='f')*256,
-        'vol_delta': np.ones(3, dtype='f')/256,
+        'vol_L': np.ones(3, dtype='f')*256,
         'grad_step': 1.0,
         'gamma_correct': 1/2.2,
     }
@@ -331,7 +346,7 @@ class View:
 
         self.texture_to_color_shader = ShaderProgram(fragment_shader='''
             void main() {
-                gl_FragColor = vec4(gl_TexCoord[0].xyz, gl_FragCoord.z);
+                gl_FragColor = vec4(gl_TexCoord[0].xyz, 1.0);
             }
         ''')
 
@@ -413,9 +428,9 @@ class View:
             if distortion_model is None:
                 distortion_model = '''
                     vec3 distortion_map(in vec3 U) {
+                        float exy = perspective_xfact * (1.0 - 2.0 * U.x) + perspective_yfact * (1.0 - 2.0 * U.y);
                         float ez = perspective_zfact * (1.0 - 2.0 * U.z);
-                        float ex = perspective_xfact * (1.0 - 2.0 * U.x);
-                        return vec3((U.x + ez) / (1.0 + 2.0*ez), (U.y + ez) / (1.0 + 2.0*ez), (U.z + ex) / (1.0 + 2.0*ex));
+                        return vec3((U.x + ez) / (1.0 + 2.0*ez), (U.y + ez) / (1.0 + 2.0*ez), (U.z + exy) / (1.0 + 2.0*exy));
                     }
 
                     mat4x3 distortion_map_gradient(in vec3 X){
@@ -433,6 +448,9 @@ class View:
 
             if self.params['show_isosurface']:
                 code.append('#define VOL_SHOW_ISOSURFACE 1')
+
+            if self.params['gamma2']:
+                code.append('#define GAMMA2_ADJUST 1')
 
             for n in range(1, MAX_CHANNELS + 1):
                 if self.params[f'channel{n}']:
@@ -573,18 +591,23 @@ class View:
 
             self.volume_texture = texture_from_array(vol, wrap=GL_CLAMP_TO_EDGE)
 
+        gamma = self.volume.info.get('gamma', 1.0)
+        self.params['gamma2'] = gamma > 1.95 and gamma < 2.05
+
         self.reset_view()
 
 
     def reset_view(self):
         if hasattr(self, 'volume'):
             vs = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f')
+            L = np.array(self.volume.info.get_list('Lx', 'Ly', 'Lz'), dtype='f')
         else:
             vs = np.ones(3, dtype='f')
+            L = 100 * vs
 
-        self.update_params(vol_size=vs, vol_delta=1./vs, center=0.5*vs,
-                           X1=vs, X0=np.zeros(3, dtype='f'),
-                           scale=float(2.0 / mag(vs)))
+        self.update_params(vol_size=vs, vol_L=L, center=0.5*L,
+                           X1=L, X0=np.zeros(3, dtype='f'),
+                           scale=float(2.0 / mag(L)))
 
 
     def frame(self, frame):
@@ -671,16 +694,15 @@ class View:
             self.current_volume_shader.bind()
             self.current_volume_shader.set_uniforms(**update_uniforms)
 
-
     def resize(self, width, height):
         '''Convenience command to update the width and height.'''
         self.width = width
         self.height = height
 
 
-    def fov_correction(self):
-        '''Computes the half height of the viewport in OpenGL units.'''
-        return np.tan(self.params['fov']*np.pi/360) if self.params['fov'] > 0 else 1.
+    # def fov_correction(self):
+    #     '''Computes the half height of the viewport in OpenGL units.'''
+    #     return np.tan(self.params['fov']*np.pi/360) if self.params['fov'] > 1E-6 else 1.
 
 
     def draw(self, z0=0.01, z1=10.0, offscreen=False, save_image=False, return_image=True):
@@ -694,6 +716,24 @@ class View:
         offscreen : bool, if True, renders to the offscreen buffer instead of
            the onscreen one.  (Usually used for screenshots/movies.)
         '''
+
+        # Framebuffers:
+        #  default_fbo: the display
+        #  back_buffer: stores texture coordinate for the volume render
+        #      * RGB coordinate is physical coordinates of texture
+        #      * Alpha coordinate is 1 if there is a
+        #  display_buffer: the buffer we are rendering to (may be default_fbo...)
+
+        # Draw process:
+        # 1. If models present:
+        #   Render the models to display_buffer
+        # 2. If volume + models present:
+        #   Render the models to the back_buffer (using texture_to_color_shader)
+        # 3. If volume:
+        #   Render the back of the texture cube to the back buffer
+        #   Render the the front
+
+        # start = time.time()
 
         if not getattr(self, '_init_gl', False):
             self.init_gl()
@@ -749,17 +789,21 @@ class View:
 
         aspect = width/height
         if self.params['fov'] > 1E-6:
-            ymax = z0 * np.tan(self.params['fov']*np.pi/360)
+            fov_correction = np.tan(self.params['fov']*np.pi/360)
+            ymax = z0 * fov_correction
             glFrustum(-ymax*aspect, ymax*aspect, -ymax, ymax, z0, z1)
         else:
+            fov_correction = 1
             glOrtho(-aspect, aspect, -1, 1, z0, z1)
 
         # Clear the display and set the view matrix
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
 
+
         R4 = np.eye(4, dtype='f')
-        R4[:3, :3] = self.params['R'] * self.params['scale'] * self.fov_correction()
+        scale = self.params['scale'] * fov_correction
+        R4[:3, :3] = self.params['R'] * scale
 
         # These get applied in the opposite order!
         glTranslatef(0, 0, -1) # Move it back to z = -1
@@ -779,7 +823,7 @@ class View:
         #   the back surface.
         self.texture_to_color_shader.bind()
 
-        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClearColor(0.0, 0.0, 0.0, 0.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         # Only draw back faces!
@@ -816,17 +860,20 @@ class View:
 
         if self.volume is not None:
             self.current_volume_shader.bind()
+            camera_loc = self.params['center'] + self.params['R'][:3, 2] / scale
+            self.current_volume_shader.set_uniforms(camera_loc=camera_loc)
+
         else:
             # If we don't have a volume bound, we can draw something neat!
             self.interference_shader.bind()
 
-        # self.texture_to_color_shader.bind()
-
-        # Draw just the front faces this time.
-        glCullFace(GL_BACK)
-
-        # Do it!
-        self._texture_cube()
+        # Clear all matrices to draw a full screen quad
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        glDisable(GL_CULL_FACE)
+        self._fs_quad()
 
         if save_image or return_image:
             img = np.frombuffer(glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE), dtype='u1').reshape(height, width, -1)
@@ -835,8 +882,11 @@ class View:
         if display_buffer_id != default_fbo:
             glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)
 
+        # print(time.time() - start)
+
         if save_image or return_image:
             return img
+
 
     #
     # def save_offscreen_image(self, fn):
@@ -883,3 +933,11 @@ class View:
 
         glDisableClientState(GL_VERTEX_ARRAY)
         glDisableClientState(GL_TEXTURE_COORD_ARRAY)
+
+    def _fs_quad(self):
+        glEnableClientState(GL_VERTEX_ARRAY)
+
+        glVertexPointer(3, GL_FLOAT, 0, _FS_QUAD)
+        glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, list(_FS_QUAD_FACES))
+
+        glDisableClientState(GL_VERTEX_ARRAY)
