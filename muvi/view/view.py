@@ -157,7 +157,7 @@ _FS_QUAD_FACES = np.arange(4, dtype='u4')
 
 PARAMS = OrderedDict()
 
-class Param:
+class ViewParam:
     def __init__(self, name, display_name,  cat, vcat, default, min=None, max=None, step=None, logstep=None, options=None):
         self.name = name
         self.display_name = display_name
@@ -182,55 +182,77 @@ class Param:
 
 
 
-Param('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'))
-Param('X0', 'X0', 'view', 'uniform', np.zeros(3, dtype='f'))
-Param('X1', 'X1', 'view', 'uniform', np.ones(3, dtype='f') * 100)
-Param('center', 'Center', 'view', 'view', np.ones(3, dtype='f') * 128)
-Param('scale', 'Scale', 'view', 'view', 1.0, logstep=1.25)
-Param('fov', 'FOV', 'view', 'view', 30.0, min=0.0, max=120.0, step=5.0)
+ViewParam('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'))
+ViewParam('X0', 'X0', 'view', 'uniform', np.zeros(3, dtype='f'))
+ViewParam('X1', 'X1', 'view', 'uniform', np.ones(3, dtype='f') * 100)
+ViewParam('center', 'Center', 'view', 'view', np.ones(3, dtype='f') * 128)
+ViewParam('scale', 'Scale', 'view', 'view', 1.0, logstep=1.25)
+ViewParam('fov', 'FOV', 'view', 'view', 30.0, min=0.0, max=120.0, step=5.0)
 
-Param('frame', 'Frame', 'playback', 'view', 0)
+ViewParam('frame', 'Frame', 'playback', 'view', 0)
 
 # Opacity replaced by "density"
-# Param('opacity', 'Cloud Opacity', 'render', 'uniform',
+# ViewParam('opacity', 'Cloud Opacity', 'render', 'uniform',
         # 0.5, min=1E-3, max=2, logstep=10**(1/8))
 
-Param('density', 'Density', 'render', 'uniform',
+ViewParam('density', 'Density', 'render', 'uniform',
         0.5, min=1E-3, max=2, logstep=10**(1/8))
-Param('glow', 'Glow', 'render', 'uniform',
+ViewParam('glow', 'Glow', 'render', 'uniform',
         1.0, min=1, max=100, logstep=10**(1/4))
 
 
 MAX_CHANNELS = 3
 _default_colormaps = ['inferno', 'viridis', 'cividis']
 
+# _isocolor_names = {
+#     'solid': 'Solid',
+#     'cm1': 'Channel 1 Colormap',
+#     'cm2': 'Channel 2 Colormap',
+#     'cm3': 'Channel 2 Colormap',
+# }
+
 for n in range(1, MAX_CHANNELS + 1):
-    Param(f'channel{n}', f'Channel {n}', 'render', 'shader', (n == 1))
-    Param(f'colormap{n}', 'Colormap', 'render', 'view', _default_colormaps[n-1],
+    ViewParam(f'channel{n}', f'Channel {n}', 'render', 'shader', (n == 1))
+    ViewParam(f'colormap{n}', 'Colormap', 'render', 'view', _default_colormaps[n-1],
         options=_colormap_names)
-    Param(f'exposure{n}', 'Exposure', 'render', 'uniform',
+    ViewParam(f'exposure{n}', 'Exposure', 'render', 'uniform',
         0.0, min=-5, max=5, step=0.5)
 
-Param('show_isosurface', 'Show Isosurface', 'hidden', 'shader', False)
-Param('iso_offset', 'Isosurface Offset', 'hidden', 'uniform', 0.5)
-Param('iso_level', 'Isosurface Level', 'hidden', 'shader', 'single')
-Param('iso_color', 'Isosurface Color', 'hidden', 'shader', 'shiny')
-Param('exposure', 'Exposure (stops)', 'hidden', 'uniform',
-        0.0, min=-5, max=5, step=0.5)
+    ViewParam(f'iso{n}_active', f'Isosurface {n}', 'isosurface', 'shader', False)
+    ViewParam(f'iso{n}_level', 'Level', 'isosurface', 'uniform', 0.5, min=0.0,
+        max=1.0, step=0.1)
+    # ViewParam(f'iso{n}_color', 'Color', 'isosurface', 'shader', 'solid',
+        # options=_isocolor_names)
+    color = np.zeros(3, dtype='f')
+    color[n-1] = 1
+    ViewParam(f'iso{n}_color', 'Color', 'isosurface', 'uniform', color)
+    ViewParam(f'iso{n}_opacity', 'Opacity', 'isosurface', 'uniform', 0.3, min=0.0,
+        max=1.0, step=0.1)
 
-Param('step_size', 'Render Step', 'advanced', 'uniform', 1.0,
+
+
+# ViewParam('show_isosurface', 'Show Isosurface', 'hidden', 'shader', False)
+# ViewParam('iso_offset', 'Isosurface Offset', 'hidden', 'uniform', 0.5)
+# ViewParam('iso_level', 'Isosurface Level', 'hidden', 'shader', 'single')
+# ViewParam('iso_color', 'Isosurface Color', 'hidden', 'shader', 'shiny')
+# ViewParam('exposure', 'Exposure (stops)', 'hidden', 'uniform',
+        # 0.0, min=-5, max=5, step=0.5)
+
+
+
+ViewParam('step_size', 'Render Step', 'advanced', 'uniform', 1.0,
         min=0.1, max=2, logstep=2**(1/2))
-Param('perspective_xfact', 'Persp. X Coeff.', 'advanced', 'uniform', 0.0,
+ViewParam('perspective_xfact', 'Persp. X Coeff.', 'advanced', 'uniform', 0.0,
         min=-.5, max=.5, step=1E-2)
-Param('perspective_yfact', 'Persp. Y Coeff.', 'advanced', 'uniform', 0.0,
+ViewParam('perspective_yfact', 'Persp. Y Coeff.', 'advanced', 'uniform', 0.0,
                 min=-.5, max=.5, step=1E-2)
-Param('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0,
+ViewParam('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0,
         min=-.5, max=.5, step=1E-2)
-Param('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba',
+ViewParam('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba',
             options=_color_remaps)
-Param('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap',
+ViewParam('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap',
         options=SUBSHADER_NAMES['cloud_color'])
-Param('gamma2', 'Raw Data Gamma 2', 'advanced', 'shader', False)
+ViewParam('gamma2', 'Raw Data Gamma 2', 'advanced', 'shader', False)
 
 
 #--------------------
@@ -433,12 +455,11 @@ class View:
                         return vec3((U.x + ez) / (1.0 + 2.0*ez), (U.y + ez) / (1.0 + 2.0*ez), (U.z + exy) / (1.0 + 2.0*exy));
                     }
 
-                    mat4x3 distortion_map_gradient(in vec3 X){
-                        mat4x3 map_grad;
-                        map_grad[0] = X;
-                        map_grad[1] = vec3(1.0, 0.0, 0.0);
-                        map_grad[2] = vec3(0.0, 1.0, 0.0);
-                        map_grad[3] = vec3(0.0, 0.0, 1.0);
+                    mat3 distortion_map_gradient(in vec3 X) {
+                        mat3 map_grad;
+                        map_grad[0] = vec3(1.0, 0.0, 0.0);
+                        map_grad[1] = vec3(0.0, 1.0, 0.0);
+                        map_grad[2] = vec3(0.0, 0.0, 1.0);
 
                         return map_grad;
                     }
@@ -446,8 +467,8 @@ class View:
 
             code = [distortion_model]
 
-            if self.params['show_isosurface']:
-                code.append('#define VOL_SHOW_ISOSURFACE 1')
+            # if self.params['show_isosurface']:
+            #     code.append('#define VOL_SHOW_ISOSURFACE 1')
 
             if self.params['gamma2']:
                 code.append('#define GAMMA2_ADJUST 1')
@@ -455,6 +476,8 @@ class View:
             for n in range(1, MAX_CHANNELS + 1):
                 if self.params[f'channel{n}']:
                     code.append(f'#define CLOUD{n}_ACTIVE 1')
+                if self.params[f'iso{n}_active']:
+                    code.append(f'#define ISOSURFACE{n} 1')
 
             # Find the cloud_color, iso_level, and iso_color sources
             for subshader in SUBSHADER_TYPES:
@@ -468,6 +491,10 @@ class View:
                 code.append(sources[name])
 
             code = self.source_template.replace('<<VOL INIT>>', '\n'.join(code)).replace('<<COLOR_REMAP>>', self.params['color_remap'])
+
+            for n in range(1, MAX_CHANNELS + 1):
+                code = code.replace(f'<<ISO{n}_COLOR>>',
+                    f'vec4(iso_color.r, iso_color.g, iso_color.b, iso{n}_opacity)')
 
             self.current_volume_shader = ShaderProgram(fragment_shader=code, uniforms=uniforms)
             self.cached_shaders[key] = self.current_volume_shader

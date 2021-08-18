@@ -22,6 +22,7 @@ Additionally a block of code defining uniforms and functions gets inserted at
 
 #version 120
 #extension GL_ARB_texture_rectangle : enable
+// #extension GL_EXT_gpu_shader4 : enable
 
 #define CROP_CUTOFF 0.0000001
 
@@ -38,37 +39,62 @@ uniform vec3 vol_size = vec3(100.0, 100.0, 100.0);
 
 uniform vec3 camera_loc = vec3(0.0, 0.0, 0.0);
 
-uniform float grad_step = 1.0;
 uniform float gamma_correct = 1.0/2.2;
-uniform float exposure = 0.0;
 uniform float exposure1 = 0.0;
 uniform float exposure2 = 0.0;
 uniform float exposure3 = 0.0;
-
-// uniform float opacity = 0.1; // VIEW_VAR: logfloat(0.05, 1E-4, 1.0, 2, 2)
 uniform float density = 0.1;
 uniform float glow = 1.0;
 uniform float step_size = 1.0;
-uniform float iso_offset = 0.5;
-// uniform float iso_level = 0.5; // VIEW_VAR: float(0.25, 0.0, 1.0, 0.05)
-// uniform vec4 surface_color = vec4(1.0, 0.0, 0.0, 0.5); // VIEW_VAR: color(1.0, 0.0, 0.0, 0.5)
-// uniform vec3 tint; // VIEW_VAR: color(0.0, 0.3, 0.3)
-// uniform float shine = 0.2; // VIEW_VAR: float(0.2, 0.0, 1.0, 0.05)
-// uniform float grid_thickness; // VIEW_VAR: logfloat(0.5, 0.1, 10.0, 10, 5)
-// uniform float grid_spacing; // VIEW_VAR: logfloat(8.0, 1.0, 1024.0, 2, 1)
-// uniform vec4 grid_color; // VIEW_VAR: color(0.0, 0.0, 0.0, 1.0)
+
+uniform float iso1_level = 0.5;
+uniform float iso2_level = 0.5;
+uniform float iso3_level = 0.5;
+uniform vec3 iso1_color = vec3(1.0, 0.0, 0.0);
+uniform vec3 iso2_color = vec3(0.0, 1.0, 0.0);
+uniform vec3 iso3_color = vec3(0.0, 0.0, 1.0);
+uniform float iso1_opacity = 0.5;
+uniform float iso2_opacity = 0.5;
+uniform float iso3_opacity = 0.5;
+uniform float isosurface_shine = 0.2;
 
 uniform float perspective_xfact = 0.0;
 uniform float perspective_yfact = 0.0;
 uniform float perspective_zfact = 0.0;
 
 
+
 vec3 distortion_map(in vec3 U);
-mat4x3 distortion_map_gradient(in vec3 U);
-vec4 iso_color(in vec4 voxel_color, in mat4x3 grad, in int level);
-int iso_level(in vec4 color);
+mat3 distortion_map_gradient(in vec3 U);
 vec4 cloud_color(in vec4 color, in vec3 X);
 
+vec4 accumulate_isosurface(vec4 color, vec4 surf_color, vec3 N, vec3 Ng) {
+    float dp = dot(N, Ng);
+    vec4 sc = surf_color;
+
+    // Increase the opacity at glancing angles
+    // Mimics what happens for dielectric interfaces, and looks more physical
+    sc.a += (sc.a * 2 * (1.0 - abs(dp))) * (1.0 - sc.a);
+
+    // Clamp the brightness
+    sc = min(sc, 1.0);
+
+    // Darken the back side of the surface
+    sc.rgb *= (dp > 0.0) ? dp : -0.5 * dp;
+
+    // Add specular reflection
+    sc.rgb += isosurface_shine * pow(abs(dp), 30.0);
+
+    // Modify the opacity based on what is already in front of this color
+    sc.a *= 1.0 - clamp(color.a, 0.0, 1.0);
+    sc.rgb *= sc.a;
+
+    // Add in the new color
+    return color + sc;
+}
+
+// #define ISO_ABOVE(C) ivec3((((ISOSURFACE1 && (C.x > iso1_level)) ? 1 : 0)), 0, 0)
+//+ (((ISOLEVEL & 2) && (C.y > iso2_level)) ? 2 : 0) + (((ISOLEVEL & 4) && (C.z > iso3_level)) ? 4 : 0))
 
 // #define GAMMA2_ADJUST 1
 
@@ -214,7 +240,6 @@ void main() {
     	}
     }
 
-
     if (abs(N.z) > CROP_CUTOFF) {
     	float a0 = (X0.z - Xf.z) / N.z;
     	float a1 = (X1.z - Xf.z) / N.z;
@@ -247,19 +272,31 @@ void main() {
 
     // Exposure adjustment
     vec4 color_mult = vec4(
-      pow(2, exposure1 + exposure),
-      pow(2, exposure2 + exposure),
-      pow(2, exposure3 + exposure),
+      pow(2, exposure1),
+      pow(2, exposure2),
+      pow(2, exposure3),
       1.0);
 
     // Start 1/2 a step in, and with no color
     vec3 U = U0 + 0.5 * delta;
     vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
 
+    // Keep track if we are above or below the isosurface(s)
+    // ivec3 last_level = vec3(-1, -1, -1);
+    #ifdef ISOSURFACE1
+        bool last_above1 = false;
+    #endif
+    #ifdef ISOSURFACE2
+        bool last_above2 = false;
+    #endif
+    #ifdef ISOSURFACE3
+        bool last_above3 = false;
+    #endif
+
     // Modified opacity
     float mod_opacity = step_size * density / glow;
 
-    // Shortcut for testing the ray
+    // Shortcut render for testing the ray clipping
     // float x = Lv / 100;
     // vec3 int_color = sin(vec3(x*6.15, x*7.55, x*8.51));
     // int_color = int_color * int_color;
@@ -293,6 +330,84 @@ void main() {
             cc.a *= mod_opacity * (1.0 - clamp(color.a, 0.0, 1.0));
             cc.rgb *= cc.a;
             color += cc;
+
+            // Are we also testing isosurfaces?
+            #if defined ISOSURFACE1 || defined ISOSURFACE2 || defined ISOSURFACE3
+                // Check each axis to see if we went from above to below.
+                bool flipped = false;
+                bool above;
+
+                #ifdef ISOSURFACE1
+                    above = voxel_color.x > iso1_level;
+                    bool flipped1 = above != last_above1;
+                    flipped = flipped || flipped1;
+                    last_above1 = above;
+                #endif
+
+                #ifdef ISOSURFACE2
+                    above = voxel_color.y > iso2_level;
+                    bool flipped2 = above != last_above2;
+                    flipped = flipped || flipped2;
+                    last_above2 = above;
+                #endif
+
+                #ifdef ISOSURFACE3
+                    above = voxel_color.z > iso3_level;
+                    bool flipped3 = above != last_above3;
+                    flipped = flipped || flipped3;
+                    last_above3 = above;
+                #endif
+
+                // Only compute isosurfaces if this is not the first point
+                //    AND at least one point flipped.
+                // Note: the gradient calculation is expensive, so don't do
+                //    it unless needed!
+                if ((i < num_steps) && flipped) {
+                    // We found an isosurface!
+                    // Let's compute the gradient first.
+                    mat3 mg = distortion_map_gradient(U);
+                    mat3 gradient;
+
+                    // Derivative in each direction is a 2-point stencil
+                    // Do all colors at once.
+                    // Note: since we will normalize the gradient, we can ignore
+                    // exposure, gamma, etc.
+                    for (int j = 0; j < 3; j++) {
+                        mg[j] /= vol_size;
+                        // mg[j] *= 0.5;
+                        gradient[j] = texture3D(vol_texture, Uc + mg[j]).<<COLOR_REMAP>>.rgb -
+                            texture3D(vol_texture, Uc - mg[j]).<<COLOR_REMAP>>.rgb;
+                    }
+                    gradient = transpose(gradient);
+
+                    #ifdef ISOSURFACE1
+                        if (flipped1) {
+                            color = accumulate_isosurface(
+                                        color, vec4(iso1_color, iso1_opacity), N,
+                                        normalize(gradient[0])
+                                    );
+                        }
+                    #endif
+
+                    #ifdef ISOSURFACE2
+                        if (flipped2) {
+                            color = accumulate_isosurface(
+                                        color, vec4(iso2_color, iso2_opacity), N,
+                                        normalize(gradient[1])
+                                    );
+                        }
+                    #endif
+
+                    #ifdef ISOSURFACE3
+                        if (flipped3) {
+                            color = accumulate_isosurface(
+                                        color, vec4(iso3_color, iso3_opacity), N,
+                                        normalize(gradient[2])
+                                    );
+                        }
+                    #endif
+                }
+            #endif
 
             // Step forward
             U += delta;

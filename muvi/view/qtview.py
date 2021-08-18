@@ -448,16 +448,22 @@ class ViewerApp(QMainWindow):
                                               isOpen=True)
         self.v_box.addWidget(self.render_options)
 
-        self.advanced_options = CollapsableVBox(self, "Advanced View Options",
+        self.isosurface_options = CollapsableVBox(self, "Isosurface Options",
                                                 isOpen=True)
+        self.v_box.addWidget(self.isosurface_options)
+
+
+        self.advanced_options = CollapsableVBox(self, "Advanced View Options",
+                                                isOpen=False)
         self.v_box.addWidget(self.advanced_options)
 
         for name, param in view.PARAMS.items():
             if param.cat == 'render':
                 self.add_param(name, self.render_options)
+            elif param.cat == 'isosurface':
+                self.add_param(name, self.isosurface_options)
             elif param.cat == 'advanced':
                 self.add_param(name, self.advanced_options)
-
 
         self.v_box.addStretch()
 
@@ -583,6 +589,8 @@ class ViewerApp(QMainWindow):
             setting = OptionsViewSetting(self.gl_display, name, param.default)
         elif param.type == bool:
             setting = BoolViewSetting(self.gl_display, name, param.default)
+        elif param.type == np.ndarray:
+            setting = ColorViewSetting(self.gl_display, name, param.default)
         else:
             raise ValueError(f'Incorrect parameter type ({param.type.__name__}) for view setting')
 
@@ -625,7 +633,7 @@ class ViewerApp(QMainWindow):
             self.control_widgets['frame'].setValue(0)
 
             for i, label in enumerate(['x', 'y', 'z']):
-                dim = shape[2-i]
+                dim = shape[i]
                 x0 = self.control_widgets[label+'0']
                 x1 = self.control_widgets[label+'1']
 
