@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-# Copyright 2020 Dustin Kleckner
+# Copyright 2021 Dustin Kleckner
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -79,7 +79,7 @@ class LinearViewSetting(QDoubleSpinBox):
         self.blockSignals(False)
 
     def set_from_slider(self, val, slider_max):
-        minval = self.minumum()
+        minval = self.minimum()
         maxval = self.maximum()
         self.setValue(minval + (val/slider_max)*(maxval-minval))
 
