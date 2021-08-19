@@ -819,9 +819,13 @@ class View:
             fov_correction = np.tan(self.params['fov']*np.pi/360)
             ymax = z0 * fov_correction
             glFrustum(-ymax*aspect, ymax*aspect, -ymax, ymax, z0, z1)
+            camera_correction = 1
+
         else:
             fov_correction = 1
             glOrtho(-aspect, aspect, -1, 1, z0, z1)
+            camera_correction = 1E3
+
 
         # Clear the display and set the view matrix
         glMatrixMode(GL_MODELVIEW)
@@ -887,7 +891,7 @@ class View:
 
         if self.volume is not None:
             self.current_volume_shader.bind()
-            camera_loc = self.params['center'] + self.params['R'][:3, 2] / scale
+            camera_loc = self.params['center'] + self.params['R'][:3, 2] / scale * camera_correction
             self.current_volume_shader.set_uniforms(camera_loc=camera_loc)
 
         else:
