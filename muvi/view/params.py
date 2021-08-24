@@ -212,6 +212,8 @@ PARAM_CATAGORIES['View'] = [
         tooltip='The field of view of the display, measured in degrees.  Setting this to 0 gives an orthographic display.'),
     ViewParam('framerate', 'Playback Rate', 'playback', 'view', 30, 1, 120, 10,
         tooltip='The playback rate in volumes/second.'),
+    ViewParam('background_color', 'Background Color', 'view', 'view', np.array([0, 0, 0, 1], dtype='f'), param_type='color',
+        tooltip='The background color of the display.')
 ]
 
 PARAM_CATAGORIES['Adv.'] = [
