@@ -585,14 +585,14 @@ class ViewerApp(QMainWindow):
         elif param.type == int:
             setting = IntViewSetting(self.gl_display, name, param.default,
                                      param.min, param.max, param.step)
-        elif param.type == str and hasattr(param, 'options'):
+        elif param.type == 'options':
             setting = OptionsViewSetting(self.gl_display, name, param.default)
         elif param.type == bool:
             setting = BoolViewSetting(self.gl_display, name, param.default)
-        elif param.type == np.ndarray:
+        elif param.type == 'color':
             setting = ColorViewSetting(self.gl_display, name, param.default)
         else:
-            raise ValueError(f'Incorrect parameter type ({param.type.__name__}) for view setting')
+            raise ValueError(f'Incorrect parameter type ({param.type if isinstance(param.type, str) else param.type.__name__}) for view setting')
 
         vbox.add_row(param.display_name + ":", setting)
 
@@ -645,7 +645,7 @@ class ViewerApp(QMainWindow):
             n_channels = vol.info.get('channels', 1)
 
             for n in range(1, view.MAX_CHANNELS):
-                self.control_widgets[f'channel{n}'].setChecked(n <= n_channels)
+                self.control_widgets[f'cloud{n}_active'].setChecked(n <= n_channels)
 
             self.gl_display.attach_volume(vol)
 

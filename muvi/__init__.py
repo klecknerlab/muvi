@@ -271,7 +271,7 @@ class VolumeProperties:
         elif key in self._defaults:
             return self._defaults[key]
         elif key in self._alternates:
-            return self[self._alternates[key]]
+            return self._param_types[key](self[self._alternates[key]])
         else:
             raise KeyError(key)
 

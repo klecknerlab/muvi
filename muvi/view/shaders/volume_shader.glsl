@@ -39,7 +39,7 @@ uniform vec3 vol_size = vec3(100.0, 100.0, 100.0);
 
 uniform vec3 camera_loc = vec3(0.0, 0.0, 0.0);
 
-uniform float gamma_correct = 1.0/2.2;
+// uniform float gamma_correct = 1.0/2.2;
 uniform float exposure1 = 0.0;
 uniform float exposure2 = 0.0;
 uniform float exposure3 = 0.0;
@@ -93,101 +93,8 @@ vec4 accumulate_isosurface(vec4 color, vec4 surf_color, vec3 N, vec3 Ng) {
     return color + sc;
 }
 
-// #define ISO_ABOVE(C) ivec3((((ISOSURFACE1 && (C.x > iso1_level)) ? 1 : 0)), 0, 0)
-//+ (((ISOLEVEL & 2) && (C.y > iso2_level)) ? 2 : 0) + (((ISOLEVEL & 4) && (C.z > iso3_level)) ? 4 : 0))
-
-// #define GAMMA2_ADJUST 1
-
 // !! The following line is used to insert code from Python, do not remove !!
 <<VOL INIT>>
-
-// #ifdef VOL_SHOW_ISOSURFACE
-//     vec3 vol_gradient(in vec3 p) {
-//         return ( vec3(
-//             vol_iso_level(p + vec3(1.0, 0.0, 0.0)) - vol_iso_level(p - vec3(1.0, 0.0, 0.0)),
-//             vol_iso_level(p + vec3(0.0, 1.0, 0.0)) - vol_iso_level(p - vec3(0.0, 1.0, 0.0)),
-//             vol_iso_level(p + vec3(0.0, 0.0, 1.0)) - vol_iso_level(p - vec3(0.0, 0.0, 1.0))
-//         ));
-//     }
-//
-//     vec4 add_surface_color(in vec3 p0, in float l0, in vec3 p1, in float l1, in vec3 light_norm, in vec4 color) {
-//         float z = (iso_level - l0)/(l1 - l0);
-//         vec3 p = (1.0-z) * p0 + z * p1;
-//         vec3 grad = normalize(vol_gradient(p));
-//         float dp = dot(grad, light_norm);
-//         #ifdef VOL_SHOW_GRID
-//             //vol_texture_space(p) * vol_size
-//             vec3 tc = mod(p + 0.5 * grid_thickness, vec3(grid_spacing, grid_spacing, grid_spacing));
-//             vec4 surf = (min(min(tc.x, tc.y), tc.z) < grid_thickness) ? grid_color : surface_color;
-//         #else
-//             vec4 surf = surface_color;
-//         #endif
-//         surf.a += (surf.a*(1.0-abs(dp)))*(1.0 - surf.a);
-//         //surf.rgb = grad;
-//         surf = min(surf, 1.0);
-//         surf.rgb *= (dp > 0.0) ? dp : -0.5*dp;
-//         surf.rgb *= surf.a;
-//         surf.rgb += shine*pow(abs(dp), 30.0);
-//         return(color + surf * (1-color.a));
-//     }
-// #endif
-
-// #ifdef VOL_SHOW_ISOSURFACE
-    // vec4 surface_color(in int last_level, in int level, vec3 voxel_color, ):
-    //     level = vol_iso_lecel(voxel_color);
-    //     if (level != last_level) {
-    //         int level_dir = (level > last_level) ? 1 : -1;
-    //         int level_add = (level_dir > 0) ? 0 : -1;
-    //         for (int j = last_level; j != level; j += level_dir) {
-    //             vol_iso_color(X, )
-    //         }
-    //     }
-    //     last_level = level;
-// #endif
-
-
-
-    //
-    //
-    // // Get the front of the ray from the plane just drawn -- units here are
-    // //   pixel coordinates in the volume, which we convert to 0-1 normalized
-    // vec3 P0 = gl_TexCoord[0].xyz / vol_L;
-    // // The back of the ray is determined from a pre-drawn buffer.
-    // vec3 P1 = texture2DRect(back_buffer_texture, gl_FragCoord.st).xyz / vol_L;
-    //
-    // // Length of a ray
-    // float l = length((P0 - P1)*vol_size);
-    //
-    // // The size of a step, converted into normalized coordinates
-    // vec3 dP = (P1 - P0)*vol_size / l * step_size;
-    // vec3 dX = dP * vol_delta;
-    // // The initial position, also in normalized coordinates
-    // vec3 X = P0;
-    // // Position after map
-    // vec3 Xm;
-    //
-    // // The overall appearance shouldn't change with step size -- this adjusts
-    // //   the opacity accordingly.
-    // float mod_opacity = step_size * density / glow;
-    //
-    // vec4 voxel_color;
-    // vec4 color = vec4(0.0, 0.0, 0.0, 0.0);
-    // vec3 light_norm = normalize(dX);
-
-    // #ifdef VOL_SHOW_ISOSURFACE
-    //     vec3 last_P = P0;
-    //     float last_opa = texture3D(vol_texture, vol_texture_space(last_p)).$oc;
-    //     int last_level = (last_opa > iso_level) ? 1 : 0;
-    //     int level;
-    // #endif
-
-    // Check if we are starting below or above the isosurface
-    // #ifdef VOL_SHOW_ISOSURFACE
-    //     Xm = distortion_map(X);
-    //     voxel_color = Texture3D(vol_texture, Xm);
-    //     int last_level = vol_iso_level(voxel_color);
-    //     int level;
-    // #endif
 
 void main() {
     // Build the start and end of the ray, as well as distances along the ray
@@ -328,7 +235,7 @@ void main() {
 
             // Accumulate the cloud color
             cc.a *= mod_opacity * (1.0 - clamp(color.a, 0.0, 1.0));
-            cc.rgb *= cc.a;
+            cc.rgb *= cc.a * glow;
             color += cc;
 
             // Are we also testing isosurfaces?
@@ -414,36 +321,7 @@ void main() {
         }
     }
 
-    //     for (float ll = 0.5 * step_size; ll < l; ll += step_size) {
-    //         voxel_color = vol_rgba_function(p);
-    //
-    //         #ifdef VOL_SHOW_ISOSURFACE
-    //
-    //             level = (voxel_color.a > iso_level) ? 1 : 0;
-    //             if (last_level != level) {
-    //                 color = add_surface_color(last_p, last_opa, p, voxel_color.a, light_norm, color);
-    //             }
-    //             last_level = level;
-    //             last_opa = voxel_color.a;
-    //             last_p = p;
-    //         #endif
-    //
-    //         voxel_color.a *= mod_opacity * (1.0-color.a);
-    //         voxel_color.rgb *= tint * voxel_color.a;
-    //         color += voxel_color;
-    //         p += s;
-    //     }
-    //
-    //     #ifdef VOL_SHOW_ISOSURFACE
-    //         p = p1;
-    //         float voxel_opa = vol_iso_level(p);
-    //
-    //         level = (voxel_opa > iso_level) ? 1 : 0;
-    //         if (last_level != level) {
-    //             color = add_surface_color(last_p, last_opa, p, voxel_opa, light_norm, color);
-    //         }
-    //     #endif
-    // }
-
-    gl_FragColor = pow(color, vec4(gamma_correct, gamma_correct, gamma_correct, 1.0));
+    // Gamma correction now handled using sRGB framebuffer!
+    // gl_FragColor = pow(color, vec4(gamma_correct, gamma_correct, gamma_correct, 1.0));
+    gl_FragColor = color;
 }

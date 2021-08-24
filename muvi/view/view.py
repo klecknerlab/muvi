@@ -99,34 +99,6 @@ class View:
     uniform_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='uniform'}
     shader_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='shader'}
 
-    # view_defaults = {
-    #     'X0': np.zeros(3, dtype='f'),
-    #     'X1': np.ones(3, dtype='f') * 256,
-    #     'R': np.eye(3, dtype='f'),
-    #     'center': np.ones(3, dtype='f') * 128,
-    #     'scale': 1.0,
-    #     'frame': 0,
-    #     'fov': 30.0,
-    #     'colormap': 'inferno',
-    # }
-    #
-    # uniform_defaults = {
-    #     'opacity': 0.5,
-    #     'step_size': 1.0,
-    #     'iso_offset': 0.5,
-    #     'exposure': 0.0,
-    #     'perspective_xfact': 0.0,
-    #     'perspective_zfact': 0.0,
-    # }
-    #
-    # shader_defaults = {
-    #     'show_isosurface': False,
-    #     'cloud_color': 'colormap',
-    #     'iso_level': 'single',
-    #     'iso_color': 'shiny',
-    #     'color_remap': 'rgba',
-    # }
-
     hidden_uniform_defaults = {
         'vol_texture': 0,
         'back_buffer_texture': 1,
@@ -136,15 +108,15 @@ class View:
         'vol_size': np.ones(3, dtype='f')*256,
         'vol_L': np.ones(3, dtype='f')*256,
         'grad_step': 1.0,
-        'gamma_correct': 1/2.2,
+        # 'gamma_correct': 1/2.2,
     }
 
     def __init__(self, volume=None, width=1000, height=1000, os_width=1920, os_height=1080, params={}, source_dir=None):
 
         self.width = width
         self.height = height
-        self._oldwidth = -1
-        self._oldheight = -1
+        self._old_width = -1
+        self._old_height = -1
         self.os_width = os_width
         self.os_height = os_height
         self._old_os_width = -1
@@ -220,24 +192,6 @@ class View:
         with open(os.path.join(SHADER_PATH, 'volume_shader.glsl')) as f:
             self.source_template = f.read()
 
-        # for subshader in self.subshader_names:
-        #     ds = {}
-        #     dn = {}
-        #
-        #     for fn in sorted(glob.glob(os.path.join(self.source_dir, subshader + "_*.glsl"))):
-        #         short_name = re.match('.*' + subshader + '_(.*).glsl', fn).group(1)
-        #
-        #         with open(fn) as f:
-        #             code = f.read()
-        #
-        #         m = re.match(r'^\s*//\s*NAME:\s*(.*)\s*$', code, flags=re.MULTILINE)
-        #         long_name = m.group(1) if m else short_name
-        #         ds[short_name] = code
-        #         dn[short_name] = long_name
-        #
-        #     setattr(self, subshader + "_source", ds)
-        #     setattr(self, subshader + "_names", dn)
-
         self.cached_shaders = {}
 
 
@@ -247,6 +201,9 @@ class View:
 
         # See if this shader has already been compiled by making a key
         key = hash(tuple(self.params[key] for key in self.shader_defaults.keys()) + (distortion_model, ))
+
+        # for k in self.shader_defaults.keys():
+        #     print(f'{k:20s}: {repr(self.params[k])}')
 
         uniforms = self.get_uniforms(include_hidden=True)
 
@@ -277,14 +234,11 @@ class View:
 
             code = [distortion_model]
 
-            # if self.params['show_isosurface']:
-            #     code.append('#define VOL_SHOW_ISOSURFACE 1')
-
             if self.params['gamma2']:
                 code.append('#define GAMMA2_ADJUST 1')
 
             for n in range(1, MAX_CHANNELS + 1):
-                if self.params[f'channel{n}']:
+                if self.params[f'cloud{n}_active']:
                     code.append(f'#define CLOUD{n}_ACTIVE 1')
                 if self.params[f'iso{n}_active']:
                     code.append(f'#define ISOSURFACE{n} 1')
@@ -306,11 +260,16 @@ class View:
                 code = code.replace(f'<<ISO{n}_COLOR>>',
                     f'vec4(iso_color.r, iso_color.g, iso_color.b, iso{n}_opacity)')
 
+            # print(code)
+            # print(uniforms)
+            # for k, v in uniforms.items():
+            #     print(f'{k:20s}: {repr(v)}')
+
             self.current_volume_shader = ShaderProgram(fragment_shader=code, uniforms=uniforms)
             self.cached_shaders[key] = self.current_volume_shader
 
-        self.current_volume_shader.bind()
-        self.current_volume_shader.set_uniforms(**uniforms)
+            self.current_volume_shader.bind()
+            self.current_volume_shader.set_uniforms(**uniforms)
 
 
     def units_per_pixel(self):
@@ -591,7 +550,7 @@ class View:
                                                  internal_format=GL_RGBA32F)
 
                     self.os_fbo_output = FrameBufferObject(width=self.os_width, height=self.os_height,
-                                                 data_type=GL_UNSIGNED_BYTE, internal_format=GL_RGBA)
+                                                 data_type=GL_UNSIGNED_BYTE, internal_format=GL_SRGB8_ALPHA8)
                 else:
                     self.os_fbo_back.resize(self.os_width, self.os_height)
                     self.os_fbo_output.resize(self.os_width, self.os_height)
@@ -606,20 +565,24 @@ class View:
             width = self.width
             height = self.height
 
-            if self.width != self._oldwidth or self.height != self._oldheight:
+            if self.width != self._old_width or self.height != self._old_height:
                 # If the viewport has changed, resize things.
                 if not hasattr(self, 'fbo'):
-                    self.fbo = FrameBufferObject(width=self.width, height=self.height,
+                    self.fbo_back = FrameBufferObject(width=self.width, height=self.height,
                                                  target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
                                                  internal_format=GL_RGBA32F)
+                    self.fbo_output = FrameBufferObject(width=self.width, height=self.height,
+                                                 data_type=GL_UNSIGNED_BYTE, internal_format=GL_SRGB8_ALPHA8)
+                                                 # format=GL_SRGB8_ALPHA8)
                 else:
-                    self.fbo.resize(self.width, self.height)
-                self._oldwidth = self.width
-                self._oldheight = self.height
+                    self.fbo_back.resize(self.width, self.height)
+                    self.fbo_output.resize(self.width, self.height)
 
-            back_buffer = self.fbo
-            display_buffer_id = default_fbo
+                self._old_width = self.width
+                self._old_height = self.height
 
+            back_buffer = self.fbo_back
+            display_buffer_id = self.fbo_output.id
 
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
@@ -678,8 +641,8 @@ class View:
         self._texture_cube()
 
         # Draw the front buffer; this is where the ray tracing magic happens.
+        glEnable(GL_FRAMEBUFFER_SRGB)
         glBindFramebuffer(GL_FRAMEBUFFER, display_buffer_id)
-        # glEnable(GL_FRAMEBUFFER_SRGB)
         # glClearColor(1.0, 1.0, 1.0, 1.0)
         glClearColor(0.0, 0.0, 0.0, 1.0)
 
@@ -716,9 +679,16 @@ class View:
         glDisable(GL_CULL_FACE)
         self._fs_quad()
 
+        glDisable(GL_FRAMEBUFFER_SRGB)
+
         if save_image or return_image:
             img = np.frombuffer(glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE), dtype='u1').reshape(height, width, -1)
             if save_image: Image.fromarray(img[::-1]).save(save_image)
+
+        if not offscreen:
+            w, h = self.width, self.height
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, default_fbo)
+            glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
 
         if display_buffer_id != default_fbo:
             glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)

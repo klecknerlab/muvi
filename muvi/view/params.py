@@ -13,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import os
 from collections import OrderedDict
 import base64
@@ -118,9 +119,12 @@ refresh_shaders()
 #   parameter names, limits, etc.  (which are used to build GUIs)
 
 PARAMS = OrderedDict()
+PARAM_CATAGORIES = OrderedDict()
 
 class ViewParam:
-    def __init__(self, name, display_name,  cat, vcat, default, min=None, max=None, step=None, logstep=None, options=None):
+    def __init__(self, name, display_name, cat, vcat, default, min=None,
+            max=None, step=None, logstep=None, options=None, param_type=None,
+            tooltip=None):
         self.name = name
         self.display_name = display_name
         self.cat = cat
@@ -137,81 +141,88 @@ class ViewParam:
             self.logstep = logstep
         if options is not None:
             self.options = options
+            param_type = 'options'
+        if tooltip is not None:
+            self.tooltip = tooltip
 
         PARAMS[name] = self
 
-    type = property(lambda self: type(self.default))
+        if param_type is None:
+            self.type = type(self.default)
+        else:
+            self.type = param_type
 
+    # type = property(lambda self: type(self.default))
 
-
-ViewParam('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'))
-ViewParam('X0', 'X0', 'view', 'uniform', np.zeros(3, dtype='f'))
-ViewParam('X1', 'X1', 'view', 'uniform', np.ones(3, dtype='f') * 100)
-ViewParam('center', 'Center', 'view', 'view', np.ones(3, dtype='f') * 128)
-ViewParam('scale', 'Scale', 'view', 'view', 1.0, logstep=1.25)
-ViewParam('fov', 'FOV', 'view', 'view', 30.0, min=0.0, max=120.0, step=5.0)
-
-ViewParam('frame', 'Frame', 'playback', 'view', 0)
-
-# Opacity replaced by "density"
-# ViewParam('opacity', 'Cloud Opacity', 'render', 'uniform',
-        # 0.5, min=1E-3, max=2, logstep=10**(1/8))
-
-ViewParam('density', 'Density', 'render', 'uniform',
-        0.5, min=1E-3, max=2, logstep=10**(1/8))
-ViewParam('glow', 'Glow', 'render', 'uniform',
-        1.0, min=1, max=100, logstep=10**(1/4))
-
+PARAM_CATAGORIES['Playback'] = [
+    ViewParam('frame', 'Frame', 'playback', 'view', 0, 0, 99, step=1, param_type='playback'),
+]
 
 MAX_CHANNELS = 3
 _default_colormaps = ['inferno', 'viridis', 'cividis']
 
-# _isocolor_names = {
-#     'solid': 'Solid',
-#     'cm1': 'Channel 1 Colormap',
-#     'cm2': 'Channel 2 Colormap',
-#     'cm3': 'Channel 2 Colormap',
-# }
+PARAM_CATAGORIES['Render'] = [
+    ViewParam('density', 'Density', 'render', 'uniform', 0.5, min=2**-10,
+        max=2, logstep=2**(1/2),
+        tooltip='The density of the cloud rendering.  If glow=1, this is the opacity of a single voxel with maximum vaue.'),
+    ViewParam('glow', 'Glow', 'render', 'uniform', 1.0, min=1, max=128,
+        logstep=2,
+        tooltip='Increasing glow makes the cloud more transparent while proportionally increasing the brightness, given the appearance of a glowing cloud.'),
+    OrderedDict()
+]
 
 for n in range(1, MAX_CHANNELS + 1):
-    ViewParam(f'channel{n}', f'Channel {n}', 'render', 'shader', (n == 1))
-    ViewParam(f'colormap{n}', 'Colormap', 'render', 'view', _default_colormaps[n-1],
-        options=_colormap_names)
-    ViewParam(f'exposure{n}', 'Exposure', 'render', 'uniform',
-        0.0, min=-5, max=5, step=0.5)
-
-    ViewParam(f'iso{n}_active', f'Isosurface {n}', 'isosurface', 'shader', False)
-    ViewParam(f'iso{n}_level', 'Level', 'isosurface', 'uniform', 0.5, min=0.0,
-        max=1.0, step=0.1)
-    # ViewParam(f'iso{n}_color', 'Color', 'isosurface', 'shader', 'solid',
-        # options=_isocolor_names)
     color = np.zeros(3, dtype='f')
     color[n-1] = 1
-    ViewParam(f'iso{n}_color', 'Color', 'isosurface', 'uniform', color)
-    ViewParam(f'iso{n}_opacity', 'Opacity', 'isosurface', 'uniform', 0.3, min=0.0,
-        max=1.0, step=0.1)
 
+    PARAM_CATAGORIES['Render'][-1][f'Ch. {n}'] = [
+         ViewParam(f'exposure{n}', 'Exposure', 'render', 'uniform', 0.0, min=0,
+            max=5, step=0.5,
+            tooltip='Adjust the brightness of the raw data.  Specified in stops (powers of 2).'),
 
+        'Cloud',
+        ViewParam(f'cloud{n}_active', f'Enabled', 'render', 'shader', (n == 1),
+            tooltip='Enable cloud rendering for this color channel.'),
+        ViewParam(f'colormap{n}', 'Colormap', 'render', 'view',
+            _default_colormaps[n-1], options=_colormap_names,
+            tooltip='Select the color mapping used to render this channel.'),
 
-# ViewParam('show_isosurface', 'Show Isosurface', 'hidden', 'shader', False)
-# ViewParam('iso_offset', 'Isosurface Offset', 'hidden', 'uniform', 0.5)
-# ViewParam('iso_level', 'Isosurface Level', 'hidden', 'shader', 'single')
-# ViewParam('iso_color', 'Isosurface Color', 'hidden', 'shader', 'shiny')
-# ViewParam('exposure', 'Exposure (stops)', 'hidden', 'uniform',
-        # 0.0, min=-5, max=5, step=0.5)
+        'Isourface',
+        ViewParam(f'iso{n}_active', f'Enabled', 'isosurface', 'shader',
+            False,
+            tooltip='Enable isosurface rendering for this color channel.'),
+        ViewParam(f'iso{n}_level', 'Level', 'isosurface', 'uniform', 0.5,
+            min=0.0, max=1.0, step=0.1,
+            tooltip='The level to display the isosurface at: 0 = minimum value, 1 = maximum.  Note that this is affected by exposure!'),
+        ViewParam(f'iso{n}_color', 'Color', 'isosurface', 'uniform', color,
+            param_type='color',
+            tooltip='The color of the isosurface for this channel.'),
+        ViewParam(f'iso{n}_opacity', 'Opacity', 'isosurface', 'uniform', 0.3,
+            min=0.0, max=1.0, step=0.1,
+            tooltip='The opacity of the isosurface for this channel')
+    ]
 
+PARAM_CATAGORIES['View'] = [
+    ViewParam('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'), param_type='rot'),
+    ViewParam('X0', 'X0', 'view', 'uniform', np.zeros(3, dtype='f'), param_type='extent'),
+    ViewParam('X1', 'X1', 'view', 'uniform', np.ones(3, dtype='f') * 100, param_type='extent'),
+    ViewParam('center', 'Center', 'view', 'view', np.ones(3, dtype='f') * 128, param_type='vector'),
+    ViewParam('scale', 'Scale', 'view', 'view', 1.0, logstep=1.25, param_type='hidden'),
+    ViewParam('fov', 'FOV (degrees)', 'view', 'view', 30.0, min=0.0, max=120.0, step=10.0,
+        tooltip='The field of view of the display, measured in degrees.  Setting this to 0 gives an orthographic display.'),
+    ViewParam('framerate', 'Playback Rate', 'playback', 'view', 30, 1, 120, 10,
+        tooltip='The playback rate in volumes/second.'),
+]
 
-
-ViewParam('step_size', 'Render Step', 'advanced', 'uniform', 1.0,
-        min=0.1, max=2, logstep=2**(1/2))
-ViewParam('perspective_xfact', 'Persp. X Coeff.', 'advanced', 'uniform', 0.0,
-        min=-.5, max=.5, step=1E-2)
-ViewParam('perspective_yfact', 'Persp. Y Coeff.', 'advanced', 'uniform', 0.0,
-                min=-.5, max=.5, step=1E-2)
-ViewParam('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0,
-        min=-.5, max=.5, step=1E-2)
-ViewParam('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba',
-            options=_color_remaps)
-ViewParam('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap',
-        options=SUBSHADER_NAMES['cloud_color'])
-ViewParam('gamma2', 'Raw Data Gamma 2', 'advanced', 'shader', False)
+PARAM_CATAGORIES['Adv.'] = [
+    ViewParam('step_size', 'Render Step', 'advanced', 'uniform', 1.0,
+        min=0.125, max=2, logstep=2**(1/2),
+        tooltip='The step size used in the internal rendering algorithm.  Increasing this will improve the quality of the display, but slows down the rendering engine proportionally.'),
+    ViewParam('perspective_xfact', 'Persp. X Coeff.', 'advanced', 'uniform',
+        0.0, min=-.5, max=.5, step=0.05),
+    ViewParam('perspective_yfact', 'Persp. Y Coeff.', 'advanced', 'uniform', 0.0, min=-.5, max=.5, step=0.05),
+    ViewParam('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0, min=-.5, max=.5, step=0.05),
+    ViewParam('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba', options=_color_remaps),
+    ViewParam('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap', options=SUBSHADER_NAMES['cloud_color']),
+    ViewParam('gamma2', 'Gamma 2', 'advanced', 'shader', False)
+]

@@ -29,10 +29,10 @@ colormaps = {
     'inferno': 'Inferno',
     'magma': 'Magma',
     'cividis': 'Cividis',
-    'BrBG': 'Brown to Teal',
+    'BrBG': 'Brn. to Teal',
     'RdBu': 'Red to Blue',
     'twilight': 'Twilight',
-    'twilight_shifted': 'Twilight Shifted',
+    'twilight_shifted': 'Shift Twi.',
 }
 
 x = np.linspace(0, 1, 256)
