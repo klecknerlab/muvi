@@ -25,7 +25,7 @@ from PyQt5 import QtCore, QtGui
 from PyQt5.QtWidgets import QMainWindow, QApplication, QTabWidget, QHBoxLayout, \
     QVBoxLayout, QLabel, QWidget, QScrollArea, QAction, QFrame, QMessageBox, \
     QFileDialog, QGridLayout, QPushButton, QStyle
-from .qt_view_widgets import param_list_to_vbox, control_from_param, \
+from .qtview_widgets import param_list_to_vbox, control_from_param, \
     VolumetricView, ListControl
 import numpy as np
 
@@ -226,6 +226,19 @@ class VolumetricViewer(QMainWindow):
             'Show Export Window', self.toggle_export, 'Ctrl+E',
             'Show or hide the export window, used to take screenshots or make movies')
 
+        for i in range(3):
+            axis = chr(ord('X') + i)
+
+            def f(event, a=i):
+                self.orient_camera(a)
+            self.add_menu_item(self.view_menu,
+                f'Look down {axis}-axis', f, axis.lower())
+
+            def f2(event, a=i):
+                self.orient_camera(a+3)
+            self.add_menu_item(self.view_menu,
+                f'Look down -{axis}-axis', f2, 'Shift+'+axis.lower())
+
 
         self.setAcceptDrops(True)
         self.show()
@@ -328,6 +341,33 @@ class VolumetricViewer(QMainWindow):
         else:
             event.ignore()
 
+    def orient_camera(self, axis):
+        X, Y, Z = np.eye(3)
+
+        # R = np.eye(3)
+        # if flip:
+        #     R[0] *= -1
+        #     R[2] *= -1
+        #
+        # R = np.roll(R, 2-axis, axis=1)
+        # print(R, axis, flip)
+        #
+        # self.display.updateParams(R=R)
+
+        if axis == 0:
+            R = np.array([-Z, Y, X]).T
+        elif axis == 1:
+            R = np.array([X, -Z, Y]).T
+        elif axis == 2:
+            R = np.array([X, Y, Z]).T
+        elif axis == 3:
+            R = np.array([Z, Y, -X]).T
+        elif axis == 4:
+            R = np.array([X, Z, -Y]).T
+        else:
+            R = np.array([-X, Y, -Z]).T
+
+        self.display.updateParams(R=R)
 
 def view_volume(vol=None, args=None, window_name=None):
     if window_name is None:
