@@ -21,6 +21,7 @@ import glob
 import xml.etree.ElementTree as ET
 import re
 import numpy as np
+import warnings
 
 '''
 This file contains information about all the parameters used for the view
@@ -119,12 +120,13 @@ refresh_shaders()
 #   parameter names, limits, etc.  (which are used to build GUIs)
 
 PARAMS = OrderedDict()
+PARAMS_WITH_VOLUME_RANGES = {}
 PARAM_CATAGORIES = OrderedDict()
 
 class ViewParam:
     def __init__(self, name, display_name, cat, vcat, default, min=None,
             max=None, step=None, logstep=None, options=None, param_type=None,
-            tooltip=None):
+            tooltip=None, max_from_vol=None):
         self.name = name
         self.display_name = display_name
         self.cat = cat
@@ -144,6 +146,9 @@ class ViewParam:
             param_type = 'options'
         if tooltip is not None:
             self.tooltip = tooltip
+        if max_from_vol is not None:
+            self.max_from_vol = max_from_vol
+            PARAMS_WITH_VOLUME_RANGES[name] = self
 
         PARAMS[name] = self
 
@@ -155,7 +160,8 @@ class ViewParam:
     # type = property(lambda self: type(self.default))
 
 PARAM_CATAGORIES['Playback'] = [
-    ViewParam('frame', 'Frame', 'playback', 'view', 0, 0, 99, step=1, param_type='playback'),
+    ViewParam('frame', 'Frame', 'playback', 'view', 0, 0, 99, step=1,
+        param_type='playback', max_from_vol='Nt'),
 ]
 
 MAX_CHANNELS = 3
@@ -167,7 +173,7 @@ PARAM_CATAGORIES['Render'] = [
         tooltip='The density of the cloud rendering.  If glow=1, this is the opacity of a single voxel with maximum vaue.'),
     ViewParam('glow', 'Glow', 'render', 'uniform', 1.0, min=1, max=128,
         logstep=2,
-        tooltip='Increasing glow makes the cloud more transparent while proportionally increasing the brightness, given the appearance of a glowing cloud.'),
+        tooltip='Increasing glow makes the cloud more transparent while proportionally increasing the brightness, giving the appearance of a glowing cloud.'),
     OrderedDict()
 ]
 
@@ -177,7 +183,7 @@ for n in range(1, MAX_CHANNELS + 1):
 
     PARAM_CATAGORIES['Render'][-1][f'Ch. {n}'] = [
          ViewParam(f'exposure{n}', 'Exposure', 'render', 'uniform', 0.0, min=0,
-            max=5, step=0.5,
+            max=8, step=0.5,
             tooltip='Adjust the brightness of the raw data.  Specified in stops (powers of 2).'),
 
         'Cloud',
@@ -196,24 +202,30 @@ for n in range(1, MAX_CHANNELS + 1):
             tooltip='The level to display the isosurface at: 0 = minimum value, 1 = maximum.  Note that this is affected by exposure!'),
         ViewParam(f'iso{n}_color', 'Color', 'isosurface', 'uniform', color,
             param_type='color',
-            tooltip='The color of the isosurface for this channel.'),
+            tooltip='The color of the isosurface.'),
         ViewParam(f'iso{n}_opacity', 'Opacity', 'isosurface', 'uniform', 0.3,
             min=0.0, max=1.0, step=0.1,
-            tooltip='The opacity of the isosurface for this channel')
+            tooltip='The opacity of the isosurface.')
     ]
 
 PARAM_CATAGORIES['View'] = [
-    ViewParam('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'), param_type='rot'),
-    ViewParam('X0', 'X0', 'view', 'uniform', np.zeros(3, dtype='f'), param_type='extent'),
-    ViewParam('X1', 'X1', 'view', 'uniform', np.ones(3, dtype='f') * 100, param_type='extent'),
-    ViewParam('center', 'Center', 'view', 'view', np.ones(3, dtype='f') * 128, param_type='vector'),
+    ViewParam('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'),
+        param_type='rot'),
     ViewParam('scale', 'Scale', 'view', 'view', 1.0, logstep=1.25, param_type='hidden'),
     ViewParam('fov', 'FOV (degrees)', 'view', 'view', 30.0, min=0.0, max=120.0, step=10.0,
         tooltip='The field of view of the display, measured in degrees.  Setting this to 0 gives an orthographic display.'),
     ViewParam('framerate', 'Playback Rate', 'playback', 'view', 30, 1, 120, 10,
         tooltip='The playback rate in volumes/second.'),
     ViewParam('background_color', 'Background Color', 'view', 'view', np.array([0, 0, 0, 1], dtype='f'), param_type='color',
-        tooltip='The background color of the display.')
+        tooltip='The background color of the display.'),
+    ViewParam('X0', 'Displayed Volume Lower Limit', 'view', 'uniform', np.zeros(3, dtype='f'),
+        max_from_vol=('Lx', 'Ly', 'Lz'),
+        tooltip='Lower limit of displayed volume (in physical units)'),
+    ViewParam('X1', 'Displayed Volume Upper Limit', 'view', 'uniform', np.ones(3, dtype='f') * 100,
+        max_from_vol=('Lx', 'Ly', 'Lz'),
+        tooltip='Upper limit of displayed volume (in physical units)'),
+    ViewParam('center', 'Display Center', 'view', 'view', np.ones(3, dtype='f') * 128,
+        max_from_vol=('Lx', 'Ly', 'Lz'), param_type='hidden'),
 ]
 
 PARAM_CATAGORIES['Adv.'] = [
@@ -221,10 +233,34 @@ PARAM_CATAGORIES['Adv.'] = [
         min=0.125, max=2, logstep=2**(1/2),
         tooltip='The step size used in the internal rendering algorithm.  Increasing this will improve the quality of the display, but slows down the rendering engine proportionally.'),
     ViewParam('perspective_xfact', 'Persp. X Coeff.', 'advanced', 'uniform',
-        0.0, min=-.5, max=.5, step=0.05),
-    ViewParam('perspective_yfact', 'Persp. Y Coeff.', 'advanced', 'uniform', 0.0, min=-.5, max=.5, step=0.05),
-    ViewParam('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0, min=-.5, max=.5, step=0.05),
-    ViewParam('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba', options=_color_remaps),
-    ViewParam('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap', options=SUBSHADER_NAMES['cloud_color']),
-    ViewParam('gamma2', 'Gamma 2', 'advanced', 'shader', False)
+        0.0, min=-1, max=1, step=0.05,
+        tooltip='The coefficient for perspective correction in the x direction (=Lx/dx).  Should only be non-zero if the scanner is displaced in the x direction.'),
+    ViewParam('perspective_yfact', 'Persp. Y Coeff.', 'advanced', 'uniform', 0.0, min=-1, max=1, step=0.05,
+        tooltip='The coefficient for perspective correction in the y direction (=Ly/dy).  Should only be non-zero if the scanner is displaced in the y direction.'),
+    ViewParam('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0, min=-1, max=1, step=0.05,
+        tooltip='The coefficient for perspective correction in the z direction (=Lz/dz).'),
+    ViewParam('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba', options=_color_remaps,
+        tooltip='Reshuffles the color channels in the corresponding order.  Can be used, for example, to have multiple isosurfaces.'),
+    ViewParam('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap', options=SUBSHADER_NAMES['cloud_color'],
+        tooltip='The cloud color sub-shader to use for the display.  Normally not changed.'),
+    ViewParam('gamma2', 'Gamma 2', 'advanced', 'shader', False,
+        tooltip='If checked, treat the raw data as if it has gamma 2.  Normally this is automatically determined from the volume itself.')
 ]
+
+def range_from_volume(vol):
+    ranges = {}
+    for name, param in PARAMS_WITH_VOLUME_RANGES.items():
+        try:
+            if param.type == np.ndarray:
+                lower = np.zeros_like(param.default)
+                upper = np.array([vol.info[p] for p in param.max_from_vol], dtype=param.default.dtype)
+            else:
+                t = type(param.default)
+                lower = t(0)
+                upper = t(vol.info[param.max_from_vol])
+        except:
+            warnings.warn(f"Could not get range of parameter '{name}' from volume info.")
+        else:
+            ranges[name] = (lower, upper)
+
+    return ranges

@@ -217,8 +217,8 @@ class View:
             if distortion_model is None:
                 distortion_model = '''
                     vec3 distortion_map(in vec3 U) {
-                        float exy = perspective_xfact * (1.0 - 2.0 * U.x) + perspective_yfact * (1.0 - 2.0 * U.y);
-                        float ez = perspective_zfact * (1.0 - 2.0 * U.z);
+                        float exy = 0.25 * (perspective_xfact * (1.0 - 2.0 * U.x) + perspective_yfact * (1.0 - 2.0 * U.y));
+                        float ez = 0.25 * (perspective_zfact * (1.0 - 2.0 * U.z));
                         return vec3((U.x + ez) / (1.0 + 2.0*ez), (U.y + ez) / (1.0 + 2.0*ez), (U.z + exy) / (1.0 + 2.0*exy));
                     }
 
@@ -415,11 +415,12 @@ class View:
             The new frame number
         '''
 
-        glActiveTexture(GL_TEXTURE0)
+        if self.volume is not None:
+            glActiveTexture(GL_TEXTURE0)
 
-        vol = self.volume[frame % len(self.volume)]
-        if vol.ndim == 3: vol = vol[..., np.newaxis]
-        self.volume_texture.replace(vol)
+            vol = self.volume[frame % len(self.volume)]
+            if vol.ndim == 3: vol = vol[..., np.newaxis]
+            self.volume_texture.replace(vol)
 
 
     def get_uniforms(self, include_hidden=False):

@@ -37,6 +37,7 @@ import traceback
 import time
 import glob
 import os
+import numpy as np
 
 GAMMA_CORRECT = 2.2
 
@@ -52,6 +53,7 @@ class ParamControl(QWidget):
             self.setToolTip(tooltip)
 
         self.hbox = QHBoxLayout()
+        self.hbox.setContentsMargins(0, 0, 0, 0)
         self.hbox.addWidget(self.title)
         if isinstance(w, (list, tuple)):
             for ww in w:
@@ -68,6 +70,7 @@ class ParamControl(QWidget):
                 self.setLayout(self.hbox)
             else:
                 self.vbox = QVBoxLayout()
+                self.vbox.setContentsMargins(0, 0, 0, 0)
                 self.vbox.addLayout(self.hbox)
                 self.vbox.addWidget(self.slider)
                 self.setLayout(self.vbox)
@@ -96,6 +99,7 @@ class PlaybackControl(ParamControl):
             slider=True, sideSlider=True)
 
         self.hbox.insertWidget(0, self.playButton, 0)
+        self.hbox.setContentsMargins(10, 10, 10, 10)
 
         self.setRange(minVal, maxVal)
         self.setValue(default)
@@ -192,18 +196,15 @@ class LinearControl(ParamControl):
 
         super().__init__(title, param, tooltip, w=self.spinBox, slider=True)
 
-        if step is None:
-            step = (maxVal - minVal) / 10
-
-        if decimals is None:
-            decimals = math.ceil(1.5-math.log10(step))
-        self.spinBox.setDecimals(decimals)
-
         self.subdiv = subdiv
         self.step = step
 
         self.setRange(minVal, maxVal)
         self.setValue(default)
+
+        if decimals is None:
+            decimals = math.ceil(1.5-math.log10(self.currentStep))
+        self.spinBox.setDecimals(decimals)
 
         self.slider.valueChanged.connect(self.sliderChanged)
         self.spinBox.valueChanged.connect(self.spinChanged)
@@ -211,14 +212,17 @@ class LinearControl(ParamControl):
         self.spinBox.valueChanged.connect(self._paramChanged)
 
     def setRange(self, minVal, maxVal):
-        self.steps = math.ceil((maxVal-minVal) / self.step)
+        step = (maxVal - minVal) / 10 if self.step is None else self.step
+        self.currentStep = step
+
+        self.steps = math.ceil((maxVal-minVal) / step)
         self.sliderSteps = self.steps * self.subdiv
         self.minVal = minVal
         self.maxVal = maxVal
         self.ratio = self.sliderSteps / (self.maxVal - self.minVal)
         self.spinBox.setRange(minVal, maxVal)
         self.slider.setRange(0, self.sliderSteps)
-        self.spinBox.setSingleStep(self.step)
+        self.spinBox.setSingleStep(step)
         self.slider.setSingleStep(self.subdiv)
         self.slider.setTickInterval(self.subdiv * 2 if self.sliderSteps//self.subdiv > 10 else self.subdiv)
 
@@ -451,6 +455,48 @@ class ListControl(ParamControl):
     def sliderChanged(self, value):
         self.spinBox.setValue(self.spinBox.values[value])
 
+
+class VectorControl(QGroupBox):
+    paramChanged = QtCore.pyqtSignal(str, object)
+
+    def __init__(self, title="Vector:", default=np.zeros(3), minVal=np.zeros(3),
+            maxVal=np.ones(3), step=None, param=None, tooltip=None, subdiv=5,
+            labels=['X:', 'Y:', 'Z:', 'W:']):
+        super().__init__(title)
+
+        self.step = step
+        self.vbox = QVBoxLayout()
+        self.setLayout(self.vbox)
+        self.param = param
+
+        self.controls = []
+        self.value = default.copy()
+
+        for i in range(len(default)):
+            control = LinearControl(labels[i], default[i],
+                minVal[i], maxVal[i], self.step, param=str(i), subdiv=subdiv,
+                tooltip=tooltip)
+            self.vbox.addWidget(control)
+            control.paramChanged.connect(self._paramChanged)
+            self.controls.append(control)
+
+    def setValue(self, value):
+        self.value = value.copy()
+        for control, val in zip(self.controls, self.value):
+            control.blockSignals(True)
+            control.setValue(val)
+            control.blockSignals(False)
+
+    def setRange(self, minVal, maxVal):
+        for control, minv, maxv in zip(self.controls, minVal, maxVal):
+            control.setRange(minv, maxv)
+
+    def _paramChanged(self, p, v):
+        self.value[int(p)] = v
+        self.paramChanged.emit(self.param, self.value)
+
+
+
 # class QHLine(QFrame):
 #     def __init__(self):
 #         super(QHLine, self).__init__()
@@ -495,13 +541,15 @@ def control_from_param(param):
         return OptionsControl(**kwargs)
     elif param.type == 'color':
         return ColorControl(**kwargs)
+    elif param.type == np.ndarray:
+        return VectorControl(**kwargs)
     else:
         return None
 
 def param_list_to_vbox(params, vbox):
     param_controls = {}
 
-    sub_vbox = None
+    sub_vbox = vbox
 
     for param in params:
         if isinstance(param, dict):
@@ -510,32 +558,39 @@ def param_list_to_vbox(params, vbox):
             # tabs.setContentsMargins(5, 5, 5, 5)
             for cat, param_list in param.items():
                 tab_vbox = QVBoxLayout()
-                tab_vbox.setContentsMargins(5, 5, 5, 5)
-                tab_vbox.setSpacing(0)
+                # tab_vbox.setContentsMargins(5, 5, 5, 5)
+                # tab_vbox.setSpacing(0)
                 param_controls.update(param_list_to_vbox(param_list, tab_vbox))
                 widget = QWidget()
                 widget.setLayout(tab_vbox)
                 tabs.addTab(widget, cat)
 
                 # tabs.setContentsMargins(0, 0, 0, 0)
+            # vbox.addSpacing(10)
             vbox.addWidget(tabs)
 
         elif isinstance(param, str):
-            label = QLabel(param)
-            label.setObjectName('SectionLabel')
-            label.setAlignment(QtCore.Qt.AlignCenter)
+            # label = QLabel(param)
+            # label.setObjectName('SectionLabel')
+            # label.setAlignment(QtCore.Qt.AlignCenter)
             # vbox.addWidget(label)
             # vbox.addWidget(QHLine())
 
             sub_vbox = QVBoxLayout()
-            frame = QFrame()
+            # sub_vbox.setContentsMargins(0, 0, 0, 0)
+            # sub_vbox.setSpacing(0)
+
+
+            # frame = QFrame()
+            frame = QGroupBox(param)
             frame.setLayout(sub_vbox)
-            frame.setFrameShape(QFrame.StyledPanel)
-            frame.setFrameShadow(QFrame.Sunken)
-            sub_vbox.setContentsMargins(0, 0, 0, 0)
-            frame.setContentsMargins(2, 2, 2, 2)
+            # frame.setFrameShape(QFrame.StyledPanel)
+            # frame.setFrameShadow(QFrame.Sunken)
+            # frame.setContentsMargins(0, 0, 0, 0)
+
             vbox.addWidget(frame)
-            sub_vbox.addWidget(label)
+            # vbox.addSpacing(10)
+            # sub_vbox.addWidget(label)
             # sub_vbox.addWidget(QHLine())
 
         else:
@@ -543,10 +598,9 @@ def param_list_to_vbox(params, vbox):
             # print(param.name)
             control = control_from_param(param)
             if control is not None:
-                if sub_vbox is None:
-                    vbox.addWidget(control)
-                else:
-                    sub_vbox.addWidget(control)
+                sub_vbox.addWidget(control)
+                # if isinstance(control, QGroupBox):
+                    # sub_vbox.addSpacing(10)
                 param_controls[param.name] = control
 
     return param_controls
@@ -633,7 +687,11 @@ class VolumetricView(QOpenGLWidget):
                 fps = self.view.params['framerate']
                 advance = int((t - self._tStart) * fps)
                 if advance:
-                    frame = (self.view.params['frame'] + advance) % len(self.view.volume)
+                    if self.view.volume is not None:
+                        nvol = len(self.view.volume)
+                    else:
+                        nvol = 1
+                    frame = (self.view.params['frame'] + advance) % nvol
                     self.updateParam('frame', frame)
                     self._tStart += advance / fps
                     self.frameChanged.emit(frame)

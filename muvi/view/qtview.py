@@ -29,7 +29,7 @@ from .qtview_widgets import param_list_to_vbox, control_from_param, \
     VolumetricView, ListControl
 import numpy as np
 
-from .params import PARAM_CATAGORIES, PARAMS
+from .params import PARAM_CATAGORIES, PARAMS, range_from_volume
 from .. import open_3D_movie, VolumetricMovie
 
 GAMMA_CORRECT = 2.2
@@ -170,14 +170,14 @@ class VolumetricViewer(QMainWindow):
             if cat == 'Playback': continue
 
             vbox = QVBoxLayout()
-            vbox.setContentsMargins(5, 5, 5, 5)
-            vbox.setSpacing(0)
+            # vbox.setContentsMargins(5, 5, 5, 5)
+            vbox.setSpacing(10)
             self.param_controls.update(param_list_to_vbox(params, vbox))
 
             vbox.addStretch(1)
 
             sa = QScrollArea()
-            sa.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            sa.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
             sa.setContentsMargins(0, 0, 0, 0)
             sa.setFrameShape(QFrame.NoFrame)
 
@@ -215,7 +215,7 @@ class VolumetricViewer(QMainWindow):
         self.view_menu = menu.addMenu("View")
 
         self.show_settings = self.add_menu_item(self.view_menu,
-            'Hide View Settings', self.toggle_settings, 'Tab',
+            'Hide View Settings', self.toggle_settings, 'Ctrl+/',
             'Show or hide settings option on right side of main window')
 
         self.save_image = self.add_menu_item(self.view_menu,
@@ -246,12 +246,17 @@ class VolumetricViewer(QMainWindow):
             self.open_volume(volume)
 
     def refresh_param_values(self):
+        if getattr(self.display, 'volume', None) is not None:
+            vol = self.display.volume
+            # self.param_controls['frame'].setRange(0, len(vol)-1)
+            ranges = range_from_volume(vol)
+            for param, r in ranges.items():
+                if param in self.param_controls:
+                    self.param_controls[param].setRange(*r)
+
         for name, control in self.param_controls.items():
             control.setValue(self.display.view.params[name])
 
-        if getattr(self.display, 'volume', None) is not None:
-            vol = self.display.volume
-            self.param_controls['frame'].setRange(0, len(vol)-1)
 
     def add_menu_item(self, menu, title, func=None, shortcut=None, tooltip=None):
         action = QAction(title, self)
