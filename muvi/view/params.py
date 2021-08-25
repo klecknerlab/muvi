@@ -193,7 +193,7 @@ for n in range(1, MAX_CHANNELS + 1):
             _default_colormaps[n-1], options=_colormap_names,
             tooltip='Select the color mapping used to render this channel.'),
 
-        'Isourface',
+        'Isosurface',
         ViewParam(f'iso{n}_active', f'Enabled', 'isosurface', 'shader',
             False,
             tooltip='Enable isosurface rendering for this color channel.'),

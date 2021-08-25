@@ -37,6 +37,19 @@ GAMMA_CORRECT = 2.2
 ORG_NAME = "MUVI Lab"
 APP_NAME = "MUVI Volumetric Movie Viewer"
 
+if sys.platform == 'win32':
+    # On Windows, it appears to need a bit more width to display text
+    PARAM_WIDTH = 300
+    SCROLL_WIDTH = 20
+elif sys.platform == 'darwin':
+    # Good default for OS X
+    PARAM_WIDTH = 230
+    SCROLL_WIDTH = 15
+else:
+    # Fallback -- if anyone ever uses this on Linux let me know what looks good!
+    PARAM_WIDTH = 230
+    SCROLL_WIDTH = 15
+
 if sys.platform.startswith('darwin'):
         # Python 3: pip3 install pyobjc-framework-Cocoa
         try:
@@ -164,7 +177,7 @@ class VolumetricViewer(QMainWindow):
         self.param_controls = {'frame': self.playback}
 
         self.param_tabs = QTabWidget()
-        self.param_tabs.setFixedWidth(230)
+        self.param_tabs.setFixedWidth(PARAM_WIDTH)
 
         for cat, params in PARAM_CATAGORIES.items():
             if cat == 'Playback': continue
@@ -183,7 +196,7 @@ class VolumetricViewer(QMainWindow):
 
             widget = QWidget()
             widget.setLayout(vbox)
-            widget.setFixedWidth(210)
+            widget.setFixedWidth(PARAM_WIDTH - (SCROLL_WIDTH + 5))
             sa.setWidget(widget)
             self.param_tabs.addTab(sa, cat)
 
@@ -383,23 +396,23 @@ def view_volume(vol=None, args=None, window_name=None):
 
     app = QApplication(args)
     app.setStyle('Fusion')
-    app.setStyleSheet('''
-        QLabel, QSlider, QSpinBox, QDoubleSpinBox, QCheckBox {
+    app.setStyleSheet(f'''
+        QLabel, QSlider, QSpinBox, QDoubleSpinBox, QCheckBox {{
             padding: 0px;
             margin: 0px;
-        }
-        QGroupBox {
+        }}
+        QGroupBox {{
             padding: 0px;
             padding-top: 20px;
             margin: 0px;
-        }
-        #SectionLabel {
+        }}
+        #SectionLabel {{
             padding-top: 10px;
             /* font-weight: bold; */
-        }
-        QScrollBar:vertical {
-            width: 15px;
-        }
+        }}
+        QScrollBar:vertical {{
+            width: {SCROLL_WIDTH}px;
+        }}
     ''')
     app.setApplicationDisplayName(window_name)
     window = VolumetricViewer(vol, window_name=window_name)
