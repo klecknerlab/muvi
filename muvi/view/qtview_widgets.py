@@ -623,7 +623,7 @@ class VolumetricView(QOpenGLWidget):
         self.lastPos = QtCore.QPoint()
 
         self.timer = QtCore.QTimer()
-        self.timer.setInterval(0)
+        self.timer.setInterval(5)
         self.timer.timeout.connect(self.update)
         # self.timer.start()
 

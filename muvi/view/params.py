@@ -251,11 +251,12 @@ def range_from_volume(vol):
     ranges = {}
     for name, param in PARAMS_WITH_VOLUME_RANGES.items():
         try:
-            if param.type == np.ndarray:
+            t = type(param.default)
+
+            if t == np.ndarray:
                 lower = np.zeros_like(param.default)
                 upper = np.array([vol.info[p] for p in param.max_from_vol], dtype=param.default.dtype)
             else:
-                t = type(param.default)
                 lower = t(0)
                 upper = t(vol.info[param.max_from_vol])
         except:
