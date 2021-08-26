@@ -14,9 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Reference: http://qt.apidoc.info/5.2.0/qtopengl/qtopengl-framebufferobject2-example.html
-
-
 try:
     # this fails in <= 2020 versions of Python on OS X 11.x
     from OpenGL.GL import *
