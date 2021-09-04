@@ -786,7 +786,7 @@ class Mesh(object):
         self.triangles = self.triangles[
             np.where((self.triangles != np.roll(self.triangles, 1, axis=-1)).all(-1))]
 
-    def ensure_linear_colors(self, drop_alpha=True):
+    def ensure_linear_colors(self, drop_alpha=False):
         '''If the colors are encoded as unsigned bytes, they will be converted
         to linear scale floats.  The routine assumes the bytes are encoded
         as sRGB, while float values are linear.  (This is generally the case!)

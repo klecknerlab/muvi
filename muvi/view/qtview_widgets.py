@@ -41,6 +41,18 @@ import numpy as np
 
 GAMMA_CORRECT = 2.2
 
+class UnwheelSlider(QSlider):
+    def wheelEvent(self, event):
+        event.ignore()
+
+class UnwheelSpinBox(QSpinBox):
+    def wheelEvent(self, event):
+        event.ignore()
+
+class UnwheelDoubleSpinBox(QDoubleSpinBox):
+    def wheelEvent(self, event):
+        event.ignore()
+
 class ParamControl(QWidget):
     paramChanged = QtCore.pyqtSignal(str, object)
 
@@ -62,7 +74,7 @@ class ParamControl(QWidget):
             self.hbox.addWidget(w)
 
         if slider:
-            self.slider = QSlider(QtCore.Qt.Horizontal)
+            self.slider = UnwheelSlider(QtCore.Qt.Horizontal)
             self.slider.setTickPosition(QSlider.TicksAbove | QSlider.TicksBelow)
 
             if sideSlider:
@@ -149,6 +161,7 @@ class BoolControl(ParamControl):
     def __init__(self, title="Value:", default=True, tooltip=None, param=None):
         self.checkBox = QCheckBox()
         super().__init__(title, param, tooltip, self.checkBox)
+        self.checkBox.setChecked(default)
         self.checkBox.stateChanged.connect(lambda s: self._paramChanged(bool(s)))
 
     def setValue(self, value):
@@ -158,7 +171,7 @@ class BoolControl(ParamControl):
 class IntControl(ParamControl):
     def __init__(self, title="Value:", default=50, minVal=0, maxVal=100,
             step=None, tooltip=None, param=None):
-        self.spinBox = QSpinBox()
+        self.spinBox = UnwheelSpinBox()
 
         super().__init__(title, param, tooltip, w=self.spinBox, slider=True)
 
@@ -192,7 +205,7 @@ class LinearControl(ParamControl):
     def __init__(self, title="Value:", default=50, minVal=0, maxVal=100,
             step=None, decimals=None, tooltip=None, param=None, subdiv=5):
 
-        self.spinBox = QDoubleSpinBox()
+        self.spinBox = UnwheelDoubleSpinBox()
 
         super().__init__(title, param, tooltip, w=self.spinBox, slider=True)
 
@@ -230,6 +243,12 @@ class LinearControl(ParamControl):
         self.spinBox.setValue(value)
         self.slider.setValue(int((value - self.minVal) * self.ratio + 0.5))
 
+    def setSilent(self, value):
+        silent = self.silent
+        self.silent = True
+        self.setValue(value)
+        self.silent = silent
+
     def spinChanged(self, value):
         self.slider.blockSignals(True)
         self.slider.setValue(int((value - self.minVal) * self.ratio + 0.5))
@@ -239,7 +258,7 @@ class LinearControl(ParamControl):
         self.spinBox.setValue(value / self.ratio + self.minVal)
 
 
-class LogSpinBox(QDoubleSpinBox):
+class LogSpinBox(UnwheelSpinBox):
     def stepBy(self, step):
         sm = self.singleStep()
         i = math.log(self.value(), sm) + step
@@ -391,7 +410,7 @@ class ColorControl(ParamControl):
         self.colorSelector.setValue(toQColor(value))
 
 
-class ListSpinBox(QSpinBox):
+class ListSpinBox(UnwheelSpinBox):
     def __init__(self, default, values, minVal=None, maxVal=None, parent=None):
         super().__init__(parent)
         self.values = tuple(sorted(values))
@@ -480,12 +499,20 @@ class VectorControl(QGroupBox):
             control.paramChanged.connect(self._paramChanged)
             self.controls.append(control)
 
+        self.silent = False
+
     def setValue(self, value):
         self.value = value.copy()
         for control, val in zip(self.controls, self.value):
             control.blockSignals(True)
             control.setValue(val)
             control.blockSignals(False)
+
+    def setSilent(self, value):
+        silent = self.silent
+        self.silent = True
+        self.setValue(value)
+        self.silent = silent
 
     def setRange(self, minVal, maxVal):
         for control, minv, maxv in zip(self.controls, minVal, maxVal):
