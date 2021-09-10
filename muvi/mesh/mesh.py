@@ -1224,7 +1224,8 @@ def encode_ply(points, tris, normals=None, colors=None, enforce_types=True, extr
     if enforce_types:
         points = np.asarray(points, 'f')
         tris = np.asarray(tris, 'i')
-        if normals is not None: normals = np.asarray(normals, 'f')
+        if normals is not None:
+            normals = np.asarray(normals, 'f')
         if colors is not None:
             colors = np.asarray(colors)
             if colors.dtype in ('f', 'd'):

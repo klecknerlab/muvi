@@ -258,7 +258,7 @@ class LinearControl(ParamControl):
         self.spinBox.setValue(value / self.ratio + self.minVal)
 
 
-class LogSpinBox(UnwheelSpinBox):
+class LogSpinBox(UnwheelDoubleSpinBox):
     def stepBy(self, step):
         sm = self.singleStep()
         i = math.log(self.value(), sm) + step
@@ -492,9 +492,8 @@ class VectorControl(QGroupBox):
         self.value = default.copy()
 
         for i in range(len(default)):
-            control = LinearControl(labels[i], default[i],
-                minVal[i], maxVal[i], self.step, param=str(i), subdiv=subdiv,
-                tooltip=tooltip)
+            control = LinearControl(labels[i], default[i], minVal[i], maxVal[i],
+                self.step, param=str(i), subdiv=subdiv, tooltip=tooltip)
             self.vbox.addWidget(control)
             control.paramChanged.connect(self._paramChanged)
             self.controls.append(control)
@@ -542,7 +541,14 @@ PARAM_FIELDS = {
     'options':'options',
 }
 
-def control_from_param(param):
+def control_from_param(param, view=None):
+    if hasattr(param, 'action'):
+        button = QPushButton(param.display_name)
+        func = getattr(view, param.action, None)
+        if func is not None:
+            button.clicked.connect(lambda: func(*param.args, **param.kw))
+        return button
+
     kwargs = dict(
         title = param.display_name + ":",
         param = param.name
@@ -573,7 +579,7 @@ def control_from_param(param):
     else:
         return None
 
-def param_list_to_vbox(params, vbox):
+def param_list_to_vbox(params, vbox, view=None):
     param_controls = {}
 
     sub_vbox = vbox
@@ -623,12 +629,13 @@ def param_list_to_vbox(params, vbox):
         else:
             # This is just an item
             # print(param.name)
-            control = control_from_param(param)
+            control = control_from_param(param, view)
             if control is not None:
                 sub_vbox.addWidget(control)
                 # if isinstance(control, QGroupBox):
                     # sub_vbox.addSpacing(10)
-                param_controls[param.name] = control
+                if hasattr(param, 'name'):
+                    param_controls[param.name] = control
 
     return param_controls
 
