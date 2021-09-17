@@ -19,6 +19,7 @@ from .vectors import norm, mag, mag1, dot, dot1, cross, generate_basis, \
 from .mesh import Mesh, load_mesh
 import numpy as np
 import os
+from matplotlib import cm
 
 '''
 This module contains basic operations for generating meshes of glyphs, intended
@@ -93,6 +94,10 @@ def generate_glyphs(X, glyph="sphere", a=1, color=None, N=np.array([1, 0, 0], dt
     n_glyphs = len(X)
     n_points = len(glyph.points)
 
+    a = np.asarray(a)
+    if not a.shape:
+        a = np.full(n_glyphs, a)
+
     points = X.reshape(-1, 1, 3) + ((a.reshape(n_glyphs, 1, -1) * glyph.points).reshape(n_glyphs, n_points, 3, 1) * T).sum(-2)
 
     normals = getattr(glyph, 'normals', None)
@@ -107,7 +112,11 @@ def generate_glyphs(X, glyph="sphere", a=1, color=None, N=np.array([1, 0, 0], dt
     output = Mesh(points.reshape(-1, 3), tris.reshape(-1, 3), normals.reshape(-1, 3))
 
     if color is not None:
-        pass
+        # color = enforce_shape(color, (len(points),))
+        if clim is None:
+            clim = (color.min(), color.max())
+        rgba = cm.get_cmap(cmap)((color - clim[0]) / (clim[1] - clim[0]))
+        output.colors = np.tile(rgba[:, np.newaxis, :3], (1, n_points, 1)).reshape(-1, 3)
     else:
         colors = getattr(glyph, 'colors', None)
         if colors is not None:

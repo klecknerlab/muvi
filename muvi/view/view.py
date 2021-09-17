@@ -1,304 +1,551 @@
-#!/usr/bin/python3
-#
-# Copyright 2021 Dustin Kleckner
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+from .ogl import ShaderProgram, GL, VertexArray, FrameBuffer, useProgram, \
+    norm, cross, mag, dot, dot1, textureFromArray, Texture
+from scipy.spatial.transform import Rotation
+from ..mesh import load_mesh, Mesh
+from .. import open_3D_movie, VolumetricMovie
+import numpy as np
+import sys, os
+# from text_render import TextRenderer
+from .params import PARAMS, MAX_CHANNELS, COLORMAPS, ASSET_DEFAULTS, ASSET_PARAMS
+import re
 
-'''
-This file contains the openGL routines for drawing a volume, but does not
-actually handle any of window managment.
+SHADER_DIR = os.path.join(os.path.split(__file__)[0], 'shaders')
 
-The qtview module contains an example of a routine that uses these functions.
-'''
-
-
-# A previous attempt to code this module did not rely on pyopengl, but rather
-# used the external module to supply the OpenGL functions -- this proved quite
-# problematic!  It turns out you can directly embed pyopengl in a pyqt5 widget
-# so long as _all_ of the calls are from pyopengl; mixing calls from the two
-# set of opengl function produces errors.
-#
-# The pyqt opengl is particularly problematic for passing numpy data, which
-# makes it useless here!
-
-from .ooopengl import *
-from string import Template
-import os
-from PIL import Image
-import warnings
-from .params import PARAMS, SHADER_PATH, MAX_CHANNELS, COLORMAPS, \
-    SUBSHADER_TYPES, SUBSHADER_SOURCE
-# import time
 
 #--------------------------------------------------------
-# Constants for drawing boxes
+# Rounding to nearest 1/2/5, used for axes
 #--------------------------------------------------------
 
-_UNIT_BOX = np.array([(x, y, z) for x in (0, 1) for y in (0, 1) for z in (0, 1)], dtype='f')
 
-_BOX_FACES = np.array([
-    0, 1, 3, 2, #-X
-    4, 6, 7, 5, #+X
-    0, 4, 5, 1, #-Y
-    2, 3, 7, 6, #+Y
-    0, 2, 6, 4, #-Z
-    1, 5, 7, 3, #+Z
+_OTF = np.array([1, 2, 5], 'd')
+
+def ceil125(x):
+    round_up = 10**np.ceil(np.log10(x / _OTF)) * _OTF
+    return round_up[np.argmin(round_up - x)]
+
+def pow125(i):
+    return 10**float(i//3) * _OTF[i%3]
+
+def log125(x):
+    l10 = int(np.floor(np.log10(x)))
+    wl = np.where(x >= _OTF*10**l10)[0]
+    return l10 * 3 + ((wl).max() if len(wl) else 0)
+
+
+#----------------------------------------------------------------
+# ViewAsset class: an object that can be displayed by the viewer
+#----------------------------------------------------------------
+
+CUBE_CORNERS = ((np.arange(8).reshape(-1, 1) // 2**np.arange(3)) % 2).astype('f')
+CUBE_TRIANGLES = np.array([
+    0, 1, 5, 0, 5, 4,
+    1, 3, 7, 1, 7, 5,
+    2, 7, 3, 2, 6, 7,
+    0, 4, 2, 2, 4, 6,
+    4, 5, 7, 4, 7, 6,
+    0, 2, 3, 0, 3, 1
 ], dtype='u4')
 
-_BOX_EDGES = [(i, j) for i in range(8) for j in range(8) if ((i < j) and sum((_UNIT_BOX[i] - _UNIT_BOX[j])**2) == 1.)]
+class ViewAsset:
+    def __init__(self, data, id=0, parent=None):
+        self.filename = None
+        self.info = []
+        self.parent = parent
+        self.id = id
 
-_FS_QUAD = np.array([
-    (-1, -1, 0),
-    (+1, -1, 0),
-    (+1, +1, 0),
-    (-1, +1, 0),
-], dtype='f')
-_FS_QUAD_FACES = np.arange(4, dtype='u4')
+        if isinstance(data, str):
+            bfn, ext = os.path.splitext(data)
+            ext = ext.lower()
 
-#--------------------
-# The main view class
-#--------------------
+            if ext in ('.vti', '.cine'):
+                self.filename = data
+                data = open_3D_movie(data)
+            elif ext in ('.ply'):
+                dir, bfn = os.path.split(bfn)
+                m = re.match('(.*_)frame([0-9]+)', bfn)
+                if m: # This is a sequence of polygon meshes!
+                    self.filename = m.group(1) + "[frame]" + ext
+                    data = {}
+                    regex = re.compile(f'{m.group(1)}frame([0-9]+)' + ext)
+
+                    for fn in os.listdir(dir):
+                        m2 = regex.match(fn)
+                        if m2:
+                            data[int(m2.group(1))] = os.path.join(dir, fn)
+                else:
+                    self.filename = data
+                    data = load_mesh(data)
+            else:
+                raise ValueError('Supported file types are VTI, CINE, and PLY')
+
+
+        if self.filename is None:
+            self.info.append('Source: Object passed directly to viewer')
+            self.filename = '-'
+        else:
+            dir, self.filename = os.path.split(self.filename)
+            self.info.append(f'Directory: {dir}')
+
+        self.isVolume = False
+        self.visible = False
+        self.vertexArray = None
+        self.validFrame = True
+        self._frame = None
+        self.uniforms = {}
+        self.globalUniformNames = set()
+
+        if isinstance(data, Mesh):
+            self.shader = 'mesh'
+            self.vertexArray, self.X0, self.X1 = meshToVertexArray(data)
+            self.frameRange = None
+            self.label = f'Mesh: {self.filename}'
+
+        elif isinstance(data, dict):
+            self.shader = 'mesh'
+            self.X0 = None
+            self.X1 = None
+            self.meshSeq = {}
+
+            X0s = []
+            X1s = []
+
+            for key, mesh in data.items():
+                if isinstance(mesh, str):
+                    mesh = load_mesh(mesh)
+                va, X0, X1 = meshToVertexArray(mesh)
+                self.meshSeq[key] = va
+                X0s.append(X0)
+                X1s.append(X1)
+
+            self.X0 = np.min(X0s, axis=0)
+            self.X1 = np.max(X1s, axis=0)
+
+            keys = self.meshSeq.keys()
+            self.frameRange = (min(keys), max(keys))
+            self.missingFrames = len(keys) != (self.frameRange[1] - self.frameRange[0] + 1)
+
+            self.label = f'Mesh Seq.: {self.filename}'
+
+        elif isinstance(data, VolumetricMovie):
+            self.volume = data
+            self.isVolume = True
+            self.shader = 'volume'
+            self.X0 = np.zeros(3, 'f')
+            self.X1 = np.array(self.volume.info.get_list('Lx', 'Ly', 'Lz'), dtype='f')
+            self.uniforms = dict(
+                vol_L = self.X1,
+                vol_N = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f'),
+            )
+            self.globalUniforms = {}
+            self.globalUniformNames.update(self.parent._shaderDep[self.shader])
+            self.globalUniformNames.update(self.parent._rebuildDep.keys())
+
+            self.frameRange = (0, len(self.volume) - 1)
+
+            vol = self.volume[0]
+            if vol.ndim == 3:
+                vol = vol[..., np.newaxis]
+
+            GL.glActiveTexture(GL.GL_TEXTURE1)
+            self.volumeTexture = textureFromArray(vol, wrap=GL.GL_CLAMP_TO_BORDER)
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+
+
+            points = np.empty(len(CUBE_CORNERS), _volVertType)
+            points['position'] = CUBE_CORNERS
+            self.vertexArray = VertexArray(points)
+            self.vertexArray.attachElements(CUBE_TRIANGLES)
+
+            self.label = f"Volumes: {self.filename}"
+
+        else:
+            raise ValueError('asset data should be a filename, Mesh/VolumetricMovie object, or dictionary of {frameNumber:Mesh}')
+
+        with np.printoptions(precision=4) as opts:
+            self.info.append(f'Lower Extent: {self.X0}')
+            self.info.append(f'Upper Extent: {self.X1}')
+
+        if self.frameRange is not None:
+            self.info.append(f"Frames: {self.frameRange[0]}-{self.frameRange[1]}{' (missing)' if getattr(self, 'missingFrames', False) else ''}")
+
+        self.update(ASSET_DEFAULTS[self.shader])
+
+    def paramList(self):
+        return ASSET_PARAMS[self.shader]
+
+    def __setitem__(self, key, val):
+        if key in self.globalUniformNames:
+            if self.visible:
+                self.parent[key] = val
+            self.globalUniforms[key] = val
+        elif key == 'frame':
+            self.setFrame(val)
+        elif key == 'visible':
+            if val and hasattr(self, 'globalUniforms'):
+                self.parent.update(self.globalUniforms)
+            self.visible = val
+        else:
+            self.uniforms[key] = val
+
+    def update(self, d):
+        for k, v in d.items():
+            self.__setitem__(k, v)
+
+    def setFrame(self, frame):
+        if frame == self._frame or self.frameRange is None:
+            self.validFrame = True
+            return
+        elif frame < self.frameRange[0] or frame > self.frameRange[1]:
+            self.validFrame = False
+            return
+        self.validFrame = True
+
+        if self.isVolume:
+            if frame != getattr(self, '_frame', None):
+                GL.glActiveTexture(GL.GL_TEXTURE1)
+                self.volumeTexture.replace(self.volume[frame])
+
+        elif hasattr(self, 'meshSeq'):
+            self.vertexArray = self.meshSeq.get(frame, None)
+            if self.vertexArray is None:
+                self.validFrame = False
+
+        self._frame = frame
+
+    def draw(self):
+        if self.validFrame:
+            self.vertexArray.draw()
+
+    def delete(self):
+        # Explicitly clean up opengl storage.
+        # Trusting the garbage collector to do this isn't a good idea, as it
+        #   doesn't work well on app shutdown.
+        if hasattr(self, 'volumeTexture'):
+            self.volumeTexture.delete()
+        if hasattr(self, 'meshSeq'):
+            for item in self.meshSeq.values():
+                item.delete()
+            del self.vertexArray
+        if hasattr(self, 'vertexArray'):
+            self.vertexArray.delete()
+
+_meshVertType = np.dtype([
+    ('position', '3float32'),
+    ('normal',   '3float32'),
+    ('color',    '4float32')
+])
+
+_volVertType = np.dtype([
+    ('position', '3float32'),
+])
+
+def meshToVertexArray(m):
+    N = len(m.points)
+    vert = np.empty(N, _meshVertType)
+
+    if not hasattr(m, 'normals'):
+        raise ValueError('Displayed meshes must include point normals!')
+
+    vert['position'] = m.points
+    vert['normal'] = m.normals
+
+    if hasattr(m, 'colors'):
+        N, channels = m.colors.shape
+        m.ensure_linear_colors()
+        vert['color'][:, :channels] = m.colors
+
+        if channels == 3:
+            vert['color'][:, 3] = 1.0
+    else:
+        vert['color'] = 1.0
+
+    X0 = m.points.min(0)
+    X1 = m.points.max(0)
+
+    va = VertexArray(vert)
+    va.attachElements(m.triangles.astype('u4'))
+
+    return va, X0, X1
+
+
+#--------------------------------------------------------
+# View class: handles low level GL calls, UI agnostic!
+#--------------------------------------------------------
+
 class View:
-    '''An object used to render views of 3D volumes.  This class does not take
-    care of window management, just the low-level OpenGL calls and viewport
-    and rendering managment.
+    AXIS_MAX_TICKS = 1000
 
-    Parameters
-    ----------
-    volume : 3D volumetric movie to be displayed.
-    R : [3, 3] rotation matrix; will be automatically converted to orthonormal.
-    center : [3] vector, center of view.
-    fov : vertical field of view (default: 45).  If <= 0, flat projection is
-            used instead.
-    scale : overall scale of object in display.  If set to 1 / volume height,
-            will fill the vertical axis of the window
-            (default: None, set on first display.)
-    X0 : [3] vector, lower edge of volume view (default: [0, 0, 0]).
-    X1 : [3] vector, upper edge of volume view (default: None, set on
-            first display to be entire volume)
-    width : int (default: 1000), the width of the view
-    height : int (default: 1000), the height of the view
-    os_width : int (default: 1920), the width of the off-screen view (used for screenshots)
-    os_height : int (default: 1080), the height of the off-screen view
-
-    Note that X0, X1, and center are in physical units, i.e. the units used
-    by Lx, Ly, and Lz in the volume.
-    '''
-
-    view_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='view'}
-    uniform_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='uniform'}
-    shader_defaults = {k:v.default for k, v in PARAMS.items() if v.vcat=='shader'}
-
-    hidden_uniform_defaults = {
-        'vol_texture': 0,
-        'back_buffer_texture': 1,
-        'colormap1_texture': 2,
-        'colormap2_texture': 3,
-        'colormap3_texture': 4,
-        'vol_size': np.ones(3, dtype='f')*256,
-        'vol_L': np.ones(3, dtype='f')*256,
-        'grad_step': 1.0,
-        # 'gamma_correct': 1/2.2,
+    _shaderDep = {
+        "volume": {"surface_shade", "perspective_model", "cloud_shade",
+            "color_remap", "vol_cloud1", "vol_cloud2", "vol_cloud3", "vol_iso1",
+            "vol_iso2", "vol_iso3", "gamma2"},
+        "mesh": {"surface_shade", "mesh_clip"},
+        # "text": {},
+        "axis": {},
     }
 
-    def __init__(self, volume=None, width=1000, height=1000, os_width=1920, os_height=1080, params={}, source_dir=None):
+    _rebuildDep = {
+        "camera_pos":{"viewMatrix", "visibleAxisFaces"},
+        "look_at":{"viewMatrix"},
+        "up":{"viewMatrix"},
+        "fov":{"perspectiveMatrix", "visibleAxisFaces"},
+        "near":{"perspectiveMatrix"},
+        "far":{"perspectiveMatrix"},
+        "disp_X0":{"axisLines", "visibleAxisFaces", "viewMatrix"},
+        "disp_X1":{"axisLines", "visibleAxisFaces", "viewMatrix"},
+        "axis_major_tick_spacing":{"axisLines"},
+        "axis_minor_ticks":{"axisLines"},
+        "axis_major_tick_length_ratio":{"axisLines"},
+        "axis_minor_tick_length_ratio":{"axisLines"},
+        "mesh_scale":{"meshModelMatrix"},
+        "mesh_offset":{"meshModelMatrix"},
+        "vol_colormap1":{"colormaps"},
+        "vol_colormap2":{"colormaps"},
+        "vol_colormap3":{"colormaps"},
+        # "frame":{"frame"},
+    }
 
-        self.width = width
-        self.height = height
-        self._old_width = -1
-        self._old_height = -1
-        self.os_width = os_width
-        self.os_height = os_height
-        self._old_os_width = -1
-        self._old_os_height = -1
+    _allShaderDep = set.union(*_shaderDep.values())
 
-        self.buttons_pressed = 0
+    # Note: Camel case params are generated automatically, underscore versions
+    #  correspond to external params.
+    _defaults = dict(
+        # surface_shade = "camera",
+        # cloud_shade = "colormap",
+        perspective_model = "simple",
+        # mesh_perspective_correction = False,
+        fontAtlas = 0,
+        # model_matrix = np.eye(4, dtype='f'),
+        # camera_pos = np.array([0, 300, 100], dtype='f'),
+        # up = np.array([0, 1, 0], dtype='f'),
+        # look_at = np.full(3, 50, dtype='f'),
+        # fov = 45.0,
+        near = 1.0,
+        far = 1000.0,
+        # disp_X0 = np.full(3, 0, dtype='f'),
+        # disp_X1 = np.full(3, 100, dtype='f'),
+        depthTexture = 0,
+        volumeTextureId = 1,
+        colormap1Texture = 2,
+        colormap2Texture = 3,
+        colormap3Texture = 4,
+        # color_remap = "rgb",
+        # mesh_clip = True,
+        # mesh_scale = 20,
+        # mesh_offset = np.full(3, 50, dtype='f'),
+        # axis_line_color = np.ones(3, dtype='f'),
+        # axis_line_width = 1.,
+        display_scaling = 1.0,
+        # background_color = np.zeros(3, dtype='f'),
+        # axis_major_tick_spacing = 20,
+        # axis_minor_ticks = 4,
+        # axis_major_tick_length_ratio = 0.15, # Relative to major spacing
+        # axis_minor_tick_length_ratio = 0.6, # Relative to major length
+        # show_mesh = True,
+        # show_volume = True,
+        # show_axis = True,
+        axis_max_ticks = 9,
+    )
 
-        self.params = self.view_defaults.copy()
-        self.params.update(self.shader_defaults)
-        self.params.update(self.uniform_defaults)
+    _subShaders = {"surface_shade", "cloud_shade", "perspective_model"}
 
-        self.hidden_uniforms = self.hidden_uniform_defaults.copy()
+    def __init__(self, valueCallback=None, rangeCallback=None):
+        self.buffers = {}
+        self.viewMatrix = []
+        # self._callbacks = {}
+        # self._rangeUpdates = {}
+        self._params = self._defaults.copy()
+        for k, v in PARAMS.items():
+            self._params[k] = v.default
+        self._uniforms = {}
+        # self._uniformUpdates = {}
+        self._uniformNames = set()
+        self._updateView = True
+        self._uniformLastUpdate = 0
+        self._needsRebuild = set.union(*self._rebuildDep.values())
+        self.perspectiveMatrix = {}
+        self.shaders = {}
+        self.volFrames = 0
+        self.visibleAssets = {
+            "volume":set(),
+            "mesh":set(),
+        }
+        self.assets = {}
 
-        if volume is not None:
-            self.attach_volume(volume)
+        self._valueCallbacks = (valueCallback, ) if valueCallback is not None else ()
+        self._rangeCallbacks = (rangeCallback, ) if rangeCallback is not None else ()
+
+        self._cachedShaders = {}
+        self._subShaderCode = {}
+        self._colormap = [None] * MAX_CHANNELS
+        self.frameRange = None
+
+    #--------------------------------------------------------
+    # Shader Compilation
+    #--------------------------------------------------------
+
+    def getSubShader(self, subshader):
+        target = subshader + "_" + self[subshader]
+
+        if target not in self._subShaderCode:
+            with open(os.path.join(SHADER_DIR, target + '.glsl'), 'rt') as f:
+                self._subShaderCode[target] = f.read() + '\n'
+
+        return self._subShaderCode[target]
+
+    def buildShader(self, target):
+        if target not in self._shaderDep:
+            raise ValueError(f'Shader target should be one of {tuple(self._shaderDep.keys())}')
+
+        deps = self._shaderDep[target]
+
+        # Make a unique key for this shader
+        key = (target, ) + tuple(self._params[key] for key in deps)
+
+        # See if it's already been compiled...
+        if key in self._cachedShaders:
+            shader = self._cachedShaders[key]
+        # If not, let's compile!
         else:
-            self.volume = None
+            code = {}
 
-        self.reload_shaders()
+            prefixCode = []
 
+            for dep in deps:
+                if dep in self._subShaders:
+                    prefixCode.append(self.getSubShader(dep))
+                elif dep != "color_remap" and self[dep]:
+                    prefixCode.insert(0, f'#define {dep.upper()} 1')
 
-    def init_gl(self):
-        '''Initiliaze OpenGL components.
+            prefixCode = '\n'.join(prefixCode)
 
-        This will be automatically called on the first draw statement, if not
-        done manually.
-        '''
+            for st in ('vertex', 'geometry', 'fragment'):
+                fn = os.path.join(SHADER_DIR, f'{target}_{st}.glsl')
+                if os.path.exists(fn):
+                    with open(fn, 'rt') as f:
+                        source = f.read()
+                        source = source.replace('//<<INSERT_SHARED_FUNCS>>',
+                            prefixCode)
+                        source = source.replace('<<COLOR_REMAP>>',
+                            self['color_remap'])
+                        code[f'{st}Shader'] = source
 
-        if getattr(self, '_init_gl', False):
-            return True
+            shader = ShaderProgram(**code)
+            self._uniformNames.update(shader.keys())
+            for k in shader.keys():
+                if k in self._params:
+                    self._uniforms[k] = self._params[k]
 
-        self.texture_to_color_shader = ShaderProgram(fragment_shader='''
-            void main() {
-                gl_FragColor = vec4(gl_TexCoord[0].xyz, 1.0);
-            }
-        ''')
+            self._cachedShaders[key] = shader
 
-        self.interference_shader = ShaderProgram(fragment_shader = '''
-            #extension GL_ARB_texture_rectangle : enable
+        self.shaders[target] = shader
+        shader.update(self._uniforms, ignore=True)
 
-            uniform sampler2DRect back_buffer;
-            uniform float scale;
+        return shader
 
-            void main() {
-                float x = scale*length(gl_TexCoord[0].xyz - texture2DRect(back_buffer, gl_FragCoord.st).rgb);
-                vec3 int_color = sin(vec3(x*6.15, x*7.55, x*8.51));
-                int_color = int_color * int_color;
-                gl_FragColor = vec4(int_color, 1.0);
-            }
-        ''', uniforms=dict(back_buffer=1, scale=2.0))
-
-        for n in range(1, MAX_CHANNELS + 1):
-            self.update_colormap(n)
-
-        self.update_shader()
-
-        self._init_gl = True
-
-        if getattr(self, 'volume', None):
-            self.attach_volume(self.volume)
-
-
-    def reload_shaders(self):
-        '''Load shaders from the shader directory.
-
-        Normally not called by the user, but can be used to udpate sources,
-        if they are being edited while a program is being run.
-
-        If you are doing this, you should also call the `refresh_shaders`
-        function first.  (Note: this is *not* a method of the view class, but
-        is in the view module.)
-        '''
-        with open(os.path.join(SHADER_PATH, 'volume_shader.glsl')) as f:
-            self.source_template = f.read()
-
-        self.cached_shaders = {}
-
-
-    def update_shader(self, distortion_model=None):
-        '''Recompile the shader based on the current view options.
-        '''
-
-        # See if this shader has already been compiled by making a key
-        key = hash(tuple(self.params[key] for key in self.shader_defaults.keys()) + (distortion_model, ))
-
-        # for k in self.shader_defaults.keys():
-        #     print(f'{k:20s}: {repr(self.params[k])}')
-
-        uniforms = self.get_uniforms(include_hidden=True)
-
-        if key in self.cached_shaders:
-            self.current_volume_shader = self.cached_shaders[key]
-            self.current_volume_shader.bind()
-            self.current_volume_shader.set_uniforms(**uniforms)
-
-        # If not, lets build a new one.
+    def useShader(self, target):
+        if target is None:
+            useProgram(0)
         else:
-            if distortion_model is None:
-                distortion_model = '''
-                    vec3 distortion_map(in vec3 U) {
-                        float exy = 0.25 * (perspective_xfact * (1.0 - 2.0 * U.x) + perspective_yfact * (1.0 - 2.0 * U.y));
-                        float ez = 0.25 * (perspective_zfact * (1.0 - 2.0 * U.z));
-                        return vec3((U.x + ez) / (1.0 + 2.0*ez), (U.y + ez) / (1.0 + 2.0*ez), (U.z + exy) / (1.0 + 2.0*exy));
-                    }
+            shader = self.shaders.get(target, None)
+            if shader is None:
+                shader = self.buildShader(target)
+            shader.bind()
+            return shader
 
-                    mat3 distortion_map_gradient(in vec3 X) {
-                        mat3 map_grad;
-                        map_grad[0] = vec3(1.0, 0.0, 0.0);
-                        map_grad[1] = vec3(0.0, 1.0, 0.0);
-                        map_grad[2] = vec3(0.0, 0.0, 1.0);
+    #--------------------------------------------------------
+    # UI Interaction methods
+    #--------------------------------------------------------
 
-                        return map_grad;
-                    }
-                '''
+    _assetRe = re.compile('\#([0-8]+)_(.*)')
 
-            code = [distortion_model]
+    def __setitem__(self, key, val, callback=False):
+        self._params[key] = val
 
-            if self.params['gamma2']:
-                code.append('#define GAMMA2_ADJUST 1')
+        if key.startswith('#'):
+            m = self._assetRe.match(key)
+            if not m:
+                raise ValueError('Keys starting with # refer to assets, and should have the form "#[number]_[parameter]')
+            else:
+                id = int(m.group(1))
+                asset = self.assets[id]
+                assetKey = m.group(2)
+                asset[assetKey] = val
 
-            for n in range(1, MAX_CHANNELS + 1):
-                if self.params[f'cloud{n}_active']:
-                    code.append(f'#define CLOUD{n}_ACTIVE 1')
-                if self.params[f'iso{n}_active']:
-                    code.append(f'#define ISOSURFACE{n} 1')
+                if assetKey == "visible":
+                    val = bool(val)
+                    if val:
+                        self.visibleAssets[asset.shader].add(id)
+                        self.resetRange()
+                    else:
+                        if id in self.visibleAssets[asset.shader]:
+                            self.visibleAssets[asset.shader].remove(id)
+                        self.resetRange()
 
-            # Find the cloud_color, iso_level, and iso_color sources
-            for subshader in SUBSHADER_TYPES:
-                # sources = getattr(self, subshader + '_source')
-                sources = SUBSHADER_SOURCE[subshader]
-                name = self.params[subshader]
-
-                if name not in sources:
-                    raise ValueError("Unknown %s shader '%s'" % (subshader, name))
-
-                code.append(sources[name])
-
-            code = self.source_template.replace('<<VOL INIT>>', '\n'.join(code)).replace('<<COLOR_REMAP>>', self.params['color_remap'])
-
-            for n in range(1, MAX_CHANNELS + 1):
-                code = code.replace(f'<<ISO{n}_COLOR>>',
-                    f'vec4(iso_color.r, iso_color.g, iso_color.b, iso{n}_opacity)')
-
-            # print(code)
-            # print(uniforms)
-            # for k, v in uniforms.items():
-            #     print(f'{k:20s}: {repr(v)}')
-
-            self.current_volume_shader = ShaderProgram(fragment_shader=code, uniforms=uniforms)
-            self.cached_shaders[key] = self.current_volume_shader
-
-            self.current_volume_shader.bind()
-            self.current_volume_shader.set_uniforms(**uniforms)
+        else:
+            if key in self._uniformNames:
+                # self._uniformUpdates[key] = val
+                self._uniforms[key] = val
+                for shader in self.shaders.values():
+                    if shader is not None:
+                        shader.__setitem__(key, val, ignore=True)
+            if key in self._rebuildDep:
+                self._needsRebuild.update(self._rebuildDep[key])
+            if key in self._allShaderDep:
+                for shader, dep in self._shaderDep.items():
+                    if key in dep:
+                        self.shaders[shader] = None
+        if callback:
+            for func in self._valueCallbacks:
+                func(key, val)
 
 
-    def units_per_pixel(self):
-        '''Returns the viewport scale in image units per pixel.'''
-        return 2.0/self.params['scale']
+    def update(self, d, callback=False):
+        for k, v in d.items():
+            self.__setitem__(k, v, callback)
 
+    def __getitem__(self, k):
+        return self._params[k]
 
-    def mouse_move(self, x, y, dx, dy):
+    def updateRange(self, name, minVal, maxVal):
+        for func in self._rangeCallbacks:
+            func(name, minVal, maxVal)
+
+    def mouseMove(self, x, y, dx, dy, buttonsPressed):
         '''Handles mouse move events, rotating the volume accordingly.
 
         Parameters
         ----------
-        dx : the x motion since the last event in viewport pixels.
-        dy : the y motion since the last event in viewport pixels.
-
-        Note that the buttons_pressed property should also be directly
-        updated by the window manager.
+        x, y:
+            The x/y coordinate of the mouse, scaled to the height of the
+            viewport
+        dx, dy : int
+            The x/y motion since the last event in viewport pixels, scaled to
+            the height of the viewport
+        buttonsPressed : int
+            A bitmap of buttons pressed (button1 = 1, button2 = 2, button3 = 4,
+            button(1+3) = 5...)
         '''
 
-        h = self.height #Should be replaced by current size?
+        if not buttonsPressed:
+            return
+
+        pb = self.buffers[0] # The primary draw buffer
+        h = pb.height
+        w = pb.width
         dx /= h
         dy /= h
-        x = (x - self.width / 2.) / h
-        y = (y - self.height / 2.) / h
+        x = (x - w/2)/h
+        y = (y - h/2)/h
 
         if abs(x) < 1E-6: x = 1E-6
         if abs(y) < 1E-6: y = 1E-6
 
-        if self.buttons_pressed & 1:
+        F = norm(self['look_at'] - self['camera_pos'])
+        R = norm(cross(F, self['up']))
+        U = cross(F, R)
+
+        if buttonsPressed & 1:
             r = np.sqrt(x**2 + y**2)
             phi = np.arctan2(y, x)
 
@@ -312,443 +559,555 @@ class View:
                 dphi /= r
                 r = 0.33
 
-            r_xy = r_hat * dr + (1 - r) * dphi * phi_hat
-            r_z  = r * dphi
+            r_xy = 3 * (r_hat * dr + np.clip(0.5 - r, 0, 0.5) * dphi * phi_hat)
+            r_z  = 3 * r * dphi
 
-            self.rot_y(3*r_xy[0])
-            self.rot_x(3*r_xy[1])
-            self.rot_z(-r_z)
+            self.rotateCamera((-R*r_xy[1] + U*r_xy[0]) - F * r_z)
 
-        elif self.buttons_pressed & 2:
-            # self.autoscale()
-            self.params['center'] -= self.units_per_pixel() * (self.params['R'][:, 0] * dx - self.params['R'][:, 1] * dy)
+        elif buttonsPressed & 2:
+            self.moveCamera(-self.viewportHeight() * (R * dx + U * dy))
 
-        # display_rot(y = r_xy[0], x = r_xy[1], z = -r_z)
+    #--------------------------------------------------------
+    # Adding/removing Data
+    #--------------------------------------------------------
 
-
-    def get_options(self, var):
-        if var in PARAMS and hasattr(PARAMS[var], 'options'):
-            return PARAMS[var].options
-        # if var == 'cloud_color':
-        #     return self.cloud_color_names
-        # elif var == 'colormap':
-        #     return _colormap_names
-        # elif var == 'color_remap':
-        #     return _color_remaps
+    def openData(self, data):
+        if self.assets:
+            id = max(self.assets.keys()) + 1
         else:
-            raise ValueError("parameter '%s' does not exist or does not have a list of options" % var)
+            id = 0
+        asset = ViewAsset(data, id, parent=self)
+        self.assets[id] = asset
+        # self[f'#{id}_visible'] = True # Will automatically trigger resetRange
+        # self.resetView()
+        return asset
 
+    def removeAsset(self, id):
+        asset = self.assets[id]
+        self[f'#{asset.id}_visible'] = False
+        asset.delete()
+        del self.assets[id]
 
-    def update_colormap(self, n=1):
-        '''Choose the display colormap.
+    def resetRange(self):
+        X0 = []
+        X1 = []
+        frameRange = []
+        frames = 0
 
-        Parameters
-        ----------
-        name : str (default: "viridis")
-            The "short name" of the colormap (corresponds to a key in the
-            `COLORMAPS` global dictionary.
+        for asset in self.assets.values():
+            if asset.visible:
+                X0.append(asset.X0)
+                X1.append(asset.X1)
+                if asset.frameRange is not None:
+                    frameRange.append(asset.frameRange)
 
-        Keywords
-        --------
-        n : int (default: 1)
-            The channel index we are selecting the color map for
-            (n = 1-MAX_CHANNELS)
-        '''
+        if not len(X0):
+            return
 
-        if not hasattr(self, 'colormap_textures'):
-            self.colormap_textures = [
-                Texture(size = (256, ), format=GL_RGB, wrap=GL_CLAMP_TO_EDGE,
-                         internal_format=GL_SRGB)
-                for i in range(MAX_CHANNELS)
-            ]
+        X0 = np.min(X0, axis=0)
+        X1 = np.max(X1, axis=0)
 
-        glActiveTexture(GL_TEXTURE2 + (n-1))
-
-        name = self.params['colormap' + str(n)]
-        if name not in COLORMAPS:
-            raise ValueError("unknown colormap '%s'" % name)
-        self.colormap_textures[n-1].replace(COLORMAPS[name].data)
-
-        glActiveTexture(GL_TEXTURE0)
-
-
-    def attach_volume(self, volume):
-        '''Attach a VolumetricMovie to the view.'''
-        self.volume = volume
-
-        if getattr(self, '_init_gl', False):
-            if hasattr(self, 'volume_texture'):
-                self.volume_texture.delete()
-
-            vol = self.volume[0]
-            if vol.ndim == 3: vol = vol[..., np.newaxis]
-
-            glActiveTexture(GL_TEXTURE0)
-
-            self.volume_texture = texture_from_array(vol, wrap=GL_CLAMP_TO_EDGE)
-
-        gamma = self.volume.info.get('gamma', 1.0)
-        self.params['gamma2'] = gamma > 1.95 and gamma < 2.05
-
-        self.reset_view()
-
-
-    def reset_view(self):
-        if hasattr(self, 'volume'):
-            vs = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f')
-            L = np.array(self.volume.info.get_list('Lx', 'Ly', 'Lz'), dtype='f')
+        if frameRange:
+            frameRange = np.array(frameRange)
+            frameRange = (frameRange[:, 0].min(), frameRange[:, 1].max())
         else:
-            vs = np.ones(3, dtype='f')
-            L = 100 * vs
+            frameRange = None
 
-        self.update_params(vol_size=vs, vol_L=L, center=0.5*L,
-                           X1=L, X0=np.zeros(3, dtype='f'),
-                           scale=float(2.0 / mag(L)))
+        self.frameRange = frameRange
 
+        D = max(X1 - X0) * np.ones(3, 'f')
 
-    def frame(self, frame):
-        '''Change the displayed frame.
+        # Build the tick spacing, which is the nearest 125 increment that
+        #  has less than the specified number of (major) ticks
+        majorTick = ceil125(D / self['axis_max_ticks'])
+        # print(X0, X1, D, majorTick)
+        lc = log125(majorTick)
+        # Minor ticks: 5 if the first digit is 1 or 5, or 4 if the first digit is 2
+        #  ... or just go down two "powers" of the 125 sequence
+        minorTicks = int(np.round(pow125(lc) / pow125(lc-2)))
+        minorTick = majorTick / minorTicks
 
-        Parameters
-        ----------
-        frame : int
-            The new frame number
-        '''
+        co = self['camera_pos']
+        la = self['look_at']
 
-        if self.volume is not None:
-            glActiveTexture(GL_TEXTURE0)
+        # Allow user to set range past limits, to next *major* tick
+        X0r = np.floor(X0 / majorTick) * majorTick
+        X1r = np.ceil(X1 / majorTick) * majorTick
+        self.updateRange('disp_X0', X0r, X1r)
+        self.updateRange('disp_X1', X0r, X1r)
+        self.updateRange('camera_pos', -10 * D, 10 * D)
+        self.updateRange('look_at', X0r, X1r)
+        if frameRange is not None:
+            self.updateRange('frame', frameRange[0], frameRange[1])
 
-            vol = self.volume[frame % len(self.volume)]
-            if vol.ndim == 3: vol = vol[..., np.newaxis]
-            self.volume_texture.replace(vol)
+        self.update({
+            # Default limits expanded to nearest *minor* tick
+            "disp_X0": np.floor(X0 / minorTick) * minorTick,
+            "disp_X1": np.ceil(X1 / minorTick) * minorTick,
+            "axis_major_tick_spacing": majorTick,
+            "axis_minor_ticks": minorTicks,
+        }, callback=True)
 
+        self.resetView(co-la)
 
-    def get_uniforms(self, include_hidden=False):
-        '''Get a dictionary of the uniforms used by the volume shader.
+    #--------------------------------------------------------
+    # Methods for manipulating the viewport
+    #--------------------------------------------------------
 
-        Keywords
-        --------
-        include_hidden : bool (default: False)
-            If True, also includes hidden uniforms.
-        '''
+    def rotateCamera(self, vec):
+        R = Rotation.from_rotvec(vec).as_matrix()
+        lookAt = self['look_at']
+        self.update({
+            'camera_pos': lookAt + (R * (self['camera_pos'] - lookAt)).sum(-1),
+            'up': (R * norm(self['up'])).sum(-1)
+        }, callback=True)
 
-        d = self.hidden_uniforms.copy() if include_hidden else {}
-        for k in self.uniform_defaults.keys():
-            d[k] = self.params[k]
+    def moveCamera(self, vec):
+        self.update({
+            'camera_pos': vec + self['camera_pos'],
+            'look_at': vec + self['look_at']
+        }, callback=True)
 
-        return d
+    def zoomCamera(self, zoom):
+        lookAt = self['look_at']
+        self.update({
+            'camera_pos': lookAt + zoom * (self['camera_pos'] - lookAt)
+        }, callback=True)
 
+    def viewportHeight(self):
+        '''Gives the height of the viewport in world units at the 'lookAt'
+        location'''
+        dist = mag(self['look_at'] - self['camera_pos'])
+        fov = self['fov']
 
-    def update_params(self, **kwargs):
-        '''Updates the view parameters, performing all necessary updates
-        downstream.
+        if fov > 1E-3:
+            return 2 * dist * np.tan(self['fov'] * np.pi / 360)
+        else:
+            return 2 * dist * np.tan(30 * np.pi / 360)
 
-        Note: this is the prefered method to update the `params` dictionary,
-        as updating it directly will not trigger all the dependent operations
-        to be performed.
-        '''
+    #--------------------------------------------------------
+    # Methods for rebuilding automatically determined uniforms
+    #--------------------------------------------------------
 
-        if 'frame' in kwargs:
-            self.params['frame'] = kwargs.pop('frame')
-            self.frame(self.params['frame'])
+    def build_viewMatrix(self):
+        cp = self['camera_pos']
 
-        for n in range(1, MAX_CHANNELS+1):
-            name = f'colormap{n}'
-            if name in kwargs:
-                self.params[name] = kwargs.pop(name)
-                self.update_colormap(n)
+        forward = norm(self['look_at'] - cp)
+        right = norm(cross(forward, self['up']))
+        up = cross(right, forward)
 
-        for k in ("os_width", "os_height", "width", "height"):
-            if k in kwargs:
-                setattr(self, k, kwargs.pop(k))
+        # print(cp, self['look_at'], self['up'], forward, right, up)
 
-        update_shader = False
-        update_uniforms = {}
-        pop_keys = []
+        viewMatrix = np.eye(4, dtype='f')
+        viewMatrix[:3, 0] = right
+        viewMatrix[:3, 1] = up
+        viewMatrix[:3, 2] = -forward
+        viewMatrix[3, 0] = -dot(right, cp)
+        viewMatrix[3, 1] = -dot(up, cp)
+        viewMatrix[3, 2] = +dot(forward, cp)
 
-        for k, v in kwargs.items():
-            if k in self.shader_defaults:
-                update_shader = True
-            elif k in self.uniform_defaults:
-                update_uniforms[k] = v
-            elif k in self.hidden_uniforms:
-                update_uniforms[k] = v
-                self.hidden_uniforms[k] = v
-                # kwargs.pop(k)
-                pop_keys.append(k)
-            elif k not in self.view_defaults:
-                # raise KeyError"unknown view parameter '%s'" % k()
-                warnings.warn("unknown view parameter '%s', ignoring" % k)
+        X0 = self['disp_X0']
+        X1 = self['disp_X1']
 
-        for k in pop_keys:
-            kwargs.pop(k)
-        self.params.update(kwargs)
+        center = np.ones(4, 'f')
+        center[:3] = 0.5 * (X0 + X1)
 
-        if update_shader:
-            self.update_shader()
+        r = 0.5 * mag(X1 - X0)
 
-        if update_uniforms and hasattr(self, 'current_volume_shader'):
-            self.current_volume_shader.bind()
-            self.current_volume_shader.set_uniforms(**update_uniforms)
+        midDepth = -(center * viewMatrix[:, 2]).sum()
+        self['near'] = max(midDepth - r, r/1000)
+        self['far'] = midDepth + r
+        # print(self['near'], self['far'])
+        self['viewMatrix'] = viewMatrix
 
-    def resize(self, width, height):
-        '''Convenience command to update the width and height.'''
-        self.width = width
-        self.height = height
+    def build_perspectiveMatrix(self):
+        fov = self['fov']
+        far = self['far']
+        near = self['near']
 
+        if fov > 1E-3:
+            tanHD = np.tan(fov * np.pi / 360)
 
-    # def fov_correction(self):
-    #     '''Computes the half height of the viewport in OpenGL units.'''
-    #     return np.tan(self.params['fov']*np.pi/360) if self.params['fov'] > 1E-6 else 1.
-
-
-    def draw(self, z0=0.01, z1=10.0, offscreen=False, save_image=False, return_image=True):
-        '''Draw the volume, creating all objects as required.  Has two
-        parameters, but normally the defaults are fine.
-
-        Parameters
-        ----------
-        z0 : float, the front clip plane (default: 0.01)
-        z1 : float, the back clip plane (default: 10.0)
-        offscreen : bool, if True, renders to the offscreen buffer instead of
-           the onscreen one.  (Usually used for screenshots/movies.)
-        '''
-
-        # Framebuffers:
-        #  default_fbo: the display
-        #  back_buffer: stores texture coordinate for the volume render
-        #      * RGB coordinate is physical coordinates of texture
-        #      * Alpha coordinate is 1 if there is a
-        #  display_buffer: the buffer we are rendering to (may be default_fbo...)
-
-        # Draw process:
-        # 1. If models present:
-        #   Render the models to display_buffer
-        # 2. If volume + models present:
-        #   Render the models to the back_buffer (using texture_to_color_shader)
-        # 3. If volume:
-        #   Render the back of the texture cube to the back buffer
-        #   Render the the front
-
-        # start = time.time()
-
-        if not getattr(self, '_init_gl', False):
-            self.init_gl()
-
-        # When called from QT or other window managers, we can't assume
-        # that the default framebuffer is 0, so check!
-        default_fbo = glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING)
-
-        if offscreen:
-            width = self.os_width
-            height = self.os_height
-
-            if self.os_width != self._old_os_width or self.os_height != self._old_os_height:
-                # If the viewport has changed, resize things.
-                if not hasattr(self, 'os_fbo_back'):
-                    self.os_fbo_back = FrameBufferObject(width=self.os_width, height=self.os_height,
-                                                 target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
-                                                 internal_format=GL_RGBA32F)
-
-                    self.os_fbo_output = FrameBufferObject(width=self.os_width, height=self.os_height,
-                                                 data_type=GL_UNSIGNED_BYTE, internal_format=GL_SRGB8_ALPHA8)
-                else:
-                    self.os_fbo_back.resize(self.os_width, self.os_height)
-                    self.os_fbo_output.resize(self.os_width, self.os_height)
-
-                self._old_os_width = self.os_width
-                self._old_os_height = self.os_height
-
-            back_buffer = self.os_fbo_back
-            display_buffer_id = self.os_fbo_output.id
+            for id, buffer in self.buffers.items():
+                perspective = np.zeros((4, 4), dtype='f')
+                perspective[0, 0] = 1.0 / (buffer.aspect * tanHD)
+                perspective[1, 1] = 1.0 / tanHD
+                perspective[2, 2] = -(far + near) / (far - near)
+                perspective[2, 3] = -1.0
+                perspective[3, 2] = -(2 * far * near) / (far - near)
+                self.perspectiveMatrix[id] = perspective
 
         else:
-            width = self.width
-            height = self.height
+            height = mag(self['camera_pos'] - self['look_at']) * np.tan(30 * np.pi / 360)
 
-            if self.width != self._old_width or self.height != self._old_height:
-                # If the viewport has changed, resize things.
-                if not hasattr(self, 'fbo'):
-                    self.fbo_back = FrameBufferObject(width=self.width, height=self.height,
-                                                 target=GL_TEXTURE_RECTANGLE, data_type=GL_FLOAT,
-                                                 internal_format=GL_RGBA32F)
-                    self.fbo_output = FrameBufferObject(width=self.width, height=self.height,
-                                                 data_type=GL_UNSIGNED_BYTE, internal_format=GL_SRGB8_ALPHA8)
-                                                 # format=GL_SRGB8_ALPHA8)
-                else:
-                    self.fbo_back.resize(self.width, self.height)
-                    self.fbo_output.resize(self.width, self.height)
+            for buffer in self.buffers.items():
+                perspective = np.zeros((4, 4), dtype='f')
+                perspective[0, 0] = 1.0 / (buffer.aspect * height)
+                perspective[1, 1] = 1.0 / height
+                perspective[2, 2] = -2.0 / (far - near)
+                perspective[3, 2] = -(far + near) / (far - near)
+                perspective[3, 3] = 1.0
+                self.perspectiveMatrix[id] = perspective
 
-                self._old_width = self.width
-                self._old_height = self.height
 
-            back_buffer = self.fbo_back
-            display_buffer_id = self.fbo_output.id
-
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-
-        aspect = width/height
-        if self.params['fov'] > 1E-6:
-            fov_correction = np.tan(self.params['fov']*np.pi/360)
-            ymax = z0 * fov_correction
-            glFrustum(-ymax*aspect, ymax*aspect, -ymax, ymax, z0, z1)
-            camera_correction = 1
-
+    def build_visibleAxisFaces(self):
+        if self['fov'] > 1E-3:
+            self['visibleAxisFaces'] = \
+                ((self['camera_pos'] > self['disp_X0']) * (1,  2,  4)).sum() + \
+                ((self['camera_pos'] < self['disp_X1']) * (8, 16, 32)).sum()
         else:
-            fov_correction = 1
-            glOrtho(-aspect, aspect, -1, 1, z0, z1)
-            camera_correction = 1E3
+            self['visibleAxisFaces'] = \
+                ((self['camera_pos'] > self['look_at']) * (1,  2,  4)).sum() + \
+                ((self['camera_pos'] < self['look_at']) * (8, 16, 32)).sum()
+
+    def build_meshModelMatrix(self):
+        scale = self['mesh_scale']
+        matrix = np.diag((scale, scale, scale, 1)).astype('f')
+        matrix[3, :3] = self['mesh_offset']
+        self['meshModelMatrix'] = matrix
+
+    def build_axisLines(self):
+        # Ouch! Place the tick lines...
+        X0 = self['disp_X0']
+        X1 = self['disp_X1']
+
+        MS = self['axis_major_tick_spacing']
+        mS = MS / self['axis_minor_ticks']
+        ML = MS * self['axis_major_tick_length_ratio']
+        mL = ML * self['axis_minor_tick_length_ratio']
+
+        # Let's make sure the axes have actually changed...
+        key = (tuple(X0), tuple(X1), MS, mS, ML, mL)
+        if getattr(self, '_lastAxis', None) == key:
+            return
+
+        self._lastAxis = key
+
+        start = 0
+
+        for axis in range(3):
+            i = np.arange(int(np.ceil(X0[axis] / mS)),
+                          int(np.ceil(X1[axis] / mS)))
+            n = len(i)
+            if start + n > self.AXIS_MAX_TICKS:
+                n = self.AXIS_MAX_TICKS - start
+                i = i[:n]
+
+            i = i.reshape(-1, 1)
+
+            tl = np.full((n, 1), mL, 'f')
+            tl[np.where(i % self['axis_minor_ticks'] == 0)] = ML
+
+            y0 = X0[(axis + 1) % 3]
+            y1 = X1[(axis + 1) % 3]
+            z0 = X0[(axis + 2) % 3]
+            z1 = X1[(axis + 2) % 3]
+
+            points = np.zeros((n, 12, 3), 'd')
+            points[:, :, 0] = i * mS
+            points[:, 0:3,  1:] = (y0, z0)
+            points[:, 3:6,  1:] = (y0, z1)
+            points[:, 6:9,  1:] = (y1, z1)
+            points[:, 9:12, 1:] = (y1, z0)
+            points[:, (2,  4), 1] += tl
+            points[:, (8, 10), 1] -= tl
+            points[:, (1, 11), 2] += tl
+            points[:, (5,  7), 2] -= tl
+
+            points = np.roll(points.reshape(12*n, 3), axis, -1)
+
+            f1 = 1 << ((axis + 1) % 3)
+            f2 = 8 << ((axis + 2) % 3)
+            f3 = 8 << ((axis + 1) % 3)
+            f4 = 1 << ((axis + 2) % 3)
+
+            faces = np.array([
+                f1 + f4, f1, f4,
+                f1 + f2, f2, f1,
+                f2 + f3, f3, f2,
+                f3 + f4, f4, f3
+            ], dtype='u4')
+
+            end = start + n
+
+            self.axisLineVerts['position'][(8 + start*12):(8 + end*12)] = points
+            self.axisLineVerts['faceMask'][(8 + start*12):(8 + end*12)] = np.tile(faces, n)
+
+            start = end
+            if start >= self.AXIS_MAX_TICKS:
+                break
+
+        self.axisLineVerts['position'][:8] = X0 + CUBE_CORNERS * (X1 - X0)
+        # end = 0
+        self.axisLines.update(self.axisLineVerts[:(8 + end*12)])
+        # self.axisLines.update(self.axisLineVerts[:100])
+        # print(self.axisLineVerts[:8])
+        # self.totalAxisPoints = self.axisEdges.size
+        self.totalAxisPoints = self.axisEdges.size + 16 * start
+
+    def build_colormaps(self):
+        if not hasattr(self, 'colormapTextures'):
+            self.colormapTextures = [
+                Texture(size = (256, ), format=GL.GL_RGB,
+                    wrap=GL.GL_CLAMP_TO_EDGE, internalFormat=GL.GL_SRGB)
+                for i in range(MAX_CHANNELS)]
+
+        for i in range(3):
+            name = self[f'vol_colormap{i+1}']
+            if name != self._colormap[i]:
+                GL.glActiveTexture(GL.GL_TEXTURE0 + self[f'colormap{i+1}Texture'])
+                if name not in COLORMAPS:
+                    raise ValueError("unknown colormap '%s'" % name)
+                self.colormapTextures[i].replace(COLORMAPS[name].data)
+                self._colormap[i] = name
+
+        GL.glActiveTexture(GL.GL_TEXTURE0)
 
 
-        # Clear the display and set the view matrix
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
+    #--------------------------------------------------------
+    # Volume Management
+    #--------------------------------------------------------
 
+    def resetView(self, direction=None, up=None):
+        if direction is None:
+            direction = self['camera_pos'] - self['look_at']
+        if up is None:
+            up = self['up']
 
-        R4 = np.eye(4, dtype='f')
-        scale = self.params['scale'] * fov_correction
-        R4[:3, :3] = self.params['R'] * scale
+        direction = np.asarray(direction, 'f')
+        up = np.asarray(up, 'f')
 
-        # These get applied in the opposite order!
-        glTranslatef(0, 0, -1) # Move it back to z = -1
-        glMultMatrixf(R4) # Rotate about center
-        glTranslatef(*(-self.params['center'])) # Move the center to the center
+        dir = norm(direction)
+        up = norm(up - dot1(up, dir) * dir)
+        X0 = self['disp_X0']
+        X1 = self['disp_X1']
+        L = mag(X1 - X0)
+        la = 0.5 * (X1 + X0)
 
-        # Draw the back buffer; this is used to find the back of the ray trace
-        glBindFramebuffer(GL_FRAMEBUFFER, back_buffer.id)
+        # print(direction, up, la)
 
-        # Set up the viewport.  We do this on every draw call to be safe; no
-        #   telling what the window manager is doing outside this code!
-        glViewport(0, 0, width, height)
+        fov = self['fov']
+        tanHD = np.tan((fov if fov > 1E-3 else 30) * np.pi / 360)
 
-        # glDisable(GL_FRAMEBUFFER_SRGB)
+        self.update({
+            "look_at": la,
+            "camera_pos": la + dir * L / (2 * tanHD),
+            "up": up
+        }, callback=True)
 
-        # Here the drawing just writes the value of the texture coordinate on
-        #   the back surface.
-        self.texture_to_color_shader.bind()
+    #--------------------------------------------------------
+    # OpenGL setup
+    #--------------------------------------------------------
 
-        glClearColor(0.0, 0.0, 0.0, 0.0)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    def setup(self, width=100, height=100):
 
-        # Only draw back faces!
-        glEnable(GL_CULL_FACE)
-        glCullFace(GL_FRONT)
+        vertexType = np.dtype([('position', '3float32'), ('faceMask', 'uint32')])
+        self.axisLineVerts = np.empty(8 + 12 * self.AXIS_MAX_TICKS, vertexType)
+        self.axisLines = VertexArray(vertexType, len(self.axisLineVerts))
 
-        # Don't do anything fancy here.
-        glDisable(GL_BLEND)
+        faceMask = ((1, 2, 4) << ((CUBE_CORNERS > 0.5) * 3)).sum(-1)
 
-        # Draw the cube; handles clipping etc. automatically.
-        self._texture_cube()
+        self.axisEdges = np.array([
+            (0, 1), (1, 3), (3, 2), (2, 0), # Bottom
+            (0, 4), (1, 5), (3, 7), (2, 6), # Sides
+            (4, 5), (5, 7), (7, 6), (6, 4), # Top
+            # Corners are handled as a repeated point
+            (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7)
+        ], dtype='u4')
+        e1 = 8 + np.array([(0, 1), (0, 2), (3, 4), (3, 5), (6, 7), (6, 8),
+            (9, 10), (9, 11)], dtype='u4')
+        edges = np.vstack([
+            self.axisEdges,
+            (e1 + 12 * np.arange(self.AXIS_MAX_TICKS, dtype='u4').reshape(-1, 1, 1)).reshape(-1, 2)
+        ])
+        self.axisLines.attachElements(edges, GL.GL_LINES)
 
-        # Draw the front buffer; this is where the ray tracing magic happens.
-        glEnable(GL_FRAMEBUFFER_SRGB)
-        glBindFramebuffer(GL_FRAMEBUFFER, display_buffer_id)
-        glClearColor(*self.params['background_color'])
+        self.axisLineVerts['position'][:8] = self['disp_X0'] + CUBE_CORNERS * (self['disp_X1'] - self['disp_X0'])
+        self.axisLineVerts['faceMask'][:8] = faceMask
+        # self.axisLines.update(self.axisLineVerts[:8])
 
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        # No need to upload data -- build_axisLines handles this!
 
-        # We can blend the output of the ray tracer with the background.
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+        GL.glClearDepth(1.0)
+        GL.glDepthFunc(GL.GL_LESS)
+        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
 
-        # We need to pass the information from the back buffer so we know which
-        #   ray to trace.
-        glEnable(GL_TEXTURE_2D)
-        glActiveTexture(GL_TEXTURE1)
-        back_buffer.texture.bind()
+        self.primaryBuffer = self.addBuffer(width, height)
 
-        # glClampColor(GL_CLAMP_READ_COLOR, GL_FALSE);
-        # glClampColor(GL_CLAMP_VERTEX_COLOR, GL_FALSE);
-        # glClampColor(GL_CLAMP_FRAGMENT_COLOR, GL_FALSE)
+        self.resetRange()
+        self.resetView()
 
-        if self.volume is not None:
-            self.current_volume_shader.bind()
-            camera_loc = self.params['center'] + self.params['R'][:3, 2] / scale * camera_correction
-            self.current_volume_shader.set_uniforms(camera_loc=camera_loc)
+    #--------------------------------------------------------
+    # Buffer management
+    #--------------------------------------------------------
 
+    def addBuffer(self, width, height):
+        if self.buffers:
+            id = max(self.buffers.keys()) + 1
         else:
-            # If we don't have a volume bound, we can draw something neat!
-            self.interference_shader.bind()
+            id = 0
 
-        # Clear all matrices to draw a full screen quad
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
-        glDisable(GL_CULL_FACE)
-        self._fs_quad()
+        self.buffers[id] = FrameBuffer(width, height,
+            internalFormat=GL.GL_SRGB8_ALPHA8, target=GL.GL_TEXTURE_RECTANGLE,
+            depthTexture=True)
+        # self.perspectiveMatrix.append(None)
+        self._needsRebuild.add('perspectiveMatrix')
+        return id
 
-        glDisable(GL_FRAMEBUFFER_SRGB)
-
-        if save_image or return_image:
-            img = np.frombuffer(glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE), dtype='u1').reshape(height, width, -1)
-            if save_image: Image.fromarray(img[::-1]).save(save_image)
-
-        if not offscreen:
-            w, h = self.width, self.height
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, default_fbo)
-            glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
-
-        if display_buffer_id != default_fbo:
-            glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)
-
-        # print(time.time() - start)
-
-        if save_image or return_image:
-            return img
+    def resizeBuffer(self, id, width, height):
+        self.buffers[id].resize(width, height)
+        self._needsRebuild.add('perspectiveMatrix')
 
 
-    #
-    # def save_offscreen_image(self, fn):
-    #     '''Save an image of the rendered volume to a file.  The size of the
-    #     screenshot does not generally match the display, and is rendered
-    #     offscreen.  The width and height are normally determined by the
-    #     `os_width`, and `os_height` parameters.  If `width` or `height` are
-    #     passed, they will update these parameters.
-    #
-    #     Parameters
-    #     ----------
-    #     width : int, default: 1000
-    #     height: int, default: 1000
-    #     offscreen : bool, if True, renders to the offscreen buffer instead of
-    #        the onscreen one.  (Usually used for screenshots/movies.)
-    #     '''
-    #     Image.fromarray(self.offscreen_image).save(fn)
+    #--------------------------------------------------------
+    # Main draw method
+    #--------------------------------------------------------
+
+    def draw(self, bufferId=None, blitToDefault=False, scaleHeight=None):
+        if bufferId is None:
+            bufferId = self.primaryBuffer
+
+        # ---- Rebuild anything that is needed ----
+        for n in range(2):
+            # Sometimes rebuilding one item triggers rebuilding a second!
+            nr = self._needsRebuild
+            self._needsRebuild = set()
+            for param in nr:
+                getattr(self, 'build_' + param)()
+
+        self._needsRebuild = set()
+
+        defaultFB = GL.glGetIntegerv(GL.GL_DRAW_FRAMEBUFFER_BINDING)
+
+        # ---- Select the draw buffer, and set up for drawing ----
+        buffer = self.buffers[bufferId]
+
+        buffer.bind()
+        width, height = buffer.width, buffer.height
+        viewportSize = np.array([width, height], dtype='f')
+
+        if scaleHeight is None:
+            axisScaling = self['display_scaling']
+        else:
+            axisScaling = height / float(scaleHeight)
+
+        GL.glViewport(0, 0, width, height)
+        GL.glEnable(GL.GL_FRAMEBUFFER_SRGB)
+        c = self['background_color']
+        GL.glClearColor(c[0], c[1], c[2], 1.0)
+        GL.glDepthMask(GL.GL_TRUE) # Needs to be before the clear!
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+
+        frame = self['frame']
+
+        # ---- Draw the Mesh ----
+        if self.visibleAssets['mesh']:
+            GL.glEnable(GL.GL_DEPTH_TEST)
+            # Don't draw the back side of meshes... unless we are clipping!
+            if not self["mesh_clip"]:
+                GL.glEnable(GL.GL_CULL_FACE)
+            else:
+                GL.glDisable(GL.GL_CULL_FACE)
+
+            GL.glCullFace(GL.GL_BACK)
+            GL.glDisable(GL.GL_BLEND)
+
+            shader = self.useShader('mesh')
+            # Note: perspective matrix is per-buffer, so we need to update!
+            shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
+
+            for id in self.visibleAssets['mesh']:
+                asset = self.assets[id]
+                asset.setFrame(frame)
+                if asset.validFrame:
+                    shader.update(asset.uniforms, ignore=True)
+                    asset.draw()
 
 
-    def rot_x(self, a):
-        '''Rotate view around x axis by a given angle (in radians).'''
-        self.params['R'] = rot_x(a, self.params['R'])
+        # ---- All subsequent draws allow transparency, and don't write to depth ----
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)
+        GL.glDisable(GL.GL_CULL_FACE)
+        GL.glDepthMask(GL.GL_FALSE)
 
 
-    def rot_y(self, a):
-        '''Rotate view around y axis by a given angle (in radians).'''
-        self.params['R'] = rot_y(a, self.params['R'])
+        # ---- Draw Text ----
+        # shader = self.useShader('text')
+        # shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
+        # shader['viewportSize'] = viewportSize
+        #
+        # GL.glActiveTexture(GL.GL_TEXTURE0)
+        # self.textRenderer.texture.bind()
 
 
-    def rot_z(self, a):
-        '''Rotate view around z axis by a given angle (in radians).'''
-        self.params['R'] = rot_z(a, self.params['R'])
+        # ---- Draw Axis ----
+        if self['show_axis']:
+            shader = self.useShader('axis')
+            shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
+            shader['viewportSize'] = viewportSize
+            shader['axis_scaling'] = axisScaling
+
+            self.axisLines.draw(self.totalAxisPoints)
 
 
-    def _texture_cube(self):
-        glEnableClientState(GL_VERTEX_ARRAY)
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY)
+        # ---- Draw Volume ----
+        if self.visibleAssets['volume']:
+            for id in self.visibleAssets['volume']:
+                asset = self.assets[id]
+                asset.setFrame(frame)
+                if asset.validFrame:
+                    # We will draw only the back faces, irrespective if there is
+                    #   something in front -- ordering is handled by the renderer
+                    #   rather than the usual method!
+                    GL.glDisable(GL.GL_DEPTH_TEST)
+                    GL.glEnable(GL.GL_CULL_FACE)
+                    GL.glCullFace(GL.GL_FRONT)
 
-        ub = (_UNIT_BOX * (self.params['X1'] - self.params['X0']) + self.params['X0']).astype('f')
+                    if hasattr(asset, 'volumeTexture'):
+                        # Shouldn't need to check, but lets be sure!
+                        GL.glActiveTexture(GL.GL_TEXTURE1)
+                        asset.volumeTexture.bind()
 
-        glVertexPointer(3, GL_FLOAT, 0, ub)
-        glTexCoordPointer(3, GL_FLOAT, 0, ub)
-        glDrawElements(GL_QUADS, len(_BOX_FACES), GL_UNSIGNED_INT, list(_BOX_FACES))
+                    # Get the depth channel from the previous steps
+                    GL.glFlush()
+                    GL.glActiveTexture(GL.GL_TEXTURE0)
+                    buffer.depthTexture.bind()
 
-        glDisableClientState(GL_VERTEX_ARRAY)
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY)
+                    shader = self.useShader('volume')
+                    shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
+                    shader.update(asset.uniforms, ignore=True)
 
-    def _fs_quad(self):
-        glEnableClientState(GL_VERTEX_ARRAY)
+                    # print('yo!')
+                    asset.draw()
 
-        glVertexPointer(3, GL_FLOAT, 0, _FS_QUAD)
-        glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, list(_FS_QUAD_FACES))
+                    break; #Only draw one volume!
 
-        glDisableClientState(GL_VERTEX_ARRAY)
+
+        # ---- Cleanup and draw to the screen (if required) ----
+        self.useShader(None)
+
+        GL.glDisable(GL.GL_FRAMEBUFFER_SRGB)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+
+        if blitToDefault:
+            GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, defaultFB)
+            GL.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                GL.GL_COLOR_BUFFER_BIT, GL.GL_NEAREST)
+
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, defaultFB)
+
+
+    #--------------------------------------------------------
+    # Cleanup
+    #--------------------------------------------------------
+
+    def cleanup(self):
+        # pass
+        for attr in ('mesh', 'volumeBox', 'textRenderer', 'axisLines', 'volumeTexture', 'depthTexture'):
+            item = getattr(self, attr, None)
+            if item is not None:
+                item.delete()
+        for shader in self._cachedShaders.values():
+            shader.delete()
+        for buffer in self.buffers.values():
+            buffer.delete()

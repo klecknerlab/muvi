@@ -1253,7 +1253,7 @@ def encode_ply(points, tris, normals=None, colors=None, enforce_types=True, extr
     if normals is not None:
         normals = np.asarray(normals)
         if normals.shape != (N, 3):
-            raise ValueError('shape of normals array should be ([num points], 3), found %s' % (normals.shape,))
+            raise ValueError(f'shape of normals array should be ([num points={len(points)}], 3), found {normals.shape}')
 
         n_dt = normals.dtype
         p_dt += [('nx', n_dt), ('ny', n_dt), ('nz', n_dt)]
@@ -1261,7 +1261,7 @@ def encode_ply(points, tris, normals=None, colors=None, enforce_types=True, extr
     if colors is not None:
         colors = np.asarray(colors)
         if colors.shape not in [(N, 3), (N, 4)]:
-            raise ValueError('shape of colors array should be ([num points], [3, 4]), found %s' % normals.shape)
+            raise ValueError(f'shape of colors array should be ([num points={len(points)}], [3, 4]), found {colors.shape}')
 
         c_dt = colors.dtype
         p_dt += [('red', c_dt), ('green', c_dt), ('blue', c_dt), ('alpha', c_dt)][:colors.shape[1]]

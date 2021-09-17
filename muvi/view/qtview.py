@@ -24,48 +24,55 @@ import sys, os
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtWidgets import QMainWindow, QApplication, QTabWidget, QHBoxLayout, \
     QVBoxLayout, QLabel, QWidget, QScrollArea, QAction, QFrame, QMessageBox, \
-    QFileDialog, QGridLayout, QPushButton, QStyle
-from .qtview_widgets import param_list_to_vbox, control_from_param, \
-    VolumetricView, ListControl
+    QFileDialog, QGridLayout, QPushButton, QStyle, QOpenGLWidget, \
+    QListWidget, QSplitter, QListWidgetItem, QMenu
+from .qtview_widgets import paramListToVBox, controlFromParam, ListControl
+from .view import View
 import numpy as np
+import time
+import traceback
+Qt = QtCore.Qt
+import glob
+from PIL import Image
 
-from .params import PARAM_CATAGORIES, PARAMS, range_from_volume
-from .. import open_3D_movie, VolumetricMovie
-
-GAMMA_CORRECT = 2.2
+from .params import PARAM_CATAGORIES, PARAMS
+# from .. import open_3D_movie, VolumetricMovie
 
 ORG_NAME = "MUVI Lab"
 APP_NAME = "MUVI Volumetric Movie Viewer"
+ICON_DIR = os.path.split(__file__)[0]
+
 
 if sys.platform == 'win32':
     # On Windows, it appears to need a bit more width to display text
-    PARAM_WIDTH = 300
-    SCROLL_WIDTH = 20
+    PARAM_WIDTH = 200
+    SCROLL_WIDTH = 15
 elif sys.platform == 'darwin':
     # Good default for OS X
     PARAM_WIDTH = 230
     SCROLL_WIDTH = 15
+
+    # Python 3: pip3 install pyobjc-framework-Cocoa
+    try:
+        from Foundation import NSBundle
+        bundle = NSBundle.mainBundle()
+        if bundle:
+            app_info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+            if app_info:
+                app_info['CFBundleName'] = APP_NAME
+                app_info['NSRequiresAquaSystemAppearance'] = 'No'
+                # print(app_info)
+    except ImportError:
+        raise ImportError('pyobjc-framework-Cocoa not installed (OS X only) -- run "pip3 install pyobjc-framework-Cocoa" or "conda install pyobjc-framework-Cocoa" first')
 else:
     # Fallback -- if anyone ever uses this on Linux let me know what looks good!
     PARAM_WIDTH = 230
     SCROLL_WIDTH = 15
 
-if sys.platform.startswith('darwin'):
-        # Python 3: pip3 install pyobjc-framework-Cocoa
-        try:
-            from Foundation import NSBundle
-            bundle = NSBundle.mainBundle()
-            if bundle:
-                app_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
-                app_info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
-                if app_info:
-                    app_info['CFBundleName'] = APP_NAME
-        except ImportError:
-            pass
 
 class ExportWindow(QWidget):
     def __init__(self, parent):
-        super().__init__(parent=parent, flags=QtCore.Qt.Window)
+        super().__init__(parent=parent, flags=Qt.Window)
         self.setWindowTitle("Image Export")
         self.parent = parent
 
@@ -78,83 +85,334 @@ class ExportWindow(QWidget):
         self.settings = QGridLayout()
         self.vbox.addLayout(self.settings)
 
-        self.export_button = QPushButton("Export Current Frame")
-        self.export_button.clicked.connect(self.save_frame)
-        self.settings.addWidget(self.export_button, 2, 1, 1, 2)
+        self.exportButton = QPushButton("Export Current Frame")
+        self.exportButton.clicked.connect(self.saveFrame)
+        self.settings.addWidget(self.exportButton, 2, 2, 1, 2)
 
-        self.preview_button = QPushButton("Preview Current Frame")
-        self.preview_button.clicked.connect(self.preview_frame)
-        self.settings.addWidget(self.preview_button, 2, 3, 1, 2)
+        self.previewButton = QPushButton("Preview Current Frame")
+        self.previewButton.clicked.connect(self.previewFrame)
+        self.settings.addWidget(self.previewButton, 2, 4, 1, 2)
 
         halign = QHBoxLayout()
-        self.folder_label = QLabel(os.getcwd())
-        self.folder_button = QPushButton()
-        self.folder_button.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
-        self.folder_button.clicked.connect(self.select_export_folder)
-        halign.addWidget(self.folder_button, 0)
-        self.settings.addLayout(halign, 3, 1, 1, 4)
-        halign.addWidget(self.folder_label, 1)
+        self.folderLabel = QLabel(os.getcwd())
+        self.folderButton = QPushButton()
+        self.folderButton.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
+        self.folderButton.clicked.connect(self.selectExportFolder)
+        halign.addWidget(self.folderButton, 0)
+        self.settings.addLayout(halign, 3, 1, 1, 6)
+        halign.addWidget(self.folderLabel, 1)
 
-        self.file_label = QLabel("")
-        self.file_label.setFixedWidth(512)
-        self.settings.addWidget(self.file_label, 4, 1, 1, 4)
+        self.fileLabel = QLabel("")
+        self.fileLabel.setFixedWidth(512)
+        self.settings.addWidget(self.fileLabel, 4, 1, 1, 6)
 
-        self.ss_sizes = [256, 384, 512, 640, 720, 768, 1024, 1080, 1280, 1920,
-            2048, 2160, 3072, 3840, 4096, 6144, 8192]
-        self.width_control = ListControl('Width:', 1920, self.ss_sizes, param='os_width')
-        self.height_control = ListControl('Height:', 1080, self.ss_sizes, param='os_height')
+        self.ss_sizes = [512, 640, 720, 768, 1024, 1080, 1280, 1920,
+            2048, 2160, 3072, 3240, 3840, 4096, 4320, 5760, 6144, 7680, 8192]
+        self.widthControl = ListControl('Width:', 1920, self.ss_sizes, param='os_width')
+        self.heightControl = ListControl('Height:', 1080, self.ss_sizes, param='os_height')
 
         def print_param(p, v):
             print(f'{p}: {v}')
-        self.width_control.paramChanged.connect(self.parent.display.updateHiddenParam)
-        self.height_control.paramChanged.connect(self.parent.display.updateHiddenParam)
+        self.widthControl.paramChanged.connect(self.updateBuffer)
+        self.heightControl.paramChanged.connect(self.updateBuffer)
+
+        self.scaleControl = ListControl('Scale Height:', 1080, self.ss_sizes, param='scaling_height',
+            tooltip='Effective screen height to use for axis scaling.  Used to prevent super thin lines and tiny text for high resolutions!')
+        self.scaleHeight = self.scaleControl.value()
+        self.scaleControl.paramChanged.connect(self.updatescaleHeight)
 
         self.settings.setColumnStretch(0, 1)
-        self.settings.setColumnStretch(5, 1)
-        self.settings.addWidget(self.width_control, 0, 1, 1, 2)
-        self.settings.addWidget(self.height_control, 0, 3, 1, 2)
+        self.settings.setColumnStretch(7, 1)
+        self.settings.addWidget(self.widthControl, 0, 1, 1, 2)
+        self.settings.addWidget(self.heightControl, 0, 3, 1, 2)
+        self.settings.addWidget(self.scaleControl, 0, 5, 1, 2)
+
 
         for i, (label, w, h) in enumerate([
                     ('720p', 1280, 720),
                     ('1080p', 1920, 1080),
                     ('1440p', 2560, 1440),
                     ('2160p (4K)', 3840, 2160),
+                    ('3240p (6K)', 5760, 3240),
+                    ('4320p (8K)', 7680, 4320,)
                 ]):
             button = QPushButton(label)
 
             def cr(state, w=w, h=h):
-                self.width_control.setValue(w)
-                self.height_control.setValue(h)
+                self.widthControl.setValue(w)
+                self.heightControl.setValue(h)
 
             button.clicked.connect(cr)
             self.settings.addWidget(button, 1, i+1)
 
+    def updatescaleHeight(self, key, val):
+        self.scaleHeight = val
+
+    def updateBuffer(self, key=None, val=None):
+        width, height = self.widthControl.value(), self.heightControl.value()
+
+        self.parent.display.makeCurrent()
+        if not hasattr(self, 'bufferId'):
+            self.bufferId = self.parent.display.view.addBuffer(width, height)
+        else:
+            self.parent.display.view.resizeBuffer(self.bufferId, width, height)
+        self.parent.display.doneCurrent()
+
     def closeEvent(self, e):
-        self.parent.toggle_export()
+        self.parent.toggleExport()
 
-    def select_export_folder(self):
-        self.folder_label.setText(QFileDialog.getExistingDirectory(
-            self, "Select Export Folder", self.folder_label.text()))
+    def selectExportFolder(self):
+        self.folderLabel.setText(QFileDialog.getExistingDirectory(
+            self, "Select Export Folder", self.folderLabel.text()))
 
-    def save_frame(self, event=None):
-        fn, img = self.parent.display.saveImage(
-            dir=self.folder_label.text())
-        # self.export_window_status.showMessage('Saved image: ' + fn)
-        # print(img.shape, img.dtype)
-        self.update_preview(img)
-        self.file_label.setText(f'Saved to: {os.path.split(fn)[1]}')
+    def renderImage(self):
+        if not hasattr(self, 'bufferId'):
+            self.updateBuffer()
 
-    def preview_frame(self, event=None):
-        self.update_preview(self.parent.display.previewImage())
+        return self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
 
-    def update_preview(self, img):
+    def saveFrame(self, event=None):
+        dir = self.folderLabel.text()
+        fns = glob.glob(os.path.join(dir, 'muvi_screenshot_*.png'))
+        for i in range(10**4):
+            fn = os.path.join(dir, 'muvi_screenshot_%08d.png' % i)
+            if fn not in fns:
+                break
+
+        img = self.renderImage()
+        Image.fromarray(img[::-1]).save(os.path.join(dir, fn))
+
+        self.updatePreview(img)
+        self.fileLabel.setText(f'Saved to: {os.path.split(fn)[1]}')
+
+    def previewFrame(self, event=None):
+        self.updatePreview(self.renderImage())
+
+    def updatePreview(self, img):
         img = QtGui.QImage(np.require(img[::-1, :, :3], np.uint8, 'C'),
             img.shape[1], img.shape[0], QtGui.QImage.Format_RGB888)
         self.image.setPixmap(QtGui.QPixmap(img).scaledToWidth(1024))
 
 
+class GLWidget(QOpenGLWidget):
+    frameChanged = QtCore.pyqtSignal(int)
+
+    def __init__(self, parent):
+        self.parent = parent
+
+        fmt = QtGui.QSurfaceFormat()
+        fmt.setProfile(QtGui.QSurfaceFormat.CoreProfile)
+        fmt.setSwapInterval(1)
+        fmt.setVersion(3, 3)
+        QtGui.QSurfaceFormat.setDefaultFormat(fmt)
+
+        super().__init__(parent)
+        self.setMinimumSize(640, 480)
+        self.dpr = 1
+        self.view = View(getattr(parent, "valueCallback", None),
+                         getattr(parent, "rangeCallback", None))
+        self.view['fontSize'] = self.font().pointSize() / 72 * self.physicalDpiX() * 1.2
+
+        self.timer = QtCore.QTimer()
+        self.timer.setInterval(5)
+        self.timer.timeout.connect(self.update)
+
+        self._isPlaying = False
+        self.hasUpdate = True
+
+    def updateParam(self, k, v):
+        self.view[k] = v
+        self.hasUpdate = True
+        self.update()
+
+    def updateParams(self, params):
+        self.view.update(params)
+        self.hasUpdate = True
+        self.update()
+
+    def paintGL(self):
+        try:
+            if self._isPlaying and self.view.frameRange is not None:
+                t = time.time()
+                fps = self.view['framerate']
+                advance = int((t - self._tStart) * fps)
+                if advance:
+                    frame = (self.view['frame'] + advance) % self.view.frameRange[1]
+                    self.view['frame'] = frame
+                    self._tStart += advance / fps
+                    self.frameChanged.emit(frame)
+
+            if self.hasUpdate:
+                self.view.draw(0, True)
+
+        except:
+            traceback.print_exc()
+            self.parent.close()
+
+    def offscreenRender(self, bufferId, scaleHeight=None):
+        self.makeCurrent()
+        self.view.draw(bufferId, scaleHeight=scaleHeight)
+        img = np.array(self.view.buffers[bufferId].texture)
+        self.doneCurrent()
+        return img
+
+    def resizeGL(self, width, height):
+        self.width, self.height = width * self.dpr, height * self.dpr
+        self.view.resizeBuffer(0, self.width, self.height)
+        self.hasUpdate = True
+        self.update()
+
+    def initializeGL(self):
+        # print(f'GL Version: {GL.glGetString(GL.GL_VERSION)}')
+        # print(f'GLSL Version: {GL.glGetString(GL.GL_SHADING_LANGUAGE_VERSION)}')
+        self.dpr = self.devicePixelRatio()
+        self.view.setup(self.width() * self.dpr, self.height() * self.dpr)
+        self.view['display_scaling'] = self.dpr
+
+    def close(self):
+        self.view.cleanup()
+
+    def mousePressEvent(self, event):
+        self.lastPos = event.pos()
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        self.lastPos = event.pos()
+        self.update()
+
+    def mouseMoveEvent(self, event):
+        x = event.x()
+        y = event.y()
+        dx = x - self.lastPos.x()
+        dy = y - self.lastPos.y()
+        self.lastPos = event.pos()
+        buttonsPressed = int(event.buttons())
+
+        if dx or dy:
+            self.view.mouseMove(x*self.dpr, y*self.dpr, dx*self.dpr, dy*self.dpr, buttonsPressed)
+            self.hasUpdate = True
+            self.update()
+
+    def wheelEvent(self, event):
+        self.view.zoomCamera(1.25**(event.angleDelta().y()/120))
+        self.hasUpdate = True
+        self.update()
+
+    def setPlaying(self, isPlaying):
+        if isPlaying:
+            self.play()
+        else:
+            self.pause()
+
+    def play(self):
+        if self.view.frameRange is not None:
+            self._isPlaying = True
+            self._tStart = time.time()
+            self.timer.start()
+
+    def pause(self):
+        self._isPlaying = False
+        self.timer.stop()
+
+class AssetItem(QListWidgetItem):
+    def __init__(self, asset, mainWindow, parent=None):
+        super().__init__(asset.label, parent)
+        self.id = asset.id
+        self.isVolume = asset.isVolume
+        self.setFlags(self.flags() | Qt.ItemIsUserCheckable ) #
+        self.prefix = f'#{self.id}_'
+        self.setCheckState(Qt.Checked if asset.visible else Qt.Unchecked)
+        self.setToolTip('\n'.join(asset.info))
+        self.asset = asset
+
+        self.tab = mainWindow.buildParamTab(asset.paramList(), prefix=self.prefix)
+        self.label = asset.shader.capitalize()
+
+
+class AssetList(QListWidget):
+    def __init__(self, mainWindow):
+        super().__init__(mainWindow)
+        self.mainWindow = mainWindow
+
+        self.currentRowChanged.connect(self.selectAssetTab)
+        self.itemChanged.connect(self.assetChanged)
+
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.contextMenu)
+
+        self.openAction = QAction('Open File')
+        self.openAction.triggered.connect(self.mainWindow.openFile)
+        self.removeAction = QAction('Remove Item')
+        self.limitsAction = QAction('Set Display Limits to Object Extent')
+
+        self.assets = {}
+
+    def selectAssetTab(self, row):
+        self.mainWindow.selectAssetTab(self.item(row))
+
+    def contextMenu(self, point):
+        item = self.itemAt(point)
+
+        menu = QMenu()
+        menu.addAction(self.openAction)
+
+        if item is not None:
+            menu.addAction(self.removeAction)
+            menu.addAction(self.limitsAction)
+
+        action = menu.exec_(QtGui.QCursor.pos())
+
+        if action == self.removeAction:
+            self.removeAsset(item)
+        elif action == self.limitsAction:
+            item.asset.X0
+            item.asset.X1
+            self.mainWindow.display.updateParams({
+                'disp_X0': item.asset.X0,
+                'disp_X1': item.asset.X1,
+            })
+
+    def assetChanged(self, asset):
+        checked = asset.checkState() == Qt.Checked
+
+        # Check if it's fully set up first...
+        if not hasattr(asset, 'prefix'):
+            return
+
+        params = {asset.prefix + "visible": checked}
+
+        # If we are activating a volume, deactivate all others!
+        if asset.isVolume and checked:
+            self.blockSignals(True)
+
+            # Turn off all other volumes, but block signals to prevent this
+            #   from getting called again
+            for asset2 in self.assets.values():
+                if asset.id == asset2.id or (not asset2.isVolume):
+                    continue
+
+                asset2.setCheckState(Qt.Unchecked)
+                params[asset2.prefix + "visible"] = False
+
+            self.blockSignals(False)
+        self.mainWindow.display.updateParams(params)
+
+    def removeAsset(self, item):
+        id = item.id
+        self.mainWindow.display.view.removeAsset(id)
+        self.takeItem(self.indexFromItem(item).row())
+        del self.assets[id]
+        self.mainWindow.display.update()
+
+    def addItem(self, assetItem):
+        self.assets[assetItem.id] = assetItem
+        super().addItem(assetItem)
+        self.setCurrentRow(self.indexFromItem(assetItem).row())
+        assetItem.setCheckState(Qt.Checked)
+
+
 class VolumetricViewer(QMainWindow):
-    def __init__(self, volume=None, parent=None, window_name=None):
+    def __init__(self, parent=None, window_name=None):
         super().__init__(parent)
 
         self.setWindowTitle(window_name)
@@ -163,80 +421,94 @@ class VolumetricViewer(QMainWindow):
         self.vbox.setContentsMargins(0, 0, 0, 0)
 
         self.hbox = QHBoxLayout()
-        self.display = VolumetricView(parent=self)
+        self.display = GLWidget(parent=self)
         self.hbox.addWidget(self.display, 1)
         self.hbox.setContentsMargins(0, 0, 0, 0)
         self.hbox.setSpacing(0)
 
         self.vbox.addLayout(self.hbox, 1)
-        self.playback = control_from_param(PARAMS['frame'])
+        self.playback = controlFromParam(PARAMS['frame'])
         self.vbox.addWidget(self.playback)
+
         self.playback.playingChanged.connect(self.display.setPlaying)
         self.display.frameChanged.connect(self.playback.setSilent)
+        self.playback.paramChanged.connect(self.display.updateParam)
 
-        self.param_controls = {'frame': self.playback}
+        self.paramControls = {'frame': self.playback}
 
-        self.param_tabs = QTabWidget()
-        self.param_tabs.setFixedWidth(PARAM_WIDTH)
+        self.paramTabs = QTabWidget()
+        self.paramTabs.setFixedWidth(PARAM_WIDTH)
+        self.numTabs = 0
+
+        self.nullTab = QWidget()
+        layout = QVBoxLayout()
+        button = QPushButton('Open Data File')
+        button.pressed.connect(self.openFile)
+        layout.addWidget(button)
+        layout.addStretch(1)
+        self.nullTab.setLayout(layout)
+        self.paramTabs.addTab(self.nullTab, 'Data')
 
         for cat, params in PARAM_CATAGORIES.items():
-            if cat == 'Playback': continue
+            if cat != 'Playback':
+                self.paramTabs.addTab(self.buildParamTab(params), cat)
 
-            vbox = QVBoxLayout()
-            # vbox.setContentsMargins(5, 5, 5, 5)
-            vbox.setSpacing(10)
-            self.param_controls.update(param_list_to_vbox(params, vbox))
+        self.paramTabs.setObjectName('paramTabs')
+        # self.paramTabs.setStyleSheet(f'''
+        #     #paramTabs::QTabBar::tab {{
+        #         width: {(PARAM_WIDTH-SCROLL_WIDTH)/self.paramTabs.count()}px;
+        #         padding: 5px 0px 5px 0px;
+        #         background-color: red;
+        #     }}
+        # ''')
+        # self.paramTabs.setTabShape(QTabWidget.Rounded)
 
-            vbox.addStretch(1)
+        self.splitter = QSplitter(Qt.Vertical)
+        self.splitter.setHandleWidth(15)
 
-            sa = QScrollArea()
-            sa.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
-            sa.setContentsMargins(0, 0, 0, 0)
-            sa.setFrameShape(QFrame.NoFrame)
+        self.assetVBox = QVBoxLayout()
+        self.assetVBox.setContentsMargins(5, 5, 5, 0)
+        self.assetList = AssetList(self)
+        self.assetVBox.addWidget(self.assetList)
+        widget = QWidget()
+        widget.setLayout(self.assetVBox)
 
-            widget = QWidget()
-            widget.setLayout(vbox)
-            widget.setFixedWidth(PARAM_WIDTH - (SCROLL_WIDTH + 5))
-            sa.setWidget(widget)
-            self.param_tabs.addTab(sa, cat)
+        self.splitter.addWidget(widget)
+        self.splitter.addWidget(self.paramTabs)
+        self.splitter.setSizes([100, 200])
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
 
-        self.hbox.addWidget(self.param_tabs)
+        self.hbox.addWidget(self.splitter)
 
         widget = QWidget()
         widget.setLayout(self.vbox)
         self.setCentralWidget(widget)
 
         self.setWindowTitle(APP_NAME)
-        # self.resize(800, 600)
 
-        for param, control in self.param_controls.items():
-            if hasattr(control, 'paramChanged'):
-                # control.paramChanged.connect(lambda p, v: print(p, v))
-                control.paramChanged.connect(self.display.updateParam)
-
-
-        self.export_window = ExportWindow(self)
+        self.exportWindow = ExportWindow(self)
 
         menu = self.menuBar()
-        self.file_menu = menu.addMenu("File")
+        self.fileMenu = menu.addMenu("File")
 
-        self.add_menu_item(self.file_menu, 'Quit', self.close, 'Ctrl+Q',
+        self.addMenuItem(self.fileMenu, 'Quit', self.close, 'Ctrl+Q',
             'Quit the viewer.')
-        self.add_menu_item(self.file_menu, '&Open Volumetric Movie',
-            self.open_file, 'Ctrl+O')
+        self.addMenuItem(self.fileMenu, '&Open Data',
+            self.openFile, 'Ctrl+O')
 
-        self.view_menu = menu.addMenu("View")
+        self.viewMenu = menu.addMenu("View")
 
-        self.show_settings = self.add_menu_item(self.view_menu,
-            'Hide View Settings', self.toggle_settings, 'Ctrl+/',
+        self.showSettings = self.addMenuItem(self.viewMenu,
+            'Hide View Settings', self.toggleSettings, 'Ctrl+/',
             'Show or hide settings option on right side of main window')
 
-        self.save_image = self.add_menu_item(self.view_menu,
-            'Save Screenshot', self.export_window.save_frame, 's',
+        self.save_image = self.addMenuItem(self.viewMenu,
+            'Save Screenshot', self.exportWindow.saveFrame, 's',
             'Save a screenshot with the current export settings (use export window to control resolution).')
 
-        self.show_export = self.add_menu_item(self.view_menu,
-            'Show Export Window', self.toggle_export, 'Ctrl+E',
+        self.showExport = self.addMenuItem(self.viewMenu,
+            'Show Export Window', self.toggleExport, 'Ctrl+E',
             'Show or hide the export window, used to take screenshots or make movies')
 
         for i in range(3):
@@ -244,34 +516,28 @@ class VolumetricViewer(QMainWindow):
 
             def f(event, a=i):
                 self.orient_camera(a)
-            self.add_menu_item(self.view_menu,
+            self.addMenuItem(self.viewMenu,
                 f'Look down {axis}-axis', f, axis.lower())
 
             def f2(event, a=i):
                 self.orient_camera(a+3)
-            self.add_menu_item(self.view_menu,
+            self.addMenuItem(self.viewMenu,
                 f'Look down -{axis}-axis', f2, 'Shift+'+axis.lower())
-
 
         self.setAcceptDrops(True)
         self.show()
-        if volume is not None:
-            self.open_volume(volume)
 
-    def refresh_param_values(self):
-        if getattr(self.display, 'volume', None) is not None:
-            vol = self.display.volume
-            # self.param_controls['frame'].setRange(0, len(vol)-1)
-            ranges = range_from_volume(vol)
-            for param, r in ranges.items():
-                if param in self.param_controls:
-                    self.param_controls[param].setRange(*r)
+    def valueCallback(self, param, value):
+        control = self.paramControls.get(param, None)
+        if control is not None:
+            control.setValue(value)
 
-        for name, control in self.param_controls.items():
-            control.setValue(self.display.view.params[name])
+    def rangeCallback(self, param, minVal, maxVal):
+        control = self.paramControls.get(param, None)
+        if control is not None and hasattr(control, 'setRange'):
+            control.setRange(minVal, maxVal)
 
-
-    def add_menu_item(self, menu, title, func=None, shortcut=None, tooltip=None):
+    def addMenuItem(self, menu, title, func=None, shortcut=None, tooltip=None):
         action = QAction(title, self)
         if shortcut is not None:
             action.setShortcut(shortcut)
@@ -284,53 +550,86 @@ class VolumetricViewer(QMainWindow):
 
         return action
 
-    def open_file(self):
+    def openFile(self):
+        fn, ext = QFileDialog.getOpenFileName(self, 'Open Volumetric Movie / Mesh Sequence', os.getcwd(), "Volumetric Movie (*.vti);; Polygon Mesh (*.ply)")
+        if fn:
+            self.openData(fn)
+
+    def openData(self, dat):
         try:
-            fn, ext = QFileDialog.getOpenFileName(self, 'Open Volumetric Movie', os.getcwd(), "VTI (*.vti)")
-            if fn:
-                vol = open_3D_movie(fn)
-        except:
-            QMessageBox.critical(self, "ERROR", f'"{fn}" does not appear to be a 3D movie file!')
+            self.display.makeCurrent()
+            asset = self.display.view.openData(dat)
+            self.display.doneCurrent()
+        except Exception as e:
+            ec = e.__class__.__name__
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle(str(ec))
+            msg.setText(str(ec) + ": " + str(e))
+            msg.setDetailedText(traceback.format_exc())
+            msg.setStyleSheet("QTextEdit {font-family: Courier; min-width: 600px;}")
+            msg.setStandardButtons(QMessageBox.Cancel)
+            msg.exec_()
+            # raise
         else:
-            if fn:
-                self.open_volume(vol)
+            self.assetList.addItem(AssetItem(asset, self))
+            self.update()
 
-    def open_volume(self, vol):
-        if isinstance(vol, str):
-            try:
-                vv = open_3D_movie(vol)
-            except Exception as e:
-                ec = e.__class__.__name__
-                QMessageBox.critical(self, ec, str(e))
-                return
-            else:
-                self.setWindowTitle(vol)
-                vol = vv
-        elif isinstance(vol, np.ndarray):
-            vol = VolumetricMovie(vol)
+    def buildParamTab(self, params, prefix=""):
+        vbox = QVBoxLayout()
+        vbox.setSpacing(10)
+        paramControls = paramListToVBox(params, vbox, self.display.view, prefix=prefix)
 
-        if isinstance(vol, VolumetricMovie):
-            self.display.attachVolume(vol)
-            self.refresh_param_values()
+        vbox.addStretch(1)
 
+        sa = QScrollArea()
+        sa.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        sa.setContentsMargins(0, 0, 0, 0)
+        sa.setFrameShape(QFrame.NoFrame)
+
+        widget = QWidget()
+        widget.setLayout(vbox)
+        widget.setFixedWidth(PARAM_WIDTH - (SCROLL_WIDTH + 5))
+        sa.setWidget(widget)
+
+        for param, control in paramControls.items():
+            if hasattr(control, 'paramChanged'):
+                control.paramChanged.connect(self.display.updateParam)
+        # print(list(paramControls.keys()))
+
+        self.paramControls.update(paramControls)
+
+        return sa
+
+    def selectAssetTab(self, asset):
+        if asset is None:
+            tab, label = self.nullTab, 'Data'
+        elif isinstance(asset, AssetItem):
+            tab, label = asset.tab, asset.label
         else:
-            raise ValueError('Volume must be a VolumetricMovie object or convertable to one (a filename or numpy array)')
+            raise ValueError('selectAssetTab should receive an int or AssetItem object')
 
-    def toggle_settings(self):
-        if self.param_tabs.isVisible():
-            self.param_tabs.setVisible(False)
-            self.show_settings.setText('Show View Settings')
-        else:
-            self.param_tabs.setVisible(True)
-            self.show_settings.setText('Hide View Settings')
+        self.paramTabs.setUpdatesEnabled(False)
+        self.paramTabs.removeTab(0)
+        self.paramTabs.insertTab(0, tab, label)
+        self.paramTabs.setCurrentIndex(0)
+        self.paramTabs.setUpdatesEnabled(True)
 
-    def toggle_export(self):
-        if self.export_window.isVisible():
-            self.export_window.hide()
-            self.show_export.setText('Show Export Window')
+    def toggleSettings(self):
+        if self.splitter.isVisible():
+            self.splitter.setVisible(False)
+            self.showSettings.setText('Show View Settings')
         else:
-            self.export_window.show()
-            self.show_export.setText('Hide Export Window')
+            self.splitter.setVisible(True)
+            self.showSettings.setText('Hide View Settings')
+
+    def toggleExport(self):
+        if self.exportWindow.isVisible():
+            self.exportWindow.hide()
+            self.showExport.setText('Show Export Window')
+        else:
+            self.exportWindow.show()
+            self.showExport.setText('Hide Export Window')
 
     def closeEvent(self, event):
         # Prevents an error message by controlling deallocation order!
@@ -344,48 +643,66 @@ class VolumetricViewer(QMainWindow):
 
     def dragMoveEvent(self, event):
         if event.mimeData().hasUrls:
-            event.setDropAction(QtCore.Qt.CopyAction)
+            event.setDropAction(Qt.CopyAction)
             event.accept()
         else:
             event.ignore()
 
     def dropEvent(self, event):
         if event.mimeData().hasUrls:
-            event.setDropAction(QtCore.Qt.CopyAction)
+            event.setDropAction(Qt.CopyAction)
             event.accept()
             l = []
             if len(event.mimeData().urls()):
-                self.open_volume(event.mimeData().urls()[0].toLocalFile())
+                self.openData(event.mimeData().urls()[0].toLocalFile())
         else:
             event.ignore()
 
     def orient_camera(self, axis):
-        X, Y, Z = np.eye(3)
-
-        # R = np.eye(3)
-        # if flip:
-        #     R[0] *= -1
-        #     R[2] *= -1
-        #
-        # R = np.roll(R, 2-axis, axis=1)
-        # print(R, axis, flip)
-        #
-        # self.display.updateParams(R=R)
-
         if axis == 0:
-            R = np.array([-Z, Y, X]).T
+            self.display.view.resetView(direction=(1, 0, 0), up=(0, 1, 0))
         elif axis == 1:
-            R = np.array([X, -Z, Y]).T
+            self.display.view.resetView(direction=(0, 1, 0), up=(0, 0, -1))
         elif axis == 2:
-            R = np.array([X, Y, Z]).T
-        elif axis == 3:
-            R = np.array([Z, Y, -X]).T
+            self.display.view.resetView(direction=(0, 0, 1), up=(0, 1, 0))
         elif axis == 4:
-            R = np.array([X, Z, -Y]).T
+            self.display.view.resetView(direction=(-1, 0, 0), up=(0, 1, 0))
+        elif axis == 4:
+            self.display.view.resetView(direction=(0, -1, 0), up=(0, 0, 1))
         else:
-            R = np.array([-X, Y, -Z]).T
+            self.display.view.resetView(direction=(0, 0, -1), up=(0, 1, 0))
 
-        self.display.updateParams(R=R)
+        self.display.update()
+
+
+def generateDarkPalette():
+    c = QtGui.QColor
+
+    palette = QtGui.QPalette()
+    palette.setColor(palette.Window,            c( 53,  53,  53))
+    palette.setColor(palette.WindowText,        c(255, 255, 255))
+    palette.setColor(palette.Text,              c(255, 255, 255))
+    palette.setColor(palette.HighlightedText,   c(255, 255, 255))
+    palette.setColor(palette.ButtonText,        c(255, 255, 255))
+    palette.setColor(palette.ToolTipBase,       c(  0,   0,   0))
+    palette.setColor(palette.ToolTipText,       c(255, 255, 255))
+    palette.setColor(palette.Light,             c(100, 100, 100))
+    palette.setColor(palette.Button,            c(70,   70,  70))
+    palette.setColor(palette.Dark,              c( 20, 20,  20))
+    palette.setColor(palette.Shadow,            c( 0,  0,  0))
+    palette.setColor(palette.Base,              c( 30,  30,  30))
+    palette.setColor(palette.AlternateBase,     c( 66,  66,  66))
+    palette.setColor(palette.Highlight,         c( 42, 130, 218))
+    palette.setColor(palette.BrightText,        c(255,   0,   0))
+    palette.setColor(palette.Link,              c( 42, 130, 218))
+    palette.setColor(palette.Highlight,         c( 42, 130, 218))
+    palette.setColor(palette.Disabled, palette.WindowText,      c(127, 127, 127))
+    palette.setColor(palette.Disabled, palette.Text,            c(127, 127, 127))
+    palette.setColor(palette.Disabled, palette.ButtonText,      c(127, 127, 127))
+    palette.setColor(palette.Disabled, palette.HighlightedText, c(127, 127, 127))
+
+    return palette
+
 
 def view_volume(vol=None, args=None, window_name=None):
     if window_name is None:
@@ -394,9 +711,21 @@ def view_volume(vol=None, args=None, window_name=None):
     if args is None:
         args = sys.argv
 
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+
     app = QApplication(args)
+
+    # start = time.time()
+    # QtGui.QFontDatabase.addApplicationFont(os.path.join(os.path.split(__file__)[0], "fonts/Inter-Regular.ttf"))
+    # print(time.time() - start)
+
     app.setStyle('Fusion')
+    app.setPalette(generateDarkPalette())
     app.setStyleSheet(f'''
+        QWidget {{
+            font-size: 12px;
+        }}
+
         QLabel, QSlider, QSpinBox, QDoubleSpinBox, QCheckBox {{
             padding: 0px;
             margin: 0px;
@@ -406,17 +735,28 @@ def view_volume(vol=None, args=None, window_name=None):
             padding-top: 20px;
             margin: 0px;
         }}
-        #SectionLabel {{
-            padding-top: 10px;
-            /* font-weight: bold; */
-        }}
         QScrollBar:vertical {{
             width: {SCROLL_WIDTH}px;
         }}
+        #Border {{
+            border: 1px solid #808080;
+            border-radius: 4px;
+            margin-top: 0px;
+            margin-bottom: 5px;
+        }}
+        QTabBar::tab:selected {{
+            color: palette(Text);
+        }}
+        QTabBar::tab:!selected {{
+            color: #A0A0A0;
+        }}
     ''')
+
     app.setApplicationDisplayName(window_name)
-    window = VolumetricViewer(vol, window_name=window_name)
-    app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap(os.path.join(os.path.split(__file__)[0], 'muvi_logo.png'))))
+    window = VolumetricViewer(window_name=window_name)
+    if vol is not None:
+        window.openData(vol)
+    app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap(os.path.join(ICON_DIR, 'muvi_logo.png'))))
     return(app.exec_())
 
 

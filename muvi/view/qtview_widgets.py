@@ -30,8 +30,8 @@ from PyQt5.QtWidgets import QWidget, QSpinBox, QVBoxLayout, QHBoxLayout, \
     QComboBox, QColorDialog, QPushButton, QLineEdit, QOpenGLWidget
 from PyQt5.QtGui import QColor, QSurfaceFormat
 # from OpenGL import GL
-from .ooopengl import GL_SRGB8_ALPHA8
-from . import view
+# from .ooopengl import GL_SRGB8_ALPHA8
+# from  import view
 import math
 import traceback
 import time
@@ -212,12 +212,9 @@ class LinearControl(ParamControl):
         self.subdiv = subdiv
         self.step = step
 
+        self.decimals = decimals
         self.setRange(minVal, maxVal)
         self.setValue(default)
-
-        if decimals is None:
-            decimals = math.ceil(1.5-math.log10(self.currentStep))
-        self.spinBox.setDecimals(decimals)
 
         self.slider.valueChanged.connect(self.sliderChanged)
         self.spinBox.valueChanged.connect(self.spinChanged)
@@ -238,6 +235,11 @@ class LinearControl(ParamControl):
         self.spinBox.setSingleStep(step)
         self.slider.setSingleStep(self.subdiv)
         self.slider.setTickInterval(self.subdiv * 2 if self.sliderSteps//self.subdiv > 10 else self.subdiv)
+
+        if self.decimals is None:
+            self.spinBox.setDecimals(math.ceil(1.5-math.log10(self.currentStep)))
+        else:
+            self.spinBox.setDecimals(self.decimals)
 
     def setValue(self, value, silent=False):
         self.spinBox.setValue(value)
@@ -459,6 +461,7 @@ class ListControl(ParamControl):
         self.slider.valueChanged.connect(self.sliderChanged)
         self.spinBox.valueChanged.connect(self.spinChanged)
         self.spinBox.valueChanged.connect(self._paramChanged)
+        self.value = self.spinBox.value
 
     def setValue(self, value):
         self.spinBox.setValue(value)
@@ -475,18 +478,32 @@ class ListControl(ParamControl):
         self.spinBox.setValue(self.spinBox.values[value])
 
 
-class VectorControl(QGroupBox):
+class VectorControl(QWidget):
     paramChanged = QtCore.pyqtSignal(str, object)
 
     def __init__(self, title="Vector:", default=np.zeros(3), minVal=np.zeros(3),
             maxVal=np.ones(3), step=None, param=None, tooltip=None, subdiv=5,
             labels=['X:', 'Y:', 'Z:', 'W:']):
-        super().__init__(title)
+        super().__init__()
+
+
+        self.vbox = QVBoxLayout()
+
+        self.frame = QFrame()
+        self.frame.setObjectName('Border')
+
+        self.vbox.addWidget(QLabel(title))
+        self.vbox.addWidget(self.frame)
+        self.vbox.setContentsMargins(0, 0, 0, 0)
+
 
         self.step = step
-        self.vbox = QVBoxLayout()
+        self.sub_vbox = QVBoxLayout()
         self.setLayout(self.vbox)
         self.param = param
+
+
+        self.frame.setLayout(self.sub_vbox)
 
         self.controls = []
         self.value = default.copy()
@@ -494,7 +511,7 @@ class VectorControl(QGroupBox):
         for i in range(len(default)):
             control = LinearControl(labels[i], default[i], minVal[i], maxVal[i],
                 self.step, param=str(i), subdiv=subdiv, tooltip=tooltip)
-            self.vbox.addWidget(control)
+            self.sub_vbox.addWidget(control)
             control.paramChanged.connect(self._paramChanged)
             self.controls.append(control)
 
@@ -541,7 +558,7 @@ PARAM_FIELDS = {
     'options':'options',
 }
 
-def control_from_param(param, view=None):
+def controlFromParam(param, view=None, prefix=""):
     if hasattr(param, 'action'):
         button = QPushButton(param.display_name)
         func = getattr(view, param.action, None)
@@ -551,7 +568,7 @@ def control_from_param(param, view=None):
 
     kwargs = dict(
         title = param.display_name + ":",
-        param = param.name
+        param = prefix + param.name
     )
 
     for p, k in PARAM_FIELDS.items():
@@ -579,7 +596,7 @@ def control_from_param(param, view=None):
     else:
         return None
 
-def param_list_to_vbox(params, vbox, view=None):
+def paramListToVBox(params, vbox, view=None, prefix=""):
     param_controls = {}
 
     sub_vbox = vbox
@@ -589,233 +606,211 @@ def param_list_to_vbox(params, vbox, view=None):
             # We have subcategories -- make tabs!
             tabs = QTabWidget()
             # tabs.setContentsMargins(5, 5, 5, 5)
+            tabs.setStyleSheet('QTabWidget {background-color: palette(window);}')
             for cat, param_list in param.items():
                 tab_vbox = QVBoxLayout()
-                # tab_vbox.setContentsMargins(5, 5, 5, 5)
-                # tab_vbox.setSpacing(0)
-                param_controls.update(param_list_to_vbox(param_list, tab_vbox))
+                param_controls.update(paramListToVBox(param_list, tab_vbox, prefix=prefix))
                 widget = QWidget()
                 widget.setLayout(tab_vbox)
                 tabs.addTab(widget, cat)
 
-                # tabs.setContentsMargins(0, 0, 0, 0)
-            # vbox.addSpacing(10)
             vbox.addWidget(tabs)
 
         elif isinstance(param, str):
-            # label = QLabel(param)
-            # label.setObjectName('SectionLabel')
-            # label.setAlignment(QtCore.Qt.AlignCenter)
-            # vbox.addWidget(label)
-            # vbox.addWidget(QHLine())
-
             sub_vbox = QVBoxLayout()
-            # sub_vbox.setContentsMargins(0, 0, 0, 0)
-            # sub_vbox.setSpacing(0)
-
-
-            # frame = QFrame()
-            frame = QGroupBox(param)
+            frame = QFrame()
+            vbox.addWidget(QLabel(param))
+            frame.setObjectName('Border')
             frame.setLayout(sub_vbox)
-            # frame.setFrameShape(QFrame.StyledPanel)
-            # frame.setFrameShadow(QFrame.Sunken)
-            # frame.setContentsMargins(0, 0, 0, 0)
-
             vbox.addWidget(frame)
-            # vbox.addSpacing(10)
-            # sub_vbox.addWidget(label)
-            # sub_vbox.addWidget(QHLine())
 
         else:
             # This is just an item
-            # print(param.name)
-            control = control_from_param(param, view)
+            control = controlFromParam(param, view, prefix=prefix)
             if control is not None:
                 sub_vbox.addWidget(control)
-                # if isinstance(control, QGroupBox):
-                    # sub_vbox.addSpacing(10)
                 if hasattr(param, 'name'):
-                    param_controls[param.name] = control
+                    param_controls[prefix + param.name] = control
 
     return param_controls
 
 
-class VolumetricView(QOpenGLWidget):
-    frameChanged = QtCore.pyqtSignal(int)
-
-    def __init__(self, parent=None, volume=None):
-        fmt = QSurfaceFormat()
-        fmt.setSwapInterval(1)
-        QSurfaceFormat.setDefaultFormat(fmt)
-
-        super().__init__(parent)
-
-        self.setUpdateBehavior(1)
-        self.last_t = time.time()
-
-        self.parent = parent
-        self.lastPos = QtCore.QPoint()
-
-        self.timer = QtCore.QTimer()
-        self.timer.setInterval(5)
-        self.timer.timeout.connect(self.update)
-        # self.timer.start()
-
-        self._isPlaying = False
-        self.hasUpdate = True
-
-        self.makeCurrent()
-        self.view = view.View()
-        self.doneCurrent()
-
-        self._updates = {}
-        # if volume is not None:
-            # self.attachVolume(volume)
-
-    def setPlaying(self, isPlaying):
-        if isPlaying:
-            self.play()
-        else:
-            self.pause()
-
-    def play(self):
-        if hasattr(self.view, 'volume'):
-            self._isPlaying = True
-            self._tStart = time.time()
-            self.timer.start()
-
-    def pause(self):
-        self._isPlaying = False
-        self.timer.stop()
-
-    def attachVolume(self, volume):
-        self.makeCurrent()
-        self.volume = volume
-        self.view.attach_volume(volume)
-        self.view.draw()
-        self.doneCurrent()
-
-    def minimumSizeHint(self):
-        return QtCore.QSize(300, 300)
-
-    def sizeHint(self):
-        return QtCore.QSize(800, 600)
-
-    def initializeGL(self):
-        try:
-            # This sets the output to be sRGB -- unfortunately doesn't work with old versions of Qt!
-            # As a result, the opengl renderer must create an offscreen buffer
-            #   to acheive the same result. ):
-            # self.setTextureFormat(GL_SRGB8_ALPHA8)
-            self.dpr = self.devicePixelRatio()
-            self.view.resize(width=self.width()*self.dpr,
-                height=self.height()*self.dpr)
-        except:
-            traceback.print_exc()
-            self.parent.close()
-
-    def paintGL(self):
-        try:
-            if self._isPlaying:
-                t = time.time()
-                fps = self.view.params['framerate']
-                advance = int((t - self._tStart) * fps)
-                if advance:
-                    if self.view.volume is not None:
-                        nvol = len(self.view.volume)
-                    else:
-                        nvol = 1
-                    frame = (self.view.params['frame'] + advance) % nvol
-                    self.updateParam('frame', frame)
-                    self._tStart += advance / fps
-                    self.frameChanged.emit(frame)
-
-            # print(t - self.last_t)
-            # dt = t - self.last_t
-            # self.last_t = t
-
-            if self.hasUpdate:
-                self._updateParams()
-                self.view.draw()
-
-        except:
-            traceback.print_exc()
-            self.parent.close()
-
-    def resizeGL(self, width, height):
-        self.view.resize(width*self.dpr, height*self.dpr)
-        self.hasUpdate = True
-
-    def mousePressEvent(self, event):
-        self.lastPos = event.pos()
-        self.view.buttons_pressed = int(event.buttons())
-        self.hasUpdate = True
-        self.update()
-
-    def mouseReleaseEvent(self, event):
-        self.view.buttons_pressed = int(event.buttons())
-        self.hasUpdate = True
-        self.update()
-
-    def mouseMoveEvent(self, event):
-        x = event.x()
-        y = event.y()
-        dx = x - self.lastPos.x()
-        dy = y - self.lastPos.y()
-        self.lastPos = event.pos()
-        self.view.buttons_pressed = int(event.buttons())
-        if dx or dy:
-            self.view.mouse_move(x*self.dpr, y*self.dpr, dx*self.dpr, dy*self.dpr)
-            self.hasUpdate = True
-            self.update()
-
-    def wheelEvent(self, event):
-        self.view.params['scale'] *= 1.25**(event.angleDelta().y()/120)
-        self.hasUpdate = True
-        self.update()
-
-    def updateParams(self, **kwargs):
-        self._updates.update(**kwargs)
-        self.hasUpdate = True
-        self.update()
-
-    def updateHiddenParams(self, **kwargs):
-        self._updates.update(**kwargs)
-        self.hasUpdate = True
-
-    def updateParam(self, p, v):
-        self.updateParams(**{p:v})
-
-    def updateHiddenParam(self, p, v):
-        self.updateHiddenParams(**{p:v})
-
-    def _updateParams(self):
-        if self.hasUpdate:
-            self.view.update_params(**self._updates)
-            self._updates = {}
-            self.hasUpdate = False
-
-    def previewImage(self):
-        self.makeCurrent()
-        self._updateParams()
-        img = self.view.draw(offscreen=True, return_image=True)
-        self.doneCurrent()
-
-        return img
-
-    def saveImage(self, fn=None, dir=None):
-        if dir is None:
-            dir = os.getcwd()
-        if fn is None:
-            fns = glob.glob(os.path.join(dir, 'muvi_screenshot_*.png'))
-            for i in range(10**4):
-                fn = os.path.join(dir, 'muvi_screenshot_%08d.png' % i)
-                if fn not in fns:
-                    break
-
-        self.makeCurrent()
-        self._updateParams()
-        img = self.view.draw(offscreen=True, save_image=fn)
-        self.doneCurrent()
-
-        return fn, img
+# class VolumetricView(QOpenGLWidget):
+#     frameChanged = QtCore.pyqtSignal(int)
+#
+#     def __init__(self, parent=None, volume=None):
+#         fmt = QSurfaceFormat()
+#         fmt.setSwapInterval(1)
+#         QSurfaceFormat.setDefaultFormat(fmt)
+#
+#         super().__init__(parent)
+#
+#         self.setUpdateBehavior(1)
+#         self.last_t = time.time()
+#
+#         self.parent = parent
+#         self.lastPos = QtCore.QPoint()
+#
+#         self.timer = QtCore.QTimer()
+#         self.timer.setInterval(5)
+#         self.timer.timeout.connect(self.update)
+#         # self.timer.start()
+#
+#         self._isPlaying = False
+#         self.hasUpdate = True
+#
+#         self.makeCurrent()
+#         self.view = view.View()
+#         self.doneCurrent()
+#
+#         self._updates = {}
+#         # if volume is not None:
+#             # self.attachVolume(volume)
+#
+#     def setPlaying(self, isPlaying):
+#         if isPlaying:
+#             self.play()
+#         else:
+#             self.pause()
+#
+#     def play(self):
+#         if hasattr(self.view, 'volume'):
+#             self._isPlaying = True
+#             self._tStart = time.time()
+#             self.timer.start()
+#
+#     def pause(self):
+#         self._isPlaying = False
+#         self.timer.stop()
+#
+#     def attachVolume(self, volume):
+#         self.makeCurrent()
+#         self.volume = volume
+#         self.view.attach_volume(volume)
+#         self.view.draw()
+#         self.doneCurrent()
+#
+#     def minimumSizeHint(self):
+#         return QtCore.QSize(300, 300)
+#
+#     def sizeHint(self):
+#         return QtCore.QSize(800, 600)
+#
+#     def initializeGL(self):
+#         try:
+#             # This sets the output to be sRGB -- unfortunately doesn't work with old versions of Qt!
+#             # As a result, the opengl renderer must create an offscreen buffer
+#             #   to acheive the same result. ):
+#             # self.setTextureFormat(GL_SRGB8_ALPHA8)
+#             self.dpr = self.devicePixelRatio()
+#             self.view.resize(width=self.width()*self.dpr,
+#                 height=self.height()*self.dpr)
+#         except:
+#             traceback.print_exc()
+#             self.parent.close()
+#
+#     def paintGL(self):
+#         try:
+#             if self._isPlaying:
+#                 t = time.time()
+#                 fps = self.view.params['framerate']
+#                 advance = int((t - self._tStart) * fps)
+#                 if advance:
+#                     if self.view.volume is not None:
+#                         nvol = len(self.view.volume)
+#                     else:
+#                         nvol = 1
+#                     frame = (self.view.params['frame'] + advance) % nvol
+#                     self.updateParam('frame', frame)
+#                     self._tStart += advance / fps
+#                     self.frameChanged.emit(frame)
+#
+#             # print(t - self.last_t)
+#             # dt = t - self.last_t
+#             # self.last_t = t
+#
+#             if self.hasUpdate:
+#                 self._updateParams()
+#                 self.view.draw()
+#
+#         except:
+#             traceback.print_exc()
+#             self.parent.close()
+#
+#     def resizeGL(self, width, height):
+#         self.view.resize(width*self.dpr, height*self.dpr)
+#         self.hasUpdate = True
+#
+#     def mousePressEvent(self, event):
+#         self.lastPos = event.pos()
+#         self.view.buttons_pressed = int(event.buttons())
+#         self.hasUpdate = True
+#         self.update()
+#
+#     def mouseReleaseEvent(self, event):
+#         self.view.buttons_pressed = int(event.buttons())
+#         self.hasUpdate = True
+#         self.update()
+#
+#     def mouseMoveEvent(self, event):
+#         x = event.x()
+#         y = event.y()
+#         dx = x - self.lastPos.x()
+#         dy = y - self.lastPos.y()
+#         self.lastPos = event.pos()
+#         self.view.buttons_pressed = int(event.buttons())
+#         if dx or dy:
+#             self.view.mouse_move(x*self.dpr, y*self.dpr, dx*self.dpr, dy*self.dpr)
+#             self.hasUpdate = True
+#             self.update()
+#
+#     def wheelEvent(self, event):
+#         self.view.params['scale'] *= 1.25**(event.angleDelta().y()/120)
+#         self.hasUpdate = True
+#         self.update()
+#
+#     def updateParams(self, **kwargs):
+#         self._updates.update(**kwargs)
+#         self.hasUpdate = True
+#         self.update()
+#
+#     def updateHiddenParams(self, **kwargs):
+#         self._updates.update(**kwargs)
+#         self.hasUpdate = True
+#
+#     def updateParam(self, p, v):
+#         self.updateParams(**{p:v})
+#
+#     def updateHiddenParam(self, p, v):
+#         self.updateHiddenParams(**{p:v})
+#
+#     def _updateParams(self):
+#         if self.hasUpdate:
+#             self.view.update_params(**self._updates)
+#             self._updates = {}
+#             self.hasUpdate = False
+#
+#     def previewImage(self):
+#         self.makeCurrent()
+#         self._updateParams()
+#         img = self.view.draw(offscreen=True, return_image=True)
+#         self.doneCurrent()
+#
+#         return img
+#
+#     def saveImage(self, fn=None, dir=None):
+#         if dir is None:
+#             dir = os.getcwd()
+#         if fn is None:
+#             fns = glob.glob(os.path.join(dir, 'muvi_screenshot_*.png'))
+#             for i in range(10**4):
+#                 fn = os.path.join(dir, 'muvi_screenshot_%08d.png' % i)
+#                 if fn not in fns:
+#                     break
+#
+#         self.makeCurrent()
+#         self._updateParams()
+#         img = self.view.draw(offscreen=True, save_image=fn)
+#         self.doneCurrent()
+#
+#         return fn, img

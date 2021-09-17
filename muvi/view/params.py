@@ -39,7 +39,6 @@ parameters, as they are options for them!)
 _module_path = os.path.split(os.path.abspath(__file__))[0]
 SHADER_PATH = os.path.join(_module_path, 'shaders')
 
-
 # ----------------------------------------------------------
 # Load the colormaps from an XML file
 # ----------------------------------------------------------
@@ -61,7 +60,6 @@ class ColorMap:
         if len(self.data) != self.length * 3:
             raise ValueError('Colormap "%s" has invalid length' % self.short_name)
 
-
 for cm in ET.parse(os.path.join(SHADER_PATH, 'colormaps.xml')).getroot():
     cm = ColorMap(cm)
     COLORMAPS[cm.short_name] = cm
@@ -70,7 +68,7 @@ for cm in ET.parse(os.path.join(SHADER_PATH, 'colormaps.xml')).getroot():
 for i1, c1 in enumerate("rgb"):
     for i2, c2 in enumerate("rgb"):
         for i3, c3 in enumerate("rgb"):
-            c = c1 + c2 + c3 + "a"
+            c = c1 + c2 + c3
             _color_remaps[c] = str((i1+1)*100 + (i2+1)*10 + (i3+1))
 
 
@@ -78,39 +76,57 @@ for i1, c1 in enumerate("rgb"):
 # Get a list of Shaders
 # -------------------------------------------------------
 
-SUBSHADER_TYPES = ('cloud_color', )
+SUBSHADER_TYPES = ('cloud_shade', 'surface_shade', 'perspective_model')
 SUBSHADER_NAMES = {}
 SUBSHADER_SOURCE = {}
 
-def refresh_shaders():
-    '''Load shaders from the shader directory.
+for subshader in SUBSHADER_TYPES:
+    ds = {}
+    dn = {}
 
-    Normally not called by the user, but can be used to udpate sources,
-    if they are being edited while a program is being run.
-    '''
+    for fn in sorted(glob.glob(os.path.join(SHADER_PATH, subshader + "_*.glsl"))):
+        short_name = re.match('.*' + subshader + '_(.*).glsl', fn).group(1)
 
-    for subshader in SUBSHADER_TYPES:
-        ds = {}
-        dn = {}
+        with open(fn) as f:
+            code = f.read()
 
-        for fn in sorted(glob.glob(os.path.join(SHADER_PATH, subshader + "_*.glsl"))):
-            short_name = re.match('.*' + subshader + '_(.*).glsl', fn).group(1)
+        m = re.match(r'^\s*//\s*NAME:\s*(.*)\s*$', code, flags=re.MULTILINE)
+        long_name = m.group(1) if m else short_name
+        ds[short_name] = code
+        dn[short_name] = long_name
 
-            with open(fn) as f:
-                code = f.read()
+    SUBSHADER_NAMES[subshader] = dn
+    SUBSHADER_SOURCE[subshader] = ds
 
-            m = re.match(r'^\s*//\s*NAME:\s*(.*)\s*$', code, flags=re.MULTILINE)
-            long_name = m.group(1) if m else short_name
-            ds[short_name] = code
-            dn[short_name] = long_name
-
-        SUBSHADER_NAMES[subshader] = dn
-        SUBSHADER_SOURCE[subshader] = ds
-
-        # setattr(self, subshader + "_source", ds)
-        # setattr(self, subshader + "_names", dn)
-
-refresh_shaders()
+# def refresh_shaders():
+#     '''Load shaders from the shader directory.
+#
+#     Normally not called by the user, but can be used to udpate sources,
+#     if they are being edited while a program is being run.
+#     '''
+#
+#     for subshader in SUBSHADER_TYPES:
+#         ds = {}
+#         dn = {}
+#
+#         for fn in sorted(glob.glob(os.path.join(SHADER_PATH, subshader + "_*.glsl"))):
+#             short_name = re.match('.*' + subshader + '_(.*).glsl', fn).group(1)
+#
+#             with open(fn) as f:
+#                 code = f.read()
+#
+#             m = re.match(r'^\s*//\s*NAME:\s*(.*)\s*$', code, flags=re.MULTILINE)
+#             long_name = m.group(1) if m else short_name
+#             ds[short_name] = code
+#             dn[short_name] = long_name
+#
+#         SUBSHADER_NAMES[subshader] = dn
+#         SUBSHADER_SOURCE[subshader] = ds
+#
+#         # setattr(self, subshader + "_source", ds)
+#         # setattr(self, subshader + "_names", dn)
+#
+# refresh_shaders()
 
 #--------------------------------------------------------
 # List of Parameters for Display
@@ -122,15 +138,17 @@ refresh_shaders()
 PARAMS = OrderedDict()
 PARAMS_WITH_VOLUME_RANGES = {}
 PARAM_CATAGORIES = OrderedDict()
+ASSET_PARAMS = {}
+ASSET_DEFAULTS = {}
+
+_ASSET = None
 
 class ViewParam:
-    def __init__(self, name, display_name, cat, vcat, default, min=None,
+    def __init__(self, name, display_name, default, min=None,
             max=None, step=None, logstep=None, options=None, param_type=None,
             tooltip=None, max_from_vol=None):
         self.name = name
         self.display_name = display_name
-        self.cat = cat
-        self.vcat = vcat
         self.default = default
 
         if min is not None:
@@ -157,23 +175,94 @@ class ViewParam:
         else:
             self.type = param_type
 
+        if _ASSET is not None:
+            if _ASSET not in ASSET_DEFAULTS:
+                ASSET_DEFAULTS[_ASSET] = {name:default}
+            else:
+                ASSET_DEFAULTS[_ASSET][name] = default
+
     # type = property(lambda self: type(self.default))
 
+class ViewAction:
+    def __init__(self, action, display_name, *args, **kw):
+        self.action = action
+        self.display_name = display_name
+        self.args = args
+        self.kw = kw
+
 PARAM_CATAGORIES['Playback'] = [
-    ViewParam('frame', 'Frame', 'playback', 'view', 0, 0, 99, step=1,
-        param_type='playback', max_from_vol='Nt'),
+    ViewParam('frame', 'Frame', 0, 0, 0, step=1, param_type='playback',
+        max_from_vol='Nt'),
+]
+
+zero = np.zeros(3, dtype='f')
+one = np.ones(3, dtype='f')
+
+PARAM_CATAGORIES['View'] = [
+    ViewAction('resetView', 'Recenter View', None, None),
+    ViewParam('fov', 'FOV (degrees)', 30.0, min=0.0, max=120.0, step=10.0,
+        tooltip='The field of view of the display, measured in degrees.  Setting this to 0 gives an orthographic display.'),
+    ViewParam('framerate', 'Playback Rate', 30, 1, 120, 10,
+        tooltip='The playback rate in volumes/second.'),
+    # ViewParam('background_color', 'Background Color', np.array([0, 0, 0, 1], dtype='f'), param_type='color',
+    #     tooltip='The background color of the display.'),
+    ViewParam('disp_X0', 'Displayed Volume Lower Limit', zero, min=zero, max=100*one,
+        tooltip='Lower limit of displayed volume (in physical units)'),
+    ViewParam('disp_X1', 'Displayed Volume Upper Limit', 100*one, min=zero, max=100*one,
+        tooltip='Upper limit of displayed volume (in physical units)'),
+    ViewParam('mesh_clip', 'Clip Mesh to Volume', True,
+        tooltip='If True, clip Mesh to volumetric data limits.'),
+    ViewParam('camera_pos', 'Camera Position', np.array([50, 50, 500], dtype='f'),
+        min=-500*one, max=500*one,
+        tooltip='The position of the camera in volume physical units.'),
+    ViewParam('look_at', 'Camera Target', 50*one, min=-100*one, max=100*one,
+        tooltip='The position which the camera is looking at.'),
+    ViewParam('up', 'Camera Up Direction', np.array([0, 1, 0], dtype='f'), min=-one, max=one,
+        tooltip='The normal which defines the up direction of the camera.  Length is ignored.'),
+]
+
+
+PARAM_CATAGORIES['Display'] = [
+    ViewParam('background_color', 'Background', zero, param_type='color',
+        tooltip='The color of the display background'),
+    ViewParam('surface_shade', 'Surface Shade', 'camera', options=SUBSHADER_NAMES['surface_shade'],
+        tooltip='The lighting model used to shade surfaces.'),
+    ViewParam('show_axis', 'Show Axes', True,
+        tooltip='Show the axes (and their labels).'),
+    ViewParam('axis_major_tick_spacing', 'Tick Spacing', 10.0, min=1E-3, max=1E3, logstep=10,
+        tooltip='The spacing of major ticks on the axis.'),
+    ViewParam('axis_minor_ticks', 'Minor Ticks', 4, min=1, max=20, step=1,
+        tooltip='The number of minor divisions per major tick.  1 = no minor ticks.'),
+    ViewParam('axis_major_tick_length_ratio', 'Major Tick Length', 0.15, 0.0, 1.0, step=0.05,
+        tooltip='The length of the major ticks relative to the distance between them.'),
+    ViewParam('axis_minor_tick_length_ratio', 'Minor Tick Length', 0.6, 0.0, 1.0, step=0.05,
+        tooltip='The length of the minor ticks relative to the major ticks.'),
+    ViewParam('axis_line_color', 'Axis Color', one, param_type='color',
+        tooltip='The color of the axis lines.'),
+    ViewParam('axis_line_width', 'Axis Line Width', 1., 0.5, 10.0, step=1.0),
 ]
 
 MAX_CHANNELS = 3
 _default_colormaps = ['inferno', 'viridis', 'cividis']
 
-PARAM_CATAGORIES['Render'] = [
-    ViewParam('density', 'Density', 'render', 'uniform', 0.5, min=2**-10,
-        max=2, logstep=2**(1/2),
+_ASSET = "mesh"
+
+ASSET_PARAMS['mesh'] = [
+    ViewParam('mesh_scale', 'Scale of Mesh', 1.0, 1E-3, 1000, logstep=2**0.5,
+        tooltip='Scale of the mesh, relative to the volumetric data units.'),
+    ViewParam('mesh_offset', 'Mesh Offset', zero, -100*one, 100*one,
+        tooltip='The offset of the mesh, relative to the volumetric data units'),
+]
+
+_ASSET = "volume"
+
+ASSET_PARAMS['volume'] = [
+    ViewParam('vol_density', 'Density', 0.5, min=2**-10, max=2, logstep=2**(1/2),
         tooltip='The density of the cloud rendering.  If glow=1, this is the opacity of a single voxel with maximum vaue.'),
-    ViewParam('glow', 'Glow', 'render', 'uniform', 1.0, min=1, max=128,
-        logstep=2,
+    ViewParam('vol_glow', 'Glow', 1.0, min=1, max=128, logstep=2,
         tooltip='Increasing glow makes the cloud more transparent while proportionally increasing the brightness, giving the appearance of a glowing cloud.'),
+    ViewParam('vol_step_size', 'Render Step', 1.0, min=0.125, max=2, logstep=2**(1/2),
+        tooltip='The step size used in the internal rendering algorithm.  Decreasing this will improve the quality of the display, but slows down the rendering engine proportionally.'),
     OrderedDict()
 ]
 
@@ -181,87 +270,50 @@ for n in range(1, MAX_CHANNELS + 1):
     color = np.zeros(3, dtype='f')
     color[n-1] = 1
 
-    PARAM_CATAGORIES['Render'][-1][f'Ch. {n}'] = [
-         ViewParam(f'exposure{n}', 'Exposure', 'render', 'uniform', 0.0, min=0,
-            max=8, step=0.5,
+    ASSET_PARAMS['volume'][-1][f'Ch. {n}'] = [
+         ViewParam(f'vol_exposure{n}', 'Exposure', 0.0, min=0, max=8, step=0.5,
             tooltip='Adjust the brightness of the raw data.  Specified in stops (powers of 2).'),
 
         'Cloud',
-        ViewParam(f'cloud{n}_active', f'Enabled', 'render', 'shader', (n == 1),
+        ViewParam(f'vol_cloud{n}', f'Enabled', (n == 1),
             tooltip='Enable cloud rendering for this color channel.'),
-        ViewParam(f'colormap{n}', 'Colormap', 'render', 'view',
-            _default_colormaps[n-1], options=_colormap_names,
+        ViewParam(f'vol_colormap{n}', 'Colormap', _default_colormaps[n-1],
+            options=_colormap_names,
             tooltip='Select the color mapping used to render this channel.'),
 
         'Isosurface',
-        ViewParam(f'iso{n}_active', f'Enabled', 'isosurface', 'shader',
-            False,
+        ViewParam(f'vol_iso{n}', 'Enabled', False,
             tooltip='Enable isosurface rendering for this color channel.'),
-        ViewParam(f'iso{n}_level', 'Level', 'isosurface', 'uniform', 0.5,
-            min=0.0, max=1.0, step=0.1,
+        ViewParam(f'vol_iso{n}_level', 'Level', 0.5, min=0.0, max=1.0, step=0.1,
             tooltip='The level to display the isosurface at: 0 = minimum value, 1 = maximum.  Note that this is affected by exposure!'),
-        ViewParam(f'iso{n}_color', 'Color', 'isosurface', 'uniform', color,
-            param_type='color',
+        ViewParam(f'vol_iso{n}_color', 'Color', color, param_type='color',
             tooltip='The color of the isosurface.'),
-        ViewParam(f'iso{n}_opacity', 'Opacity', 'isosurface', 'uniform', 0.3,
-            min=0.0, max=1.0, step=0.1,
+        ViewParam(f'vol_iso{n}_opacity', 'Opacity', 0.3, min=0.0, max=1.0, step=0.1,
             tooltip='The opacity of the isosurface.')
     ]
 
-PARAM_CATAGORIES['View'] = [
-    ViewParam('R', 'Rotation', 'view', 'view', np.eye(3, dtype='f'),
-        param_type='rot'),
-    ViewParam('scale', 'Scale', 'view', 'view', 1.0, logstep=1.25, param_type='hidden'),
-    ViewParam('fov', 'FOV (degrees)', 'view', 'view', 30.0, min=0.0, max=120.0, step=10.0,
-        tooltip='The field of view of the display, measured in degrees.  Setting this to 0 gives an orthographic display.'),
-    ViewParam('framerate', 'Playback Rate', 'playback', 'view', 30, 1, 120, 10,
-        tooltip='The playback rate in volumes/second.'),
-    ViewParam('background_color', 'Background Color', 'view', 'view', np.array([0, 0, 0, 1], dtype='f'), param_type='color',
-        tooltip='The background color of the display.'),
-    ViewParam('X0', 'Displayed Volume Lower Limit', 'view', 'uniform', np.zeros(3, dtype='f'),
-        max_from_vol=('Lx', 'Ly', 'Lz'),
-        tooltip='Lower limit of displayed volume (in physical units)'),
-    ViewParam('X1', 'Displayed Volume Upper Limit', 'view', 'uniform', np.ones(3, dtype='f') * 100,
-        max_from_vol=('Lx', 'Ly', 'Lz'),
-        tooltip='Upper limit of displayed volume (in physical units)'),
-    ViewParam('center', 'Display Center', 'view', 'view', np.ones(3, dtype='f') * 128,
-        max_from_vol=('Lx', 'Ly', 'Lz'), param_type='hidden'),
-]
-
-PARAM_CATAGORIES['Adv.'] = [
-    ViewParam('step_size', 'Render Step', 'advanced', 'uniform', 1.0,
-        min=0.125, max=2, logstep=2**(1/2),
-        tooltip='The step size used in the internal rendering algorithm.  Increasing this will improve the quality of the display, but slows down the rendering engine proportionally.'),
-    ViewParam('perspective_xfact', 'Persp. X Coeff.', 'advanced', 'uniform',
-        0.0, min=-1, max=1, step=0.05,
-        tooltip='The coefficient for perspective correction in the x direction (=Lx/dx).  Should only be non-zero if the scanner is displaced in the x direction.'),
-    ViewParam('perspective_yfact', 'Persp. Y Coeff.', 'advanced', 'uniform', 0.0, min=-1, max=1, step=0.05,
-        tooltip='The coefficient for perspective correction in the y direction (=Ly/dy).  Should only be non-zero if the scanner is displaced in the y direction.'),
-    ViewParam('perspective_zfact', 'Persp. Z Coeff.', 'advanced', 'uniform', 0.0, min=-1, max=1, step=0.05,
-        tooltip='The coefficient for perspective correction in the z direction (=Lz/dz).'),
-    ViewParam('color_remap', 'Color Remap', 'advanced', 'shader', 'rgba', options=_color_remaps,
-        tooltip='Reshuffles the color channels in the corresponding order.  Can be used, for example, to have multiple isosurfaces.'),
-    ViewParam('cloud_color', 'Cloud Shader', 'advanced', 'shader', 'colormap', options=SUBSHADER_NAMES['cloud_color'],
+ASSET_PARAMS['volume'] += [
+    ViewParam('vol_perspective_correction_factor', 'Perspective Coefficients', zero, min=-one, max=+one, step=0.05,
+        tooltip='The coefficient for perspective correction along each axis (=Li/di).  Normally only one of x/y is nonzero.'),
+    ViewParam('cloud_shade', 'Cloud Shade', 'colormap', options=SUBSHADER_NAMES['cloud_shade'],
         tooltip='The cloud color sub-shader to use for the display.  Normally not changed.'),
-    ViewParam('gamma2', 'Gamma 2', 'advanced', 'shader', False,
-        tooltip='If checked, treat the raw data as if it has gamma 2.  Normally this is automatically determined from the volume itself.')
+    ViewParam('gamma2', 'Gamma 2', False,
+        tooltip='If checked, treat the raw data as if it has gamma 2.  Normally this is automatically determined from the volume itself.'),
+    ViewParam('color_remap', 'Color Remap', 'rgb', options=_color_remaps,
+        tooltip='Reshuffles the color channels in the corresponding order.  Can be used, for example, to have multiple isosurfaces.'),
 ]
 
-def range_from_volume(vol):
-    ranges = {}
-    for name, param in PARAMS_WITH_VOLUME_RANGES.items():
-        try:
-            t = type(param.default)
+_ASSET = None
 
-            if t == np.ndarray:
-                lower = np.zeros_like(param.default)
-                upper = np.array([vol.info[p] for p in param.max_from_vol], dtype=param.default.dtype)
-            else:
-                lower = t(0)
-                upper = t(vol.info[param.max_from_vol])
-        except:
-            warnings.warn(f"Could not get range of parameter '{name}' from volume info.")
-        else:
-            ranges[name] = (lower, upper)
-
-    return ranges
+THEMES = {
+    'Light': dict(
+        background_color=one,
+        axis_line_color=zero,
+        axis_line_width=1.0,
+    ),
+    'Dark': dict(
+        background_color=zero,
+        axis_line_color=one,
+        axis_line_width=1.0,
+    ),
+}

@@ -67,7 +67,7 @@ In order to run the tools, you will need several Python packages installed, incl
   * lz4
   * numba
 
-This is easiest to do with some sort of package manager; the utilities are being developed using Anaconda (https://www.anaconda.com/).  Note that the only Python 3.X is supported.
+This is easiest to do with some sort of package manager; the code is being developed using Anaconda (https://www.anaconda.com/).  Note that the only Python 3.X is supported.
 
 Assuming you have Anaconda installed, you can get the require packages with:
 
@@ -76,7 +76,6 @@ $ conda install numba lz4 pyopengl pyqt
 ```
 
 ### Installing the Package in Developer Mode
-
 
 ```shell
 $ git clone https://github.com/klecknerlab/muvi
@@ -94,6 +93,15 @@ $ cd muvi
 $ python setup.py install
 ```
 
+### Updating the Package
+
+If the package is installed in developer mode, any changes to the code in the package folder will immediately affect the module.
+To update the package, just pull from the master github repository.
+
+In Atom, you can do this by opening the main project directory (if you just opened Atom, select `Add Project Folder` from the `File` menu, and then select the `muvi` base directory (by default on Windows this is `[USER]\github\muvi`).
+The click the `Fetch` button on the lower right of the Atom window.
+If updates are available, this will button will change to `Pull`; click again and you should have the updates.
+
 # Usage
 
 ## Simple Example
@@ -103,7 +111,7 @@ To create and view an example volume:
 ```shell
 $ cd [MUVI DIR]/util
 $ python generate_gyroid.py
-$ python view.py gyroid.vti
+$ muvi gyroid.vti
 ```
 
 ![](gyroid.png)
@@ -112,7 +120,7 @@ Alternatively, there is a sample frame from a real experiment in the same direct
 
 ```shell
 $ cd [MUVI DIR]/util
-$ python view.py ../samples/sample_frame.vti
+$ muvi ../samples/sample_frame.vti
 ```
 
 ## Converting a 2D Movie to 3D
