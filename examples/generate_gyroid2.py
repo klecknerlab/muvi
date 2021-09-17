@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-# Copyright 2018 Dustin Kleckner
+# Copyright 2021 Dustin Kleckner
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,6 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+'''
+A simple example which generates a moving gyroid volume.
+'''
+
 import sys
 from muvi import VolumetricMovie
 import numpy as np
@@ -25,7 +29,7 @@ W = 128
 N = 128
 
 if len(sys.argv) == 1:
-    fn = 'colored_gyroid.vti'
+    fn = 'gyroid2.vti'
 else:
     fn = sys.argv[1]
 
@@ -37,20 +41,18 @@ x = np.arange(W).reshape(1, 1, -1) * scale
 y = np.arange(W).reshape(1, -1, 1) * scale
 z = np.arange(W).reshape(-1, 1, 1) * scale
 
-phi = 2 * z
-
 gyroid_base = np.sin(x)*np.cos(y) + np.sin(y)*np.cos(z) + np.sin(z)*np.cos(x)
-noise = 5*ndimage.gaussian_filter((np.random.rand(W, W, W)-0.5) * 1.0, 3, mode='wrap')
+noise = 2*ndimage.gaussian_filter((np.random.rand(W, W, W)-0.5) * 1.0, 3, mode='wrap')
+gyroid_base += noise
+
+# np_frames = [
+#     (255 * np.clip(np.roll(gyroid_base, n, axis=0) + noise - 0.5, 0, 1)).astype('u1').reshape(W, W, W, 1) for n in range(N)
+# ]
 
 frames = []
-
-
-for n in range(N):
-    base = 255 * np.clip(np.roll(gyroid_base, n, axis=0) + noise - 0.5, 0, 1)
-    f = np.empty((W, W, W, 2), dtype='u1')
-    f[..., 0] = base * abs(np.sin(phi))
-    f[..., 1] = base * abs(np.cos(phi))
-    frames.append(f)
+for i in range(N):
+    offset = 1.7*np.sin(2*np.pi*i/N)
+    frames.append(np.clip(255*(1 - 10 * (gyroid_base - offset)**2), 0, 255).astype('u1'))
 
 el = time.time() - start
 
@@ -66,11 +68,8 @@ info = {
 }
 
 start = time.time()
-vol = VolumetricMovie(frames, **info)
-vol.save(fn)
+VolumetricMovie(frames, **info).save(fn)
 el = time.time() - start
-
-print(vol.info)
 
 fs = os.path.getsize(fn)
 rs = N * frames[0].nbytes

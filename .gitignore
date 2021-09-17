@@ -11,6 +11,10 @@ __pycache__/
 util/*.vti
 *.muv
 
+# Example data
+examples/*_frames/*
+examples/*.vti
+
 # C extensions
 *.so
 
