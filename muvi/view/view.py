@@ -147,7 +147,7 @@ class ViewAsset:
                 vol = vol[..., np.newaxis]
 
             GL.glActiveTexture(GL.GL_TEXTURE1)
-            self.volumeTexture = textureFromArray(vol, wrap=GL.GL_CLAMP_TO_BORDER)
+            self.volumeTexture = textureFromArray(vol, wrap=GL.GL_CLAMP_TO_EDGE)
             GL.glActiveTexture(GL.GL_TEXTURE0)
 
 

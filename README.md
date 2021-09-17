@@ -58,6 +58,8 @@ the defaults, your muvi directory is  `~\github\muvi`
 
 ## Mac / Linux
 
+**Note:** The software is being actively developed and tested on Mac OS X, but not in Linux.  It should *probably* work, but may have some minor bugs.  If you run into any issues, please reach out!
+
 ### Dependencies
 
 In order to run the tools, you will need several Python packages installed, including:
@@ -109,7 +111,7 @@ If updates are available, this will button will change to `Pull`; click again an
 To create and view an example volume:
 
 ```shell
-$ cd [MUVI DIR]/util
+$ cd [MUVI DIR]/examples
 $ python generate_gyroid.py
 $ muvi gyroid.vti
 ```
@@ -119,15 +121,26 @@ $ muvi gyroid.vti
 Alternatively, there is a sample frame from a real experiment in the same directory, it can be viewed with:
 
 ```shell
-$ cd [MUVI DIR]/util
-$ muvi ../samples/sample_frame.vti
+$ muvi [MUVI DIR]/samples/sample_frame.vti
 ```
 
-## Converting a 2D Movie to 3D
+Note also that you can drag and drop files into the Muvi Viewer window, which will automatically display them.
 
-**Note: this instructions are outdated; `Nz` and `Nz` are determined automatically
-if converting from Cines files which are triggered only during the active scan
-region.**
+## Introduction to the viewer.
+
+The viewer has a few main parts:
+ * **Rendered data:** the main portion of the window.
+ * **Data selector:** top-right of the window.  This allows you to select which data is displayed, and add/remove files.  Right click on a data item to get more options.  Also, if you select an item (left click on it), it's display options will be shown in the panel below.
+ * **Display options:** center-right of the window.  This displays all the adjustable options for the rendering of the data.  Note that the first tab is specific to the data item you have selected above.
+ * **Playback controls:** bottom of the window.  Note that playback speed is controlled in the "View" tab of the display options.
+
+If you would like to export an image, you can open the export window with `Ctrl+E` (`Cmd+E` on Mac).
+
+You can also hide/show the right panel with `Ctrl+/` (`Cmd+/` on Mac).
+
+Most of the display options include "tooltips" -- if you hover the cursor over the controls it will give you more information on what it does.
+
+## Converting a 2D Movie to 3D
 
 To convert a Phantom CINE file to compressed VTI volume, you need to first generate a XML file which contains the VolumeProperties info.  This will allow you to define the number of frames per volume and other important properties.  To do this, copy the `samples/muvi_setup.xml` file (copied below) to the same directory as your 2D movie source files.  If you leave the name as is, it will be automatically used by every file conversion in that directory.  Alternatively, if you give it the same name as your source file (apart from the extension), this will be used for that specific file only.
 
@@ -172,19 +185,18 @@ To convert a Phantom CINE file to compressed VTI volume, you need to first gener
 </VolumeProperties>
 ```
 
+**Note:** If your 3D frames are trigger only during the active scan region,  you can comment out the `Ns` and `Nz` entries.  The software will automatically determine the volume depth by analyzing the frame timings!
+
 Additionally, there are two utilities in the `util` directory which are useful for determining the properties of Cine files:
 
 * `cine_histo.py`: This will sample the input cine file and create a histogram of the brightness levels.  Can be used to determine the appropriate `dark_clip` level.  (Although the default is usually sufficient.)
-* `frame_delta.py`: This will analyze the first 1500 frames to try to find the "turn-around" of the laser scanner.  Can be used to determine the number of frames in a scan (`Ns`) and the offset (`offset`).
+* `frame_delta.py`: This will analyze the first 1500 frames to try to find the "turn-around" of the laser scanner.  Can be used to determine the number of frames in a scan (`Ns`) and the offset (`offset`).  (**Note:** this utility is obsolete in practice; if you don't specify `Ns` or `Nz`, this analysis is automatic!)
 
-Once you've defined the volume properties, you can should be able to view your data in two ways:
-1. Use `view.py` directly on the source file.  In general, this is rather slow, as it converts on the fly.  However, this can be very useful to verify your setup.
-2. Run `convert_2D.py` on the input file (see below), and then view the resulting `.vti` conversion.
+To convert your video file, use the installed `muvi_convert` shell command to generate the `.vti` file, and `muvi` to view it:
 
 ```shell
-$ cd [MUVI DIR]/util
-$ python convert_2D.py [INPUT FILE] [OUTPUT FILE]
-$ python view.py [OUTPUT FILE]
+$ muvi_convert [INPUT FILE] [OUTPUT FILE]
+$ muvi [OUTPUT FILE]
 ```
 
 By default, the output filename is the same as the input with an `.vti`
@@ -192,9 +204,8 @@ extension.  There are also more options in the conversion utility, which you
 can view with:
 
 ```shell
-$ cd [MUVI DIR]/util
-$ python convert_2D.py --help
-usage: convert_2D.py [-h] [-x XML] [-n NUMBER] infile [outfile]
+$ muvi_convert --help
+usage: muvi_convert [-h] [-x XML] [-s START] [-e END] infile [outfile]
 
 Convert a CINE file to a VTI movie
 
@@ -205,8 +216,10 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   -x XML, --xml XML     XML file to use for conversion parameters
-  -n NUMBER, --number NUMBER
-                        Number of volumes to output (default: all)
+  -s START, --start START
+                        First volume index to convert (default: 0)
+  -e END, --end END     Last volume index to convert (default: all volumes
+                        converted)
 ```
 
 # Features
@@ -215,23 +228,23 @@ This project is currently in active development.
 A number of features are currently planned:
 
 - [x] Volume rendering
-- [ ] Isosurface viewing
+- [x] Isosurface viewing
+- [x] Mesh overlay
+- [x] Tools to generate glyphs (arrows, points, etc.) for overlays
 - [x] VTI file writing
 - [x] VTI file reading
 - [ ] VTI reading from other sources
 - [x] CINE conversion
 - [ ] SEQ conversion
 - [ ] Conversion GUI
-- [ ] Display perspective correction
+- [x] Display perspective correction
 - [x] Multichannel support (partial)
 - [ ] Support for perspective in old "S4D" format  
 - [ ] Perspective correction on volumes in memory (for external processing)
-- [ ] Image export (high res)
+- [x] Image export (high res)
 - [ ] Movie export
-- [ ] Multithreaded display code (to avoid hang ups)
-- [ ] Labelled axes
-- [ ] Standalone Mac App
-- [ ] Standalone Windows App
+- [ ] Asyncronous display code (to avoid hang ups)
+- [ ] Labeled axes
 - [ ] Create Wiki with practical examples
 
 
@@ -240,7 +253,7 @@ A number of features are currently planned:
 
 # License
 
-Copyright 2020 Dustin Kleckner
+Copyright 2021 Dustin Kleckner
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
