@@ -1,5 +1,5 @@
 from .ogl import ShaderProgram, GL, VertexArray, FrameBuffer, useProgram, \
-    norm, cross, mag, dot, dot1, textureFromArray, Texture
+    norm, cross, mag, dot, dot1, textureFromArray, Texture, TextRenderer
 from scipy.spatial.transform import Rotation
 from ..mesh import load_mesh, Mesh
 from .. import open_3D_movie, VolumetricMovie
@@ -124,16 +124,17 @@ class ViewAsset:
             self.frameRange = (min(keys), max(keys))
             self.missingFrames = len(keys) != (self.frameRange[1] - self.frameRange[0] + 1)
 
-            self.label = f'Mesh Seq.: {self.filename}'
+            self.label = f'Mesh Sequence: {self.filename}'
 
         elif isinstance(data, VolumetricMovie):
             self.volume = data
             self.isVolume = True
             self.shader = 'volume'
-            self.X0 = np.zeros(3, 'f')
-            self.X1 = np.array(self.volume.info.get_list('Lx', 'Ly', 'Lz'), dtype='f')
+            L = np.array(self.volume.info.get_list('Lx', 'Ly', 'Lz'), dtype='f')
+            self.X0 = -0.5 * L
+            self.X1 = 0.5 * L
             self.uniforms = dict(
-                vol_L = self.X1,
+                vol_L = L,
                 vol_N = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f'),
             )
             self.globalUniforms = {}
@@ -191,11 +192,22 @@ class ViewAsset:
         for k, v in d.items():
             self.__setitem__(k, v)
 
+    def allParams(self, prefix=True):
+        if prefix is True:
+            prefix = f'#{self.id}_'
+
+        d = {prefix+'visible':self.visible}
+        d.update({prefix+k:v for k, v in self.uniforms.items()})
+        if hasattr(self, 'globalUniforms'):
+            d.update({prefix+k:v for k, v in self.globalUniforms.items()})
+
+        return d
+
+
     def setFrame(self, frame):
         if frame == self._frame or self.frameRange is None:
-            self.validFrame = True
             return
-        elif frame < self.frameRange[0] or frame > self.frameRange[1]:
+        if frame < self.frameRange[0] or frame > self.frameRange[1]:
             self.validFrame = False
             return
         self.validFrame = True
@@ -274,36 +286,45 @@ def meshToVertexArray(m):
 
 class View:
     AXIS_MAX_TICKS = 1000
+    AXIS_LABEL_MAX_CHARS = 5000
 
     _shaderDep = {
         "volume": {"surface_shade", "distortion_model", "cloud_shade",
             "color_remap", "vol_cloud1", "vol_cloud2", "vol_cloud3", "vol_iso1",
             "vol_iso2", "vol_iso3", "gamma2"},
         "mesh": {"surface_shade", "mesh_clip"},
-        # "text": {},
+        "text": {},
         "axis": {},
     }
 
     _rebuildDep = {
-        "camera_pos":{"viewMatrix", "visibleAxisFaces"},
+        "camera_pos":{"viewMatrix", "visibleAxis"},
         "look_at":{"viewMatrix"},
         "up":{"viewMatrix"},
-        "fov":{"perspectiveMatrix", "visibleAxisFaces"},
+        "fov":{"perspectiveMatrix", "visibleAxis"},
         "near":{"perspectiveMatrix"},
         "far":{"perspectiveMatrix"},
-        "disp_X0":{"axisLines", "visibleAxisFaces", "viewMatrix"},
-        "disp_X1":{"axisLines", "visibleAxisFaces", "viewMatrix"},
-        "axis_major_tick_spacing":{"axisLines"},
-        "axis_minor_ticks":{"axisLines"},
-        "axis_major_tick_length_ratio":{"axisLines"},
-        "axis_minor_tick_length_ratio":{"axisLines"},
+        "disp_X0":{"axisLine", "visibleAxis", "viewMatrix", "axisLabel"},
+        "disp_X1":{"axisLine", "visibleAxis", "viewMatrix", "axisLabel"},
+        "axis_major_tick_spacing":{"axisLine", "axisLabel"},
+        "axis_minor_ticks":{"axisLine"},
+        "axis_major_tick_length_ratio":{"axisLine"},
+        "axis_minor_tick_length_ratio":{"axisLine"},
         "mesh_scale":{"meshModelMatrix"},
         "mesh_offset":{"meshModelMatrix"},
         "vol_colormap1":{"colormaps"},
         "vol_colormap2":{"colormaps"},
         "vol_colormap3":{"colormaps"},
+        "axis_angle_exclude":{"visibleAxis"},
+        "axis_single_label":{"visibleAxis"},
+        "axis_label_angle":{"visibleAxis"},
         # "frame":{"frame"},
     }
+
+    # Items that are not included get built in arbitrary order *AFTER* these
+    _rebuildOrder = [
+        "viewMatrix", "perspectiveMatrix", "axisLine"
+    ]
 
     _allShaderDep = set.union(*_shaderDep.values())
 
@@ -567,6 +588,15 @@ class View:
         elif buttonsPressed & 2:
             self.moveCamera(-self.viewportHeight() * (R * dx + U * dy))
 
+    def allParams(self):
+        d = {k:v for k, v in self._params.items()
+                if k in PARAMS and k not in ALL_ASSET_PARAMS}
+
+        for asset in self.assets.values():
+            d.update(asset.allParams())
+
+        return d
+
     #--------------------------------------------------------
     # Adding/removing Data
     #--------------------------------------------------------
@@ -640,15 +670,16 @@ class View:
         if frameRange is not None:
             self.updateRange('frame', frameRange[0], frameRange[1])
 
-        self.update({
-            # Default limits expanded to nearest *minor* tick
-            "disp_X0": np.floor(X0 / minorTick) * minorTick,
-            "disp_X1": np.ceil(X1 / minorTick) * minorTick,
-            "axis_major_tick_spacing": majorTick,
-            "axis_minor_ticks": minorTicks,
-        }, callback=True)
+        if self['autoupdate_limits']:
+            self.update({
+                # Default limits expanded to nearest *minor* tick
+                "disp_X0": np.floor(X0 / minorTick) * minorTick,
+                "disp_X1": np.ceil(X1 / minorTick) * minorTick,
+                "axis_major_tick_spacing": majorTick,
+                "axis_minor_ticks": minorTicks,
+            }, callback=True)
 
-        self.resetView(co-la)
+            self.resetView(co-la)
 
     #--------------------------------------------------------
     # Methods for manipulating the viewport
@@ -685,9 +716,9 @@ class View:
         else:
             return 2 * dist * np.tan(30 * np.pi / 360)
 
-    #--------------------------------------------------------
-    # Methods for rebuilding automatically determined uniforms
-    #--------------------------------------------------------
+    #-----------------------------------------------------------
+    # Methods for rebuilding automatically determined structures
+    #-----------------------------------------------------------
 
     def build_viewMatrix(self):
         cp = self['camera_pos']
@@ -740,7 +771,7 @@ class View:
         else:
             height = mag(self['camera_pos'] - self['look_at']) * np.tan(30 * np.pi / 360)
 
-            for buffer in self.buffers.items():
+            for id, buffer in self.buffers.items():
                 perspective = np.zeros((4, 4), dtype='f')
                 perspective[0, 0] = 1.0 / (buffer.aspect * height)
                 perspective[1, 1] = 1.0 / height
@@ -750,15 +781,52 @@ class View:
                 self.perspectiveMatrix[id] = perspective
 
 
-    def build_visibleAxisFaces(self):
+    def build_visibleAxis(self):
+        axisEnd = self.axisLineVert['position'][self.axisEdge[:12]]
+        axisCenter = axisEnd.mean(1)
+        X0 = self['disp_X0']
+        X1 = self['disp_X1']
+        middle = 0.5 * (X0 + X1)
+        cameraPos = self['camera_pos']
+
         if self['fov'] > 1E-3:
-            self['visibleAxisFaces'] = \
-                ((self['camera_pos'] > self['disp_X0']) * (1,  2,  4)).sum() + \
-                ((self['camera_pos'] < self['disp_X1']) * (8, 16, 32)).sum()
+            vaf = ((cameraPos > X0) * (1,  2,  4)).sum() + \
+                  ((cameraPos < X1) * (8, 16, 32)).sum()
+            cameraVec = norm(axisCenter - cameraPos)
         else:
-            self['visibleAxisFaces'] = \
-                ((self['camera_pos'] > self['look_at']) * (1,  2,  4)).sum() + \
-                ((self['camera_pos'] < self['look_at']) * (8, 16, 32)).sum()
+            lookAt = self['look_at']
+            vaf = ((cameraPos > lookAt) * (1,  2,  4)).sum() + \
+                  ((cameraPos < lookAt) * (8, 16, 32)).sum()
+            cameraVec = norm(lookAt - cameraPos)
+
+        ev = (vaf & self.axisEdgeFaceMask)
+        # Find edges where one face is visible and one is not
+        ev = ((ev & (ev - 1)) == 0) * (ev != 0) # True iff 1 bit is nonzero
+
+        dp = dot(cameraVec, norm(axisEnd[:, 1] - axisEnd[:, 0]))
+
+        # Exclude axes which are oriented close to the camera vector
+        ev *= np.arccos(abs(dp)) * 180/np.pi > self['axis_angle_exclude']
+
+        if self['axis_single_label']:
+            axisOffset = axisCenter - middle
+            dir = norm((axisOffset[..., np.newaxis] * self['viewMatrix'][:3, 0:2]).sum(1))
+            angle = self['axis_label_angle'] * np.pi / 180
+            priority = dot(dir, (np.sin(angle), np.cos(angle)))
+            priority[np.where(ev == 0)] = -10
+
+            val = 0
+            for axis in range(3):
+                i0 = axis * 4
+                best = np.argmax(priority[i0:i0+4]) + i0
+                if priority[best] >= -1:
+                    val += 1 << best
+            self['visibleAxisLabels'] = val
+
+        else:
+            self['visibleAxisLabels'] = np.sum(1 << np.arange(12)[np.where(ev)])
+
+        self['visibleAxisFaces'] = vaf
 
     def build_meshModelMatrix(self):
         scale = self['mesh_scale']
@@ -766,7 +834,63 @@ class View:
         matrix[3, :3] = self['mesh_offset']
         self['meshModelMatrix'] = matrix
 
-    def build_axisLines(self):
+    def build_axisLabel(self):
+        X0 = self['disp_X0']
+        X1 = self['disp_X1']
+        spacing = self['axis_major_tick_spacing']
+        # Let's make sure the axes have actually changed...
+        key = (tuple(X0), tuple(X1), spacing)
+        if getattr(self, '_lastaxisLabel', None) == key:
+            return
+        else:
+            self._lastaxisLabel = key
+
+        i0 = np.ceil(X0 / spacing).astype('i4')
+        i1 = np.floor(X1 / spacing).astype('i4')
+
+        start = 0
+        for axis in range(3):
+            offset = X0.copy()
+            offset[axis] = 0
+            a2 = (axis + 1) % 3
+            a3 = (axis + 2) % 3
+
+            baseline = np.zeros(3, 'f')
+            baseline[axis] = 1.0
+
+            for n in range(4):
+                up = np.zeros(3, 'f')
+                if n%2:
+                    offset[a2] = X1[a2]
+                    up[a2] = +1
+                else:
+                    offset[a2] = X0[a2]
+                    up[a2] = -1
+
+                if n//2:
+                    offset[a3] = X1[a3]
+                    up[a3] = +1
+                else:
+                    offset[a3] = X0[a3]
+                    up[a3] = -1
+
+                visFlag = 1 << (4*axis + n + 8)
+
+                for x in np.arange(i0[axis], i1[axis]+1) * spacing:
+                    offset[axis] = x
+                    start = self.textRender.write(self.axisLabel, offset,
+                        f'{x}', flags=48 + visFlag, padding=0.5,
+                        start=start, baseline=baseline, up=up)
+
+                offset[axis] = 0.5 * (X0[axis] + X1[axis])
+                start = self.textRender.write(self.axisLabel, offset,
+                    f'{chr(ord("X")+axis)}', flags=48 + visFlag, padding=3.5,
+                    start=start, baseline=baseline, up=up)
+
+        self.axisLabelChars = start
+        self.axisLabelVertexArray.update(self.axisLabel[:self.axisLabelChars])
+
+    def build_axisLine(self):
         # Ouch! Place the tick lines...
         X0 = self['disp_X0']
         X1 = self['disp_X1']
@@ -830,20 +954,20 @@ class View:
 
             end = start + n
 
-            self.axisLineVerts['position'][(8 + start*12):(8 + end*12)] = points
-            self.axisLineVerts['faceMask'][(8 + start*12):(8 + end*12)] = np.tile(faces, n)
+            self.axisLineVert['position'][(8 + start*12):(8 + end*12)] = points
+            self.axisLineVert['faceMask'][(8 + start*12):(8 + end*12)] = np.tile(faces, n)
 
             start = end
             if start >= self.AXIS_MAX_TICKS:
                 break
 
-        self.axisLineVerts['position'][:8] = X0 + CUBE_CORNERS * (X1 - X0)
+        self.axisLineVert['position'][:8] = X0 + CUBE_CORNERS * (X1 - X0)
         # end = 0
-        self.axisLines.update(self.axisLineVerts[:(8 + end*12)])
-        # self.axisLines.update(self.axisLineVerts[:100])
-        # print(self.axisLineVerts[:8])
-        # self.totalAxisPoints = self.axisEdges.size
-        self.totalAxisPoints = self.axisEdges.size + 16 * start
+        self.axisLine.update(self.axisLineVert[:(8 + end*12)])
+        # self.axisLine.update(self.axisLineVert[:100])
+        # print(self.axisLineVert[:8])
+        # self.totalAxisPoints = self.axisEdge.size
+        self.totalAxisPoints = self.axisEdge.size + 16 * start
 
     def build_colormaps(self):
         if not hasattr(self, 'colormapTextures'):
@@ -891,7 +1015,7 @@ class View:
 
         self.update({
             "look_at": la,
-            "camera_pos": la + dir * L / (2 * tanHD),
+            "camera_pos": la + 1.1 * dir * L / (2 * tanHD),
             "up": up
         }, callback=True)
 
@@ -902,31 +1026,38 @@ class View:
     def setup(self, width=100, height=100):
 
         vertexType = np.dtype([('position', '3float32'), ('faceMask', 'uint32')])
-        self.axisLineVerts = np.empty(8 + 12 * self.AXIS_MAX_TICKS, vertexType)
-        self.axisLines = VertexArray(vertexType, len(self.axisLineVerts))
+        self.axisLineVert = np.empty(8 + 12 * self.AXIS_MAX_TICKS, vertexType)
+        self.axisLine = VertexArray(vertexType, len(self.axisLineVert))
 
         faceMask = ((1, 2, 4) << ((CUBE_CORNERS > 0.5) * 3)).sum(-1)
 
-        self.axisEdges = np.array([
-            (0, 1), (1, 3), (3, 2), (2, 0), # Bottom
-            (0, 4), (1, 5), (3, 7), (2, 6), # Sides
-            (4, 5), (5, 7), (7, 6), (6, 4), # Top
+        self.axisEdge = np.array([
+            (0, 1), (2, 3), (4, 5), (6, 7), # x-edges
+            (0, 2), (4, 6), (1, 3), (5, 7), # y-edges
+            (0, 4), (1, 5), (2, 6), (3, 7), # z-edges
             # Corners are handled as a repeated point
             (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7)
         ], dtype='u4')
         e1 = 8 + np.array([(0, 1), (0, 2), (3, 4), (3, 5), (6, 7), (6, 8),
             (9, 10), (9, 11)], dtype='u4')
         edges = np.vstack([
-            self.axisEdges,
+            self.axisEdge,
             (e1 + 12 * np.arange(self.AXIS_MAX_TICKS, dtype='u4').reshape(-1, 1, 1)).reshape(-1, 2)
         ])
-        self.axisLines.attachElements(edges, GL.GL_LINES)
+        self.axisLine.attachElements(edges, GL.GL_LINES)
 
-        self.axisLineVerts['position'][:8] = self['disp_X0'] + CUBE_CORNERS * (self['disp_X1'] - self['disp_X0'])
-        self.axisLineVerts['faceMask'][:8] = faceMask
-        # self.axisLines.update(self.axisLineVerts[:8])
+        # Get the faces used by each of the 12 axis edges -- needed for axis visiblity
+        self.axisEdgeFaceMask = faceMask[self.axisEdge[:12, 0]] & faceMask[self.axisEdge[:12, 1]]
 
-        # No need to upload data -- build_axisLines handles this!
+        self.axisLineVert['position'][:8] = self['disp_X0'] + CUBE_CORNERS * (self['disp_X1'] - self['disp_X0'])
+        self.axisLineVert['faceMask'][:8] = faceMask
+        # self.axisLine.update(self.axisLineVert[:8])
+
+        self.textRender = TextRenderer(os.path.join(os.path.split(__file__)[0], 'fonts', 'Inter-Regular'))
+        self['pixelRange'] = self.textRender.pixelRange
+
+        self.axisLabel = np.empty(self.AXIS_LABEL_MAX_CHARS, self.textRender.vertexType)
+        self.axisLabelVertexArray = VertexArray(self.textRender.vertexType, self.AXIS_LABEL_MAX_CHARS)
 
         GL.glClearDepth(1.0)
         GL.glDepthFunc(GL.GL_LESS)
@@ -958,7 +1089,6 @@ class View:
         self.buffers[id].resize(width, height)
         self._needsRebuild.add('perspectiveMatrix')
 
-
     #--------------------------------------------------------
     # Main draw method
     #--------------------------------------------------------
@@ -968,14 +1098,25 @@ class View:
             bufferId = self.primaryBuffer
 
         # ---- Rebuild anything that is needed ----
-        for n in range(2):
-            # Sometimes rebuilding one item triggers rebuilding a second!
-            nr = self._needsRebuild
-            self._needsRebuild = set()
-            for param in nr:
-                getattr(self, 'build_' + param)()
+        # for n in range(2):
+        #     # Sometimes rebuilding one item triggers rebuilding a second!
+        #     nr = self._needsRebuild
+        #     self._needsRebuild = set()
+        #     for param in nr:
+        #         getattr(self, 'build_' + param)()
 
-        self._needsRebuild = set()
+        if self._needsRebuild:
+            # Rebuild items that have a specific order
+            for item in self._rebuildOrder:
+                if item in self._needsRebuild:
+                    getattr(self, 'build_' + item)()
+                    self._needsRebuild.remove(item)
+
+            # Rebuild unsorted items
+            for item in self._needsRebuild:
+                getattr(self, 'build_' + item)()
+
+            self._needsRebuild = set()
 
         defaultFB = GL.glGetIntegerv(GL.GL_DRAW_FRAMEBUFFER_BINDING)
 
@@ -1032,13 +1173,18 @@ class View:
 
 
         # ---- Draw Text ----
-        # shader = self.useShader('text')
-        # shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
-        # shader['viewportSize'] = viewportSize
-        #
-        # GL.glActiveTexture(GL.GL_TEXTURE0)
-        # self.textRenderer.texture.bind()
+        if self['show_axis_labels']:
+            shader = self.useShader('text')
+            shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
+            shader['viewportSize'] = viewportSize
+            shader['axis_scaling'] = axisScaling
+            shader['font_size'] = self['axis_label_size']
+            shader['font_color'] = self['axis_color']
 
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            self.textRender.texture.bind()
+
+            self.axisLabelVertexArray.drawArrays(GL.GL_POINTS, 0, self.axisLabelChars)
 
         # ---- Draw Axis ----
         if self['show_axis']:
@@ -1047,7 +1193,7 @@ class View:
             shader['viewportSize'] = viewportSize
             shader['axis_scaling'] = axisScaling
 
-            self.axisLines.draw(self.totalAxisPoints)
+            self.axisLine.draw(self.totalAxisPoints)
 
 
         # ---- Draw Volume ----
@@ -1103,7 +1249,7 @@ class View:
 
     def cleanup(self):
         # pass
-        for attr in ('mesh', 'volumeBox', 'textRenderer', 'axisLines', 'volumeTexture', 'depthTexture'):
+        for attr in ('mesh', 'volumeBox', 'textRenderer', 'axisLine', 'volumeTexture', 'depthTexture'):
             item = getattr(self, attr, None)
             if item is not None:
                 item.delete()

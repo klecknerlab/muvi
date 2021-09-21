@@ -18,9 +18,13 @@ except ImportError:
 
 from OpenGL.GL import shaders
 import numpy as np
+import numba
 import re
 import ctypes
-
+import os
+import json
+import base64
+from PIL import Image
 
 #--------------------------------------------------------
 # Some basic vector operations -- pretty self explanatory
@@ -28,13 +32,13 @@ import ctypes
 
 
 def mag(X):
-    return np.sqrt(np.dot(X, X))
+    return np.sqrt(dot(X, X))
 
 def mag1(X):
-    return np.sqrt(np.dot(X, X))[..., np.newaxis]
+    return np.sqrt(dot(X, X))[..., np.newaxis]
 
 def norm(X):
-    return np.asarray(X) / mag(X)
+    return np.asarray(X) / mag1(X)
 
 def dot(X, Y):
     return (np.asarray(X)*Y).sum(-1)
@@ -172,26 +176,28 @@ class ShaderProgram:
             self._uniform[name] = (loc, n_elem, np_dtype, np_size, np_shape, uf)
             self._uniformNames.add(name)
 
-        # Set up the vertex attribute information
-        self._attrib = {}
+        # !! New version handles attributes explicitly, rather than getting them
+        #  from shader info !!
 
-        # Note that glGetActiveAttrib doesn't have a nice pyopengl binding,
-        #  so we have to work a little harder ):
-        bufSize = GL.glGetProgramiv(self.id, GL.GL_ACTIVE_ATTRIBUTE_MAX_LENGTH)
-        length = GL.GLint()
-        size = GL.GLint()
-        t = GL.GLenum()
-        name = (GL.GLchar * bufSize)()
-
-        for i in range(GL.glGetProgramiv(self.id, GL.GL_ACTIVE_ATTRIBUTES)):
-            GL.glGetActiveAttrib(self.id, i, bufSize, length, size, t, name)
-            np_dtype, np_shape, gl_type, gl_var_type, uf = GL_VEC_TYPES[t.value]
-            ns = name.value.decode('utf8')
-
-            loc = GL.glGetAttribLocation(self.id, ns)
-            items = int(size.value * np.prod(np_shape))
-
-            self._attrib[ns] = (loc, np_dtype, items)
+        # # Set up the vertex attribute information
+        # self._attrib = {}
+        # # Note that glGetActiveAttrib doesn't have a nice pyopengl binding,
+        # #  so we have to work a little harder ):
+        # bufSize = GL.glGetProgramiv(self.id, GL.GL_ACTIVE_ATTRIBUTE_MAX_LENGTH)
+        # length = GL.GLint()
+        # size = GL.GLint()
+        # t = GL.GLenum()
+        # name = (GL.GLchar * bufSize)()
+        #
+        # for i in range(GL.glGetProgramiv(self.id, GL.GL_ACTIVE_ATTRIBUTES)):
+        #     GL.glGetActiveAttrib(self.id, i, bufSize, length, size, t, name)
+        #     np_dtype, np_shape, gl_type, gl_var_type, uf = GL_VEC_TYPES[t.value]
+        #     ns = name.value.decode('utf8')
+        #
+        #     loc = GL.glGetAttribLocation(self.id, ns)
+        #     items = int(size.value * np.prod(np_shape))
+        #
+        #     self._attrib[ns] = (loc, np_dtype, items)
 
     def bind(self):
         '''Use shader, and update uniforms that were set previously.'''
@@ -297,97 +303,6 @@ class AttributeError(Exception):
     pass
 
 
-# class Buffer:
-#     def __init__(self, dtype, shape, target=GL.GL_ARRAY_BUFFER,
-#             usage=GL.GL_DYNAMIC_DRAW):
-#         '''Initiliaze an openGL buffer, intended to be mapped to a numpy array
-#
-#         Parameters
-#         ----------
-#         dtype : numpy data type
-#             The data type of the array
-#         shape : integer, or tuple of integers
-#             The shape of the array -- if 2 or more dimensional, only the
-#             first index is used for indexing and assigment
-#
-#         Keywords
-#         --------
-#         target : GLenum (default: GL.GL_ARRAY_BUFFER)
-#             The target parameters pass to the OpenGL buffer object.
-#         usage : GLenum (default: GL.GL_DYNAMIC_DRAW)
-#             The usage parameter passed to the OpenGL buffer object.
-#
-#         The resulting object can be written to like an array, using slice
-#         notation.  (Indeed, this is the preferred method for altering it!)
-#
-#         Generally speaking, the first index is the number of elements, and the
-#         subsequent indices is used for vector or matrix types.  If you set a
-#         slice of the buffer with an array, the only thing that matters is that
-#         the total number of elements matches!
-#         '''
-#
-#         self.dtype = np.dtype(dtype)
-#
-#         if isinstance(shape, int):
-#             self.shape = (shape, )
-#         else:
-#             self.shape = tuple(shape)
-#
-#         self.target = target
-#         self.id = GL.glGenBuffers(1)
-#         self.numElem = int(np.prod(self.shape[1:]))
-#         self.bytesPerVertex = self.numElem * self.dtype.itemsize
-#
-#         GL.glBindBuffer(self.target, self.id)
-#         nbytes = self.dtype.itemsize * int(np.prod(self.shape))
-#         GL.glBufferData(self.target, nbytes, None, usage)
-#
-#     def __len__(self):
-#         return self.shape[0]
-#
-#     def __setitem__(self, key, val):
-#         if isinstance(key, int):
-#             key = slice(key, key + 1)
-#         if not isinstance(key, slice):
-#             raise TypeError("buffer indices must be integers or slices, not tuple")
-#
-#         if key.step not in (None, 1):
-#             raise ValueError("only step=1 slices are supported for setting the buffer")
-#
-#         val = np.asarray(val, dtype=self.dtype, order='C')
-#         if val.size % self.numElem:
-#             raise ValueError(f"The number of elements in this array ({val.size}) is not divisible by the number of elements in the buffer ({self.numElem})")
-#         n = val.size // self.numElem
-#
-#         start, end = key.start, key.stop
-#
-#         if start is None:
-#             if end is None:
-#                 start = 0
-#             else:
-#                 start = end - n
-#         elif (end is not None) and (end - start != n):
-#             raise ValueError(f"Incompatible number of items in array -- can't set!")
-#
-#         # print(self.id)
-#         GL.glBindBuffer(self.target, self.id)
-#         GL.glBufferSubData(self.target, start*self.bytesPerVertex, val)
-#
-#     def _set(self, val, start=0):
-#         '''Set the value of the buffer using an array -- no checking of sizes,
-#         etc. is performed, so make sure you know what you are doing!'''
-#
-#         val = np.asarray(val, dtype=self.dtype, order='C')
-#         GL.glBindBuffer(self.target, self.id)
-#         GL.glBufferSubData(self.target, start*self.bytesPerVertex, val)
-#
-#     def bind(self):
-#         GL.glBindBuffer(self.target, self.id)
-#
-#     def delete(self):
-#         GL.glDeleteBuffers(1, [self.id])
-
-
 class VertexArray:
     def __init__(self, data, numElements=None, usage=GL.GL_DYNAMIC_DRAW):
         if isinstance(data, np.ndarray):
@@ -416,7 +331,7 @@ class VertexArray:
                 raise ValueError('if VertexArray is created with numpy data type, must specify number of elements as second argument')
 
         for loc, name in enumerate(spec.names):
-            if name.startswith('__'):
+            if name.startswith('_'):
                 continue
 
             dt, offset = spec.fields[name]
@@ -478,314 +393,9 @@ class VertexArray:
             num = self.numElements - offset
         GL.glDrawElements(self.mode, num, self.elementsType, GL.GLvoidp(offset*self.elementsItemSize))
 
-
-# class VertexArray:
-#     def __init__(self, spec, numVert, packed=False, usage=GL.GL_STATIC_DRAW):
-#         '''An object to contain an OpenGL VertexArray.
-#
-#         Paramaters
-#         ----------
-#         spec : ShaderProgram object, or dictionary
-#             If a ShaderProgram object, attributes are copied over from that
-#             program, otherwise a dictionary of the form:
-#                 {name1: (loc1, dtype1, num1), name2: (loc2, dtype2, num2), ...}
-#         numVert : int
-#             The number of vertices to store in the array
-#
-#         Keywords
-#         --------
-#         packed : bool (default: False)
-#             If True, the array data is stored as a single buffer, and the
-#             vertex array can be accessed directly like a Buffer object.
-#             Requires all attributes to have the same data type!
-#         usage : GLenum (default: GL.GL_DYNAMIC_DRAW)
-#             The usage parameter passed to the OpenGL buffer object.
-#
-#         Examples
-#         --------
-#
-#         >>> arr = VertexArray({'position': (0, 'f', 3), 'color': (0, 'f', 4)}, 20)
-#         >>> arr['position'] = np.random.rand((10, 3))
-#
-#         Create an array, and set the first 10 vertex positions
-#
-#         >>> arr['position', -10:] = numpy.random.rand((10, 3))
-#
-#         Set the last ten vertex positions
-#
-#         >>> arr.drawArrays(GL.GL_TRIANGLES, 0, 9)
-#
-#         Draw 3 triangles in array order
-#
-#         >>> arr.attachElements(np.random.randint(0, 20, (15, 3)))
-#         >>> arr.drawElements(GL.GL_TRIANGLES, 30)
-#
-#         Draws 10 triangles, with ordering determined by array.  (Note: we
-#         created 15, but only drew 10!)
-#
-#         >>> arr2 = VertexArray({'position': (0, 'f', 3), 'color': (0, 'f', 4)}, 20, packed=True)
-#         >>> arr2[:] = np.random.rand((15, 6))
-#
-#         Create a packed array, setting position *and* color of the first 15
-#         elements.
-#
-#         '''
-#
-#         if hasattr(spec, "_attrib"):
-#             spec = {k:v for k, v in spec._attrib.items()
-#                         if not k.startswith("gl_")}
-#
-#         self.id = GL.glGenVertexArrays(1)
-#         self.packed = bool(packed)
-#         GL.glBindVertexArray(self.id)
-#
-#         if self.packed:
-#             attrib = [(loc, name, dtype, items) for name, (loc, dtype, items)
-#                 in spec.items()]
-#             attrib.sort()
-#             totalItems = 0
-#             dtype = attrib[0][2]
-#             self.loc = {}
-#
-#             for (loc, name, dt, items) in attrib:
-#                 if dtype != dt:
-#                     raise ValueError('For a packed array, all items must have same data type!')
-#                 self.loc[name] = (loc, totalItems, items)
-#                 totalItems += items
-#
-#             self.buffer = Buffer(dtype, (numVert, totalItems))
-#             glType = npToGl(dtype)
-#
-#             for name, (loc, start, items) in self.loc.items():
-#                 GL.glEnableVertexAttribArray(loc)
-#                 GL.glVertexAttribPointer(loc, items, glType,  GL.GL_FALSE,
-#                     self.buffer.bytesPerVertex,
-#                     GL.GLvoidp(self.buffer.dtype.itemsize * start))
-#
-#         else:
-#             self.buffers = {}
-#
-#             for name, (loc, dtype, items) in spec.items():
-#                 buffer = Buffer(dtype, (numVert, items))
-#                 self.buffers[name] = buffer
-#                 GL.glEnableVertexAttribArray(loc)
-#                 GL.glVertexAttribPointer(loc, items, npToGl(dtype),
-#                     GL.GL_FALSE, 0, None)
-#
-#         GL.glBindVertexArray(0)
-#
-#     def drawArrays(self, mode, first, count):
-#         '''Bind the Array and draw vertices using glDrawArrays.
-#
-#         See GL.glDrawArrays for more info.'''
-#         GL.glBindVertexArray(self.id)
-#         GL.glDrawArrays(mode, first, count)
-#
-#     def drawElements(self, mode, count=None):
-#         if not hasattr(self, 'elements'):
-#             raise ValueError("You must create elements using the 'attachElements' method before calling 'drawElements'")
-#         GL.glBindVertexArray(self.id)
-#         self.elements.bind()
-#         if count is None:
-#             count = len(self.elements)
-#         GL.glDrawElements(mode, count, self.elementType, GL.GLvoidp(0))
-#
-#     def attachElements(self, elem, dtype='u4'):
-#         if isinstance(elem, np.ndarray):
-#             self.elements = Buffer(dtype, elem.size,
-#                 target=GL.GL_ELEMENT_ARRAY_BUFFER)
-#             self.elements[:] = elem
-#         else:
-#             self.elements = Buffer(dtype, elem,
-#                 target=GL.GL_ELEMENT_ARRAY_BUFFER)
-#         self.elementType = npToGl(dtype)
-#
-#     def __setitem__(self, key, val):
-#         if self.packed:
-#             self.buffer.__setitem__(key, val)
-#         elif isinstance(key, str):
-#             self.buffers[key][:] = val
-#         elif isinstance(key, tuple) and len(key) == 2:
-#             self.buffers[key[0]].__setitem__(key[1], val)
-#         else:
-#             raise ValueError('Key for unpacked array should be string or string, slice')
-#
-#     def delete(self):
-#         if hasattr(self, 'id'):
-#             GL.glDeleteVertexArrays(1, [self.id])
-#             del self.id
-#
-#         if hasattr(self, 'buffers'):
-#             for buffer in self.buffers.values():
-#                 buffer.delete()
-#
-#         if hasattr(self, 'buffer'):
-#             self.buffer.delete()
-#
-#         if hasattr(self, 'elements'):
-#             self.elements.delete()
-
-
-# class VertexArray:
-#     def __init__(self, _parent, _usage=GL.GL_STATIC_DRAW, _packed=None,
-#         _refreshable=True, **kwargs):
-#         '''Initiliaze a VertexArray object
-#
-#         Parameters
-#         ----------
-#         _parent : ShaderProgram
-#             The shader program this will draw to.  Used to identify name
-#             attributes
-#
-#         Keywords
-#         --------
-#         _usage : GLenum (default: GL_STATIC_DRAW)
-#             The usage type of the buffers
-#         _packed : None or numpy array (default: None)
-#             If specified, the data is assumed to close packed with each
-#             attribute following the order indicated by the shader.  In this
-#             case, the data type of the array *MUST* match that of the shader,
-#             and all data must have the same type.
-#         _refreshable : bool (default: False)
-#             If True, keep a reference to the data array to allow the vertices
-#             to be refreshed.  (In this case, _usage should most probably be
-#             GL_DYNAMIC_DRAW or similar.)
-#
-#         If _packed is not specified, additional keywords are mapped to input
-#         attributes in the shader.  All attributes must be specified, or an
-#         error will be raised.
-#         '''
-#         self._attrib = {}
-#         for k, v in _parent._attrib.items():
-#             if k.startswith('gl_'):
-#                 continue
-#             self._attrib[k] = v
-#
-#         self.id = GL.glGenVertexArrays(1)
-#         self.bind()
-#         n = 1 if _packed is not None else len(self._attrib)
-#         self.vb_ids = GL.glGenBuffers(n)
-#         if n == 1: # Usually if n=1, it does not return a list... force it to!
-#             self.vb_ids = (self.vb_ids,)
-#         self._len = None
-#
-#         self.refreshable = bool(_refreshable)
-#         self.usage = _usage
-#
-#         if _packed is not None:
-#             if not isinstance(_packed, np.ndarray) or _packed.ndim != 2:
-#                 raise AttributeError('_packed input must be 2D numpy array')
-#
-#             offset = 0
-#             self._len, stride = _packed.shape
-#             stride *= _packed.itemsize
-#
-#             # print(_packed.shape, _packed.nbytes)
-#
-#             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vb_ids[0])
-#             GL.glBufferData(GL.GL_ARRAY_BUFFER, _packed, _usage)
-#
-#             if self.refreshable:
-#                 self.sources = (_packed,)
-#
-#             for i, (loc, items, gl_var_type, np_dtype) in \
-#                     enumerate(sorted(self._attrib.values())):
-#                 if np_dtype != _packed.dtype:
-#                     raise AttributeError(f'_packed input must have same data type as shader input attributes ({_packed.dtype} != {np_dtype})')
-#                 GL.glVertexAttribPointer(loc, items, gl_var_type, GL.GL_FALSE,
-#                     stride, GL.GLvoidp(offset))
-#                 GL.glEnableVertexAttribArray(loc)
-#                 # print(i, loc, items, stride, offset)
-#                 offset += items * _packed.itemsize
-#
-#         else:
-#             if self._attrib.keys() != kwargs.keys():
-#                 raise AttributeError(f'the attributes of this vertex array object must match shader specification!\n(shader has: {tuple(self._attrib.keys())})')
-#
-#             if self.refreshable:
-#                 self.sources = []
-#
-#             for i, (name, val) in enumerate(kwargs.items()):
-#                 loc, items, gl_var_type, np_dtype = self._attrib[name]
-#                 val = np.asarray(val, dtype=np_dtype, order='C')
-#                 val = val.reshape(-1, items)
-#                 if self._len is None:
-#                     self._len = len(val)
-#                 if len(val) != self._len:
-#                     raise AttributeError(f'each attribute must have the same number of values!')
-#
-#                 if self.refreshable:
-#                     self.sources.append(val)
-#                 GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vb_ids[i])
-#                 GL.glBufferData(GL.GL_ARRAY_BUFFER, val, _usage)
-#                 GL.glEnableVertexAttribArray(loc)
-#                 GL.glVertexAttribPointer(loc, items, gl_var_type, GL.GL_FALSE, 0, GL.GLvoidp(0))
-#
-#         self.unbind()
-#         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
-#
-#     def refresh(self, n=None):
-#         if not self.refreshable:
-#             raise ValueError('this Vertex Array was created with _refreshable = False')
-#         else:
-#             # self.bind()
-#             for i, source in enumerate(self.sources):
-#                 GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vb_ids[i])
-#                 if n is None:
-#                     GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, source)
-#                 else:
-#                     GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, source[:n])
-#
-#     def bind(self):
-#         GL.glBindVertexArray(self.id)
-#         if hasattr(self, 'element_id'):
-#             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, self.element_id)
-#
-#     def unbind(self):
-#         GL.glBindVertexArray(0)
-#         if hasattr(self, 'element_id'):
-#             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
-#
-#     def attachElements(self, data, element_type=GL.GL_TRIANGLES):
-#         self.element_id = GL.glGenBuffers(1)
-#         self.element_type = element_type
-#
-#         data = np.asarray(data, dtype='u4', order='C')
-#         self.n_elem = data.size
-#
-#         GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, self.element_id)
-#         GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, data, GL.GL_STATIC_DRAW)
-#         GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
-#
-#     def drawElements(self):
-#         GL.glDrawElements(self.element_type, self.n_elem, GL.GL_UNSIGNED_INT, None)
-#
-#     def draw(self):
-#         self.bind()
-#         self.drawElements()
-#         self.unbind()
-#
-#     def __enter__(self):
-#         self.bind()
-#         return self
-#
-#     def __exit__(self, type, value, traceback):
-#         self.unbind()
-#
-#     def delete(self):
-#         buffers = list(getattr(self, 'vb_ids', []))
-#         if hasattr(self, 'element_id'):
-#             buffers.append(self.element_id)
-#
-#         if buffers:
-#             GL.glDeleteBuffers(len(buffers), buffers)
-#
-#         if hasattr(self, 'id'):
-#             GL.glDeleteVertexArrays(1, [self.id])
-#             del self.id
-#
-#     def __del__(self):
-#         self.delete()
+    def drawArrays(self, mode, first, count):
+        GL.glBindVertexArray(self.id)
+        GL.glDrawArrays(mode, first, count)
 
 
 _npToGl = {
@@ -805,6 +415,7 @@ def npToGl(t):
     else:
         return _npToGl[t]
 
+
 _glToNp = {v:k for k, v in _npToGl.items()}
 
 def glToNp(t):
@@ -812,6 +423,7 @@ def glToNp(t):
         raise ValueError('Data type of array should be one of: [%s] (found %s)', (','.join(dts.keys()), arr.dtype))
     else:
         return _glToNp[t]
+
 
 class Texture:
     '''OpenGL Texture Object
@@ -969,6 +581,7 @@ class Texture:
 
         return data
 
+
 def textureFromArray(arr, format=None, **kwargs):
     '''Create an OpenGL Texture Object from a numpy array.
 
@@ -1000,6 +613,7 @@ def textureFromArray(arr, format=None, **kwargs):
 
     return Texture(arr.shape[:-1][::-1], format=format, dataType=dataType,
                    source=arr, **kwargs)
+
 
 class FrameBuffer:
     '''OpenGL FrameBuffer object
@@ -1103,3 +717,122 @@ class FrameBuffer:
 
     def __array__(self):
         return self.texture.__array__()
+
+
+class TextRenderer:
+    # From shader:
+    # layout (location = 0) in vec3 anchor;
+    # layout (location = 1) in vec4 glyph; // x/y = container, z/w = offset relative to bottom-left corner of container
+    # layout (location = 2) in vec4 atlas; // x/y = x0/y0, z/w = x1/y1
+    # layout (location = 3) in vec2 padding;
+    # layout (location = 4) in vec3 baseline;
+    # layout (location = 5) in vec3 up;
+    # layout (location = 6) in uint flags;
+    vertexType = np.dtype(dict(
+        names =   [  'anchor',    'glyph',    'atlas',  'padding', 'baseline',       'up',  'flags', '_glyphRender'],
+        #                 0:3,        3:7,       7:11,      11:13,      13:16,      16:19,    19:20,           3:11
+        formats = ['3float32', '4float32', '4float32', '2float32', '3float32', '3float32', 'uint32',     '8float32'],
+        offsets = [         0,         12,         28,         44,         52,         64,       76,             12],
+        itemsize = 80
+    ))
+
+    def __init__(self, basename):
+        '''Create a text renderer object.
+
+        Parameters
+        ----------
+        basename : str
+            A path/filename to the font information (.png and .font_info).
+            The extension is ignored, and replaced with the required types.
+        '''
+        self.basename = os.path.splitext(basename)[0]
+        with open(self.basename + '.font_info', 'rt') as f:
+            info = json.load(f)
+
+        geometry = np.frombuffer(base64.b64decode(info['geometry']),
+            dtype='i4').reshape(-1, 8)
+
+        self.atlas = np.full((geometry[:, 0].max()+1, 7),
+            -1, dtype='f')
+        self.atlas[geometry[:, 0]] = geometry[:, 1:8]
+        self.atlas[geometry[:, 0], :3] *= 1./65536
+        self.atlas[geometry[:, 0], 3:] += 0.5
+        self.lineHeight = info['lineHeight']
+        self.pixelsPerEm = info['pixelsPerEm']
+        self.pixelRange = info.get('pixelRange', 2.0)
+        M = self.atlas[ord('M')]
+        self.capHeight = abs(M[6] - M[4]) / self.pixelsPerEm
+        # print(self.capHeight)
+
+        img = np.array(Image.open(self.basename + '.png'))
+        self.texture = textureFromArray(img, target=GL.GL_TEXTURE_RECTANGLE)
+
+    def write(self, va, anchor, text, flags=0, padding=1.0, lineSpacing=1.0,
+            baseline=np.array([1, 0, 0], 'f'), up=np.array([0, 1, 0], 'f'),
+            start=0):
+        end = _writeText(text, start, self.capHeight,
+            self.lineHeight*lineSpacing, va['_glyphRender'], self.atlas)
+        va['flags'][start:end] = flags
+        va['anchor'][start:end] = anchor
+        va['baseline'][start:end] = baseline
+        va['up'][start:end] = up
+        va['padding'][start:end] = padding
+
+        return end
+
+    def delete(self):
+        if hasattr(self, 'texture'):
+            self.texture.delete()
+            del self.texture
+            del self.atlas
+
+@numba.njit(cache=True)
+def _writeText (s, start, cap_height, line_height, output, atlas):
+    x0 = 0.0
+    y0 = -cap_height
+    width = 0.0
+    height = cap_height
+    i = start
+
+    N = len(atlas)
+    M = len(output)
+
+    for c in s:
+        u = ord(c)
+
+        if u > N: # Outside the covered range of glyphs
+            continue
+
+        if u == 10: # line break
+            x0 = 0.0
+            y0 -= line_height
+            height += line_height
+            width = max(width, x0)
+            continue
+
+        advance = atlas[u, 0]
+        if advance < 0.0: # This is an undefined character!
+            continue
+
+        if atlas[u, 1] > -1000.0: # if this is whitespace, left = -2**16
+            output[i, 2] = atlas[u, 1] + x0
+            output[i, 3] = atlas[u, 2] + y0
+            output[i, 4] = atlas[u, 3]
+            output[i, 5] = atlas[u, 4]
+            output[i, 6] = atlas[u, 5]
+            output[i, 7] = atlas[u, 6]
+            i += 1
+
+        x0 += advance
+
+        if i >= M:
+            break
+
+    width = max(width, x0)
+
+    for j in range(start, i):
+        output[j, 0] = width
+        output[j, 1] = height
+        output[j, 3] += height
+
+    return i

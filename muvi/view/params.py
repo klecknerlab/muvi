@@ -137,8 +137,9 @@ for subshader in SUBSHADER_TYPES:
 
 PARAMS = OrderedDict()
 PARAMS_WITH_VOLUME_RANGES = {}
-PARAM_CATAGORIES = OrderedDict()
+PARAM_CATEGORIES = OrderedDict()
 ASSET_PARAMS = {}
+ALL_ASSET_PARAMS = {}
 ASSET_DEFAULTS = {}
 
 _ASSET = None
@@ -146,7 +147,7 @@ _ASSET = None
 class ViewParam:
     def __init__(self, name, display_name, default, min=None,
             max=None, step=None, logstep=None, options=None, param_type=None,
-            tooltip=None, max_from_vol=None):
+            tooltip=None, max_from_vol=None, range_update=None):
         self.name = name
         self.display_name = display_name
         self.default = default
@@ -167,19 +168,23 @@ class ViewParam:
         if max_from_vol is not None:
             self.max_from_vol = max_from_vol
             PARAMS_WITH_VOLUME_RANGES[name] = self
-
-        PARAMS[name] = self
+        if range_update is not None:
+            self.range_update = range_update
 
         if param_type is None:
             self.type = type(self.default)
         else:
             self.type = param_type
 
+        PARAMS[name] = self
+
         if _ASSET is not None:
             if _ASSET not in ASSET_DEFAULTS:
                 ASSET_DEFAULTS[_ASSET] = {name:default}
             else:
                 ASSET_DEFAULTS[_ASSET][name] = default
+
+            ALL_ASSET_PARAMS[name] = self
 
     # type = property(lambda self: type(self.default))
 
@@ -190,7 +195,7 @@ class ViewAction:
         self.args = args
         self.kw = kw
 
-PARAM_CATAGORIES['Playback'] = [
+PARAM_CATEGORIES['Playback'] = [
     ViewParam('frame', 'Frame', 0, 0, 0, step=1, param_type='playback',
         max_from_vol='Nt'),
 ]
@@ -198,38 +203,50 @@ PARAM_CATAGORIES['Playback'] = [
 zero = np.zeros(3, dtype='f')
 one = np.ones(3, dtype='f')
 
-PARAM_CATAGORIES['View'] = [
-    ViewAction('resetView', 'Recenter View', None, None),
+PARAM_CATEGORIES['Asset List'] = [
+    ViewParam('autoupdate_limits', 'Auto-update limits/view', True,
+    tooltip="If enabled, the display limits are automatically adjusted when the visible items are toggled."),
+]
+
+PARAM_CATEGORIES['Limits'] = [
+    # ViewAction('resetView', 'Recenter View', None, None),
+    ViewParam('disp_X0', 'Displayed Volume Lower Limit', -50*one, min=-50*one,
+        max=50*one, range_update='data_limits+',
+        tooltip='Lower limit of displayed volume (in physical units)'),
+    ViewParam('disp_X1', 'Displayed Volume Upper Limit', 50*one, min=-50*one,
+        max=50*one, range_update='data_limits+',
+        tooltip='Upper limit of displayed volume (in physical units)'),
+    ViewParam('mesh_clip', 'Clip Mesh to Limits', True,
+        tooltip='If True, clip Mesh to volumetric data limits.'),
+]
+
+PARAM_CATEGORIES['View'] = [
+    # ViewAction('resetView', 'Recenter View', None, None),
     ViewParam('fov', 'FOV (degrees)', 30.0, min=0.0, max=120.0, step=10.0,
         tooltip='The field of view of the display, measured in degrees.  Setting this to 0 gives an orthographic display.'),
     ViewParam('framerate', 'Playback Rate', 30, 1, 120, 10,
         tooltip='The playback rate in volumes/second.'),
-    # ViewParam('background_color', 'Background Color', np.array([0, 0, 0, 1], dtype='f'), param_type='color',
-    #     tooltip='The background color of the display.'),
-    ViewParam('disp_X0', 'Displayed Volume Lower Limit', zero, min=zero, max=100*one,
-        tooltip='Lower limit of displayed volume (in physical units)'),
-    ViewParam('disp_X1', 'Displayed Volume Upper Limit', 100*one, min=zero, max=100*one,
-        tooltip='Upper limit of displayed volume (in physical units)'),
-    ViewParam('mesh_clip', 'Clip Mesh to Volume', True,
-        tooltip='If True, clip Mesh to volumetric data limits.'),
     ViewParam('camera_pos', 'Camera Position', np.array([50, 50, 500], dtype='f'),
-        min=-500*one, max=500*one,
+        min=-500*one, max=500*one, range_update='camera_limits',
         tooltip='The position of the camera in volume physical units.'),
     ViewParam('look_at', 'Camera Target', 50*one, min=-100*one, max=100*one,
+        range_update='data_limits',
         tooltip='The position which the camera is looking at.'),
     ViewParam('up', 'Camera Up Direction', np.array([0, 1, 0], dtype='f'), min=-one, max=one,
         tooltip='The normal which defines the up direction of the camera.  Length is ignored.'),
 ]
 
 
-PARAM_CATAGORIES['Display'] = [
+PARAM_CATEGORIES['Display'] = [
     ViewParam('background_color', 'Background', zero, param_type='color',
         tooltip='The color of the display background'),
     ViewParam('surface_shade', 'Surface Shade', 'camera', options=SUBSHADER_NAMES['surface_shade'],
         tooltip='The lighting model used to shade surfaces.'),
     ViewParam('show_axis', 'Show Axes', True,
-        tooltip='Show the axes (and their labels).'),
-    ViewParam('axis_major_tick_spacing', 'Tick Spacing', 10.0, min=1E-3, max=1E3, logstep=10,
+        tooltip='Show the axes.'),
+    ViewParam('show_axis_labels', 'Show Axes Labels', True,
+        tooltip='Show the axes labels.'),
+    ViewParam('axis_major_tick_spacing', 'Major Tick Spacing', 20.0, min=1E-3, max=1E3, logstep=10,
         tooltip='The spacing of major ticks on the axis.'),
     ViewParam('axis_minor_ticks', 'Minor Ticks', 4, min=1, max=20, step=1,
         tooltip='The number of minor divisions per major tick.  1 = no minor ticks.'),
@@ -237,9 +254,16 @@ PARAM_CATAGORIES['Display'] = [
         tooltip='The length of the major ticks relative to the distance between them.'),
     ViewParam('axis_minor_tick_length_ratio', 'Minor Tick Length', 0.6, 0.0, 1.0, step=0.05,
         tooltip='The length of the minor ticks relative to the major ticks.'),
-    ViewParam('axis_line_color', 'Axis Color', one, param_type='color',
-        tooltip='The color of the axis lines.'),
+    ViewParam('axis_color', 'Axis Color', one, param_type='color',
+        tooltip='The color of the axis lines and labels.'),
     ViewParam('axis_line_width', 'Axis Line Width', 1., 0.5, 10.0, step=1.0),
+    ViewParam('axis_label_size', 'Axis Label Size', 12., 6., 60., step=1.0),
+    ViewParam('axis_single_label', 'One Label per Axis', True,
+        tooltip='If true, one label per axis is drawn at most.'),
+    ViewParam('axis_label_angle', 'Axis Label Angle', 215., 0., 360., step=45,
+        tooltip='Prioritize labels drawn at this angle.\n0 = top, 90 = right, 180 = bottom, 270 = left\n(Only used if there is one label per axis.)'),
+    ViewParam('axis_angle_exclude', 'Axis Angle Exclude', 10., 0., 90., step=5.0,
+        tooltip='Any axis whose angle is less than this with respect to the camera will not have their labels drawn.'),
 ]
 
 MAX_CHANNELS = 3
@@ -288,7 +312,7 @@ for n in range(1, MAX_CHANNELS + 1):
             tooltip='The level to display the isosurface at: 0 = minimum value, 1 = maximum.  Note that this is affected by exposure!'),
         ViewParam(f'vol_iso{n}_color', 'Color', color, param_type='color',
             tooltip='The color of the isosurface.'),
-        ViewParam(f'vol_iso{n}_opacity', 'Opacity', 0.3, min=0.0, max=1.0, step=0.1,
+        ViewParam(f'vol_iso{n}_opacity', 'Opacity', 0.7, min=0.0, max=1.0, step=0.1,
             tooltip='The opacity of the isosurface.')
     ]
 
@@ -308,12 +332,12 @@ _ASSET = None
 THEMES = {
     'Light': dict(
         background_color=one,
-        axis_line_color=zero,
+        axis_color=zero,
         axis_line_width=1.0,
     ),
     'Dark': dict(
         background_color=zero,
-        axis_line_color=one,
+        axis_color=one,
         axis_line_width=1.0,
     ),
 }

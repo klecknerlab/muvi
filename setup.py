@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='muvi',
-    version='0.1',
+    version='0.5',
     description='Python-based 3D movie viewing software.  Developed by the MUVI center at UC Merced.',
     url='https://github.com/klecknerlab/muvi',
     author='Dustin Kleckner',

@@ -108,8 +108,8 @@ void main() {
     vec3 Xf = camera_pos;
     vec3 Xb = vIn.worldPos;
     vec3 delta = Xb - Xf;
-    vec3 clip0 = max(vec3(0.0, 0.0, 0.0), disp_X0);
-    vec3 clip1 = min(vol_L, disp_X1);
+    vec3 clip0 = max(-0.5*vol_L, disp_X0);
+    vec3 clip1 = min(0.5*vol_L, disp_X1);
 
     float d0 = 0;
     float d1 = length(delta);
@@ -179,8 +179,8 @@ void main() {
     }
 
     // Find the location of the segment ends in texture space
-    vec3 U0 = (Xf + d0 * N) / vol_L;
-    vec3 U1 = (Xf + d1 * N) / vol_L;
+    vec3 U0 = (Xf + d0 * N) / vol_L + 0.5;
+    vec3 U1 = (Xf + d1 * N) / vol_L + 0.5;
     delta = U1 - U0;
 
     // Length of the ray in voxels

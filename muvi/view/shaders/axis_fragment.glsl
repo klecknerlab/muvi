@@ -16,7 +16,7 @@ limitations under the License.
 
 #version 330
 
-uniform vec3 axis_line_color = vec3(0.0);
+uniform vec3 axis_color = vec3(0.0);
 uniform float axis_line_width;
 uniform float axis_scaling;
 
@@ -38,5 +38,5 @@ void main() {
     }
     if (a < 1E-6) {discard;}
 
-    fragColor = vec4(axis_line_color * a, a);
+    fragColor = vec4(axis_color * a, a);
 }

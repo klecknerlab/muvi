@@ -17,7 +17,8 @@ limitations under the License.
 #version 330
 
 uniform sampler2DRect fontAtlas;
-uniform vec4 text_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform vec3 font_color = vec3(1.0, 1.0, 1.0);
+uniform float font_opacity = 1.0;
 
 in VertexData {
     vec2 texCoord;
@@ -34,9 +35,12 @@ void main() {
     vec3 msd = texture(fontAtlas, vIn.texCoord).rgb;
     float sd = median(msd.rgb);
     float dist = vIn.screenPxRange * (sd - 0.5);
-    float opacity = clamp(dist + 0.5, 0.0, 1.0) * text_color.a;
+    float opacity = clamp(dist + 0.5, 0.0, 1.0) * font_opacity;
     if (opacity < 1E-3) {
         discard;
     }
-    fragColor = vec4(text_color.rgb * opacity, opacity);
+    fragColor = vec4(font_color.rgb * opacity, opacity);
+
+    // // Red background for testing
+    // fragColor = vec4(text_color.rgb * opacity + vec3(1.0, 0.0, 0.0) * (1-opacity), 1.0);
 }

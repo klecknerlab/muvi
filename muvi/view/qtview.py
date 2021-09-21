@@ -35,7 +35,7 @@ Qt = QtCore.Qt
 import glob
 from PIL import Image
 
-from .params import PARAM_CATAGORIES, PARAMS
+from .params import PARAM_CATEGORIES, PARAMS
 # from .. import open_3D_movie, VolumetricMovie
 
 ORG_NAME = "MUVI Lab"
@@ -45,11 +45,11 @@ ICON_DIR = os.path.split(__file__)[0]
 
 if sys.platform == 'win32':
     # On Windows, it appears to need a bit more width to display text
-    PARAM_WIDTH = 200
+    PARAM_WIDTH = 250
     SCROLL_WIDTH = 15
 elif sys.platform == 'darwin':
     # Good default for OS X
-    PARAM_WIDTH = 230
+    PARAM_WIDTH = 250
     SCROLL_WIDTH = 15
 
     # Python 3: pip3 install pyobjc-framework-Cocoa
@@ -66,7 +66,7 @@ elif sys.platform == 'darwin':
         raise ImportError('pyobjc-framework-Cocoa not installed (OS X only) -- run "pip3 install pyobjc-framework-Cocoa" or "conda install pyobjc-framework-Cocoa" first')
 else:
     # Fallback -- if anyone ever uses this on Linux let me know what looks good!
-    PARAM_WIDTH = 230
+    PARAM_WIDTH = 250
     SCROLL_WIDTH = 15
 
 
@@ -194,6 +194,8 @@ class ExportWindow(QWidget):
         self.image.setPixmap(QtGui.QPixmap(img).scaledToWidth(1024))
 
 
+
+
 class GLWidget(QOpenGLWidget):
     frameChanged = QtCore.pyqtSignal(int)
 
@@ -313,6 +315,11 @@ class GLWidget(QOpenGLWidget):
     def pause(self):
         self._isPlaying = False
         self.timer.stop()
+
+    def resetView(self):
+        self.view.resetView()
+        self.update()
+
 
 class AssetItem(QListWidgetItem):
     def __init__(self, asset, mainWindow, parent=None):
@@ -449,9 +456,11 @@ class VolumetricViewer(QMainWindow):
         self.nullTab.setLayout(layout)
         self.paramTabs.addTab(self.nullTab, 'Data')
 
-        for cat, params in PARAM_CATAGORIES.items():
-            if cat != 'Playback':
-                self.paramTabs.addTab(self.buildParamTab(params), cat)
+        # for cat, params in PARAM_CATEGORIES.items():
+            # if cat != 'Playback':
+        for cat in ["Limits", "View", "Display"]:
+            params = PARAM_CATEGORIES[cat]
+            self.paramTabs.addTab(self.buildParamTab(params), cat)
 
         self.paramTabs.setObjectName('paramTabs')
         # self.paramTabs.setStyleSheet(f'''
@@ -470,6 +479,18 @@ class VolumetricViewer(QMainWindow):
         self.assetVBox.setContentsMargins(5, 5, 5, 0)
         self.assetList = AssetList(self)
         self.assetVBox.addWidget(self.assetList)
+
+
+        # button = QPushButton('Print all params')
+        # button.clicked.connect(self.allParams)
+        # self.assetVBox.addWidget(button)
+
+        resetView = QPushButton('Recenter/Rescale View')
+        resetView.clicked.connect(self.display.resetView)
+        self.assetVBox.addWidget(resetView)
+
+        self.addParamCategory('Asset List', self.assetVBox)
+
         widget = QWidget()
         widget.setLayout(self.assetVBox)
 
@@ -601,6 +622,16 @@ class VolumetricViewer(QMainWindow):
 
         return sa
 
+    def addParamCategory(self, cat, vbox):
+        paramControls = paramListToVBox(PARAM_CATEGORIES[cat], vbox,
+            self.display.view)
+
+        for param, control in paramControls.items():
+            if hasattr(control, 'paramChanged'):
+                control.paramChanged.connect(self.display.updateParam)
+
+        self.paramControls.update(paramControls)
+
     def selectAssetTab(self, asset):
         if asset is None:
             tab, label = self.nullTab, 'Data'
@@ -665,7 +696,7 @@ class VolumetricViewer(QMainWindow):
             self.display.view.resetView(direction=(0, 1, 0), up=(0, 0, -1))
         elif axis == 2:
             self.display.view.resetView(direction=(0, 0, 1), up=(0, 1, 0))
-        elif axis == 4:
+        elif axis == 3:
             self.display.view.resetView(direction=(-1, 0, 0), up=(0, 1, 0))
         elif axis == 4:
             self.display.view.resetView(direction=(0, -1, 0), up=(0, 0, 1))
@@ -673,6 +704,15 @@ class VolumetricViewer(QMainWindow):
             self.display.view.resetView(direction=(0, 0, -1), up=(0, 1, 0))
 
         self.display.update()
+
+    def allParams(self):
+        d = self.display.view.allParams()
+        for k, v in d.items():
+            print(f'{k:>20s}: {v}')
+
+        print(f'\nTotal bytes: {sum(sys.getsizeof(v) for v in d.values()) + sys.getsizeof(d)}')
+
+
 
 
 def generateDarkPalette():
