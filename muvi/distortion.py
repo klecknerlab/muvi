@@ -25,238 +25,262 @@ class DistortionModel:
     '''Used to convert betwenn coordinate systems for distorted volumes.
     There are three basic coordinate systems you should be aware of:
 
-    * Physical: The real coordinates in physical space
+    * `"physical"`: The real coordinates in physical space
         - x = (-Lx/2 -- +Lx/2) = (u - 1/2) * Lx
         - y = (-Ly/2 -- +Ly/2) = (v - 1/2) * Ly
         - z = (-Lz/2 -- +Lz/2) = (w - 1/2) * Lz
 
-    * Raw: A normalized coordinate in the raw imaged volume (corresponds directly
+    * `"raw"`: A normalized coordinate in the raw imaged volume (corresponds directly
         to a pixel in a volume).
         - u' = up = (0 -- 1)
         - v' = vp = (0 -- 1)
         - w' = wp = (0 -- 1)
 
-    * Corrected: A normalized coordinate in a distortion corrected space.
+    * `"corrected"`: A normalized coordinate in a distortion corrected space.
         - u = (0 -- 1)
         - v = (0 -- 1)
         - w = (0 -- 1)
 
+    * `"index"`: The indices of the volume.  Note that the order of the indices
+        is reversed, as in accessing the volume-array.  (e.g. vol[k, j, i])
+        - k = (0 -- Nz-1)
+        - j = (0 -- Ny-1)
+        - i = (0 -- Nx-1)
+
+    * `"index-xyz"`: The indices, in "natural" order.  This is what is
+        returned by TrackPy, among other things.
+        - i = (0 -- Nx-1)
+        - j = (0 -- Ny-1)
+        - k = (0 -- Nz-1)
+
     The main job of this class is to connect raw to corrected coordinates,
-    which in general depends on the physical camera setup.  This class can
-    also generate C code used to compile the viewing shader.
+    which in general depends on the physical camera setup.
 
-    The base model assume *no* distortion for compatbility reasons.  More
-    complicated distortion models derive from this class.
+    The base model (refered to as "simple" in the glsl shader), assumes camera
+    perspective and scanning angle distortion.
+
+    Note: the GLSL shader fragment code for this model is
+    "perspective_model_simple.glsl" in [MUVI SOURCE]/view/shaders
     '''
-    # C code to obtain raw coordinates for corrected
-    c_defs = []
-    c_u = 'u'
-    c_v = 'v'
-    c_w = 'w'
 
-    # C code to obtain derivative of raw coordinates with respect to corrected
-    c_du = '1.0, 0.0, 0.0'
-    c_dv = '0.0, 1.0, 0.0'
-    c_dw = '0.0, 0.0, 1.0'
+    NAME = 'simple'
+    VARIABLES = {
+        "distortion_correction_factor" : np.zeros(3, 'd'),
+        "vol_N": np.ones(3, 'i'),
+        "vol_L": np.ones(3, 'd'),
+    }
+
+    CORRECTED_SPACES = {"physical", "corrected"}
+    RAW_SPACES = {"raw", "index", "index-xyz"}
+    SPACES = CORRECTED_SPACES | RAW_SPACES
 
     def __init__(self, info):
-        self.update_params(info)
-        self.update_size(info)
+        self.var = self.VARIABLES.copy()
 
+        self.var['vol_N'] = np.array(info.get_list('Nx', 'Ny', 'Nz'), dtype='d')
+        self.var['vol_L'] = np.array(info.get_list('Lx', 'Ly', 'Lz'), dtype='d')
 
-    def update_params(self, info):
-        self.params = ()
+        if 'Nx' in info and 'dx' in info:
+            self.var["distortion_correction_factor"][0] = info['Nx'] / info['dx']
+        if 'Ny' in info and 'dy' in info:
+            self.var["distortion_correction_factor"][0] = info['Ny'] / info['dy']
+        if 'Nz' in info and 'dz' in info:
+            self.var["distortion_correction_factor"][0] = info['Nz'] / info['dz']
 
+    def convert(self, X, input="index", output="physical"):
+        '''Convert coordinates between spaces.
 
-    def update_size(self, info):
-        self.Lx = info.get('Lx', info.get('Nx', 1))
-        self.Ly = info.get('Ly', info.get('Ny', 1))
-        self.Lz = info.get('Lz', info.get('Nz', 1))
-
-
-    def raw_to_corrected(self, Xr):
-        '''Converted raw coordinates to idealized coordinates ('corrected')
-        in normalized volume space.
-
-        Parameters
+        Paramaters
         ----------
-        Xr : (N, 3) shaped array
+        X : (..., 3) shaped array like
+            The input coordinates.
+
+        Keywords
+        --------
+        input : str (default: "index")
+            The input coordinate space
+        output : str (default: "physical")
+            The output coordinate space
 
         Returns
         -------
-        Xc : (N, 3) shaped array
+        X' : (..., 3) shaped array
+            The output coordinates, coverted to the new space.
         '''
-        return np.stack(self._raw_to_corrected(Xr[..., 0], Xr[..., 1], Xr[..., 2]), axis=-1)
+
+        if input not in self.SPACES:
+            raise ValueError(f'input keyword should be one of {self.SPACES}')
+
+        if output not in self.SPACES:
+            raise ValueError(f'output keyword should be one of {self.SPACES}')
+
+        X = np.asarray(X, 'd')
+        if X.shape[-1] != 3:
+            raise ValueError('The last axis of the input coordinates must have size 3')
 
 
-    def _raw_to_corrected(self, up, vp, wp):
-        return (up, vp, wp)
+        N = self.var['vol_N']
+        L = self.var["vol_L"]
 
+        if input in self.CORRECTED_SPACES:
+            if input == "physical":
+                U = X / L + 0.5
+            else: # "corrected"
+                U = X
+            if output in self.RAW_SPACES:
+                Up = self.corrected_to_raw(U)
 
-    def corrected_to_raw(self, Xc):
-        '''Converted idealized coordinates ('corrected') to raw coordinates
-        in normalized volume space.
+        else:
+            if input.startswith("index"):
+                if input != "index-xyz":
+                    X = X[::-1]
+                Up = (X + 0.5) / N
+            else: # "raw"
+                Up = X
+            if output in self.CORRECTED_SPACES:
+                U = self.raw_to_corrected(Up)
+
+        if output == "index":
+            return (Up * N)[::-1] - 0.5
+        elif output == "index-xyz":
+            return (Up * N) - 0.5
+        elif output == "raw":
+            return Up
+        elif output == "physical":
+            return (U - 0.5) * L
+        else: # "corrected"
+            return U
+
+    def raw_to_corrected(self, Up):
+        '''Convert from raw to corrected coordinates.
 
         Parameters
         ----------
-        Xc : (N, 3) shaped array
+        Up: (..., 3) shaped array, or array like
+            The raw coordinates.
 
         Returns
         -------
-        Xr : (N, 3) shaped array
+        U: (..., 3) shaped array
+            The corrected coordinates.
         '''
-        return np.stack(self._corrected_to_raw(Xc[..., 0], Xc[..., 1], Xc[..., 2]), axis=-1)
 
+        Up = np.asarray(Up, 'd')
+        if Up.shape[-1] != 3:
+            raise ValueError('The last axis of the input must have size 3')
 
-    def _corrected_to_raw(self, u, v, w):
-        return (u, v, w)
+        U = np.empty(Up.shape, 'd')
 
+        dcf = self.var['distortion_correction_factor']
+        eps = 0.25 * (dcf * (1 - 2*Up))
+        eps_xy = eps[..., 0] + eps[..., 1]
+        eps_z  = eps[..., 2]
 
-    def raw_to_physical(self, Xr):
-        '''Converted raw coordinates to physical coordinates.
+        U[..., 0] = Up[..., 0] * (1 + 2*eps_z ) - eps_z  * (1 + 2*eps_xy)
+        U[..., 1] = Up[..., 1] * (1 + 2*eps_z ) - eps_z  * (1 + 2*eps_xy)
+        U[..., 2] = Up[..., 2] * (1 + 2*eps_xy) - eps_xy * (1 + 2*eps_z )
+        U /= (1 - 4*eps_xy*eps_z)[..., np.newaxis]
+
+        return U
+
+    def corrected_to_raw(self, U):
+        '''Convert from corrected to raw coordinates.
 
         Parameters
         ----------
-        Xr : (N, 3) shaped array
+        U: (..., 3) shaped array
+            The corrected coordinates.
 
         Returns
         -------
-        Xp : (N, 3) shaped array
+        Up: (..., 3) shaped array, or array like
+            The raw coordinates.
         '''
 
-        return (self.raw_to_corrected(Xr) - 0.5) * (self.Lx, self.Ly, self.Lz)
+        U = np.asarray(U)
+        if U.shape[-1] != 3:
+            raise ValueError('The last axis of the input must have size 3')
+
+        Up = np.empty(U.shape, 'd')
+
+        dcf = self.var['distortion_correction_factor']
+        eps = 0.25 * (dcf * (1 - 2*U))
+        eps_xy = eps[..., 0] + eps[..., 1]
+        eps_z  = eps[..., 2]
+
+        Up[..., 0] = (U[..., 0] + eps_z ) / (1 + 2*eps_z )
+        Up[..., 1] = (U[..., 1] + eps_z ) / (1 + 2*eps_z )
+        Up[..., 2] = (U[..., 2] + eps_xy) / (1 + 2*eps_xy)
+
+        return Up
 
 
-    def physical_to_raw(self, Xp):
-        '''Converted physical coordinates to raw coordinates.
+distortion_models = {
+    "simple": DistortionModel,
+}
 
-        Parameters
-        ----------
-        Xp : (N, 3) shaped array
+def get_distortion_model(info):
+    '''Given VolumeProperties object, return an appropriate initialized
+    DistortionModel object.
 
-        Returns
-        -------
-        Xr : (N, 3) shaped array
-        '''
-        return self.corrected_to_raw(Xp / (self.Lx, self.Ly, self.Lz) + 0.5)
+    Parameters
+    ----------
+    info : VolumeProperties object
 
+    Returns
+    -------
+    model : DistortionModel or derived class
 
-    def glsl_funcs(self):
-        fmt = {
-            'defs':'\n    '.join('float %s;' % d for d in self.c_defs),
-            'u': self.c_u,
-            'v': self.c_v,
-            'w': self.c_w,
-            'du': self.c_du,
-            'dv': self.c_dv,
-            'dw': self.c_dw,
-        }
-
-        return '''
-vec3 distortion_map(in vec3 U) {{
-    float u = U.x;
-    float v = U.y;
-    float w = U.z;
-    {defs}
-
-    return vec3({u}, {v}, {w});
-}}
-
-mat4x3 distortion_map_gradient(in vec3 U){{
-    float u = U.x;
-    float v = U.y;
-    float w = U.z;
-    {defs}
-
-    mat4x3 map_grad;
-    map_grad[0] = vec3({u}, {v}, {w});
-    map_grad[1] = vec3({du});
-    map_grad[2] = vec3({dv});
-    map_grad[3] = vec3({dw});
-
-    return map_grad
-}}
-        '''.format(**fmt)
-
-
-class Undistorted(DistortionModel):
-    # The default distortion model is undistorted -- this is here for clarity
-    pass
-
-
-class XScan(DistortionModel):
-    # C code to obtain raw coordinates for corrected
-    c_defs = [
-        'eps_x = 0.25 * param0 * (1.0 - 2.0 * u)',
-        'eps_z = 0.25 * param1 * (1.0 - 2.0 * w)',
-        'div_x = 1.0 / (1.0 + 2.0 * eps_x)',
-        'div_z = 1.0 / (1.0 + 2.0 * eps_z)'
-    ]
-    c_u = '(u + eps_z) * div_z'
-    c_v = '(v + eps_z) * div_z'
-    c_w = '(w + eps_x) * div_x'
-
-    # C code to obtain derivative of raw coordinates with respect to corrected
-    c_du = 'div_z, 0, param1 * (u - 0.5) * div_z*div_z'
-    c_dv = '0, div_z, param1 * (v - 0.5) * div_z*div_z'
-    c_dw = 'param0 * (w - 0.5) * div_x*div_x, 0, div_x'
-
-
-    def update_params(self, info):
-        self.params = (
-            info['Lx'] / info['dx'],
-            info['Lz'] / info['dz']
-        )
-
-    def _corrected_to_raw(self, u, v=None, w=None):
-
-        eps_x = 0.25 * self.params[0] * (1.0 - 2.0 * u)
-        eps_z = 0.25 * self.params[1] * (1.0 - 2.0 * w)
-        div_x = 1.0 / (1.0 + 2.0 * eps_x)
-        div_z = 1.0 / (1.0 + 2.0 * eps_z)
-
-        return (
-            (u + eps_z) * div_z,
-            (v + eps_z) * div_z,
-            (w + eps_x) * div_x
-        )
-
-
-    def _raw_to_corrected(self, up, vp=None, wp=None):
-        eps_x = 0.25 * self.params[0] * (1.0 - 2.0 * up)
-        eps_z = 0.25 * self.params[1] * (1.0 - 2.0 * wp)
-        div = 1.0 / (1.0 - 4.0 * eps_x * eps_z)
-
-        return (
-            (up + eps_z * (2 * up - 1 - 2 * eps_x)) * div,
-            (vp + eps_z * (2 * vp - 1 - 2 * eps_x)) * div,
-            (wp + eps_x * (2 * wp - 1 - 2 * eps_z)) * div,
-        )
-
-def get_distortion_map(info):
-    if 'dx' in info and 'dz' in info:
-        if 'dy' in info:
-            raise ValueError('Volume info specified both dx and dy -- should only have one or the other!')
-        return XScan(info)
-
-    else:
-        return Undistorted(info)
-
+    **Note:** presently there is only one distortion model, so it only returns
+    this.  In future iterations multiple models may be supported.
+    '''
+    return DistortionModel(info)
 
 if __name__ == "__main__":
-    # import numpy as np
-    info = {'Lx': 10, 'Ly': 8, 'Lz': 5, 'dx':100, 'dz':200}
-    # info = {}
+    import random
+    from muvi import VolumeProperties
 
-    distortion = get_distortion_map(info)
+    info = VolumeProperties(
+        Nx = 50,
+        Ny = 75,
+        Nz = 100,
+        Lx = 20,
+        Ly = 30,
+        Lz = 40,
+        dx = -15,
+        dz = 10
+    )
 
-    print(distortion.glsl_funcs())
+    dm = DistortionModel(info)
+    spaces = list(DistortionModel.SPACES)
 
-    X = np.random.rand(10, 3)
-    # print(X)
+    # Stress test 1: convert back and forth between 2
+    for n in range(10):
+        seq = random.sample(spaces, k=2)
+        X0 = np.random.rand(50, 3)
 
-    Xp = distortion.corrected_to_raw(X)
-    # print(Xp)
+        if seq[0].startswith("index"):
+            X0 *= dm.var['vol_N']
+        elif seq[0] == "physical":
+            X0 *= dm.var['vol_L']
 
-    Xpp = distortion.raw_to_corrected(Xp)
-    print('RMS error in round trip calculation: %e' % (Xpp-X).std())
+        X = dm.convert(X0, seq[0], seq[1])
+        X = dm.convert(X, seq[1], seq[0])
+
+        print(f'{seq[0]:9s} <-> {seq[1]:9s}: {(X - X0).std()}')
+
+    # Stress test 2: convert back and forth along a sequence of 3
+    for n in range(20):
+        seq = random.sample(spaces, k=3)
+        X0 = np.random.rand(50, 3)
+
+        if seq[0].startswith("index"):
+            X0 *= dm.var['vol_N']
+        elif seq[0] == "physical":
+            X0 *= dm.var['vol_L']
+
+        X = dm.convert(X0, seq[0], seq[1])
+        X = dm.convert(X, seq[1], seq[2])
+        X = dm.convert(X, seq[2], seq[0])
+
+        print(f'{seq[0]:9s} -> {seq[1]:9s} -> {seq[2]:9s} -> {seq[0]:9s}: {(X - X0).std()}')

@@ -276,7 +276,7 @@ class View:
     AXIS_MAX_TICKS = 1000
 
     _shaderDep = {
-        "volume": {"surface_shade", "perspective_model", "cloud_shade",
+        "volume": {"surface_shade", "distortion_model", "cloud_shade",
             "color_remap", "vol_cloud1", "vol_cloud2", "vol_cloud3", "vol_iso1",
             "vol_iso2", "vol_iso3", "gamma2"},
         "mesh": {"surface_shade", "mesh_clip"},
@@ -312,7 +312,7 @@ class View:
     _defaults = dict(
         # surface_shade = "camera",
         # cloud_shade = "colormap",
-        perspective_model = "simple",
+        distortion_model = "simple",
         # mesh_perspective_correction = False,
         fontAtlas = 0,
         # model_matrix = np.eye(4, dtype='f'),
@@ -347,7 +347,7 @@ class View:
         axis_max_ticks = 9,
     )
 
-    _subShaders = {"surface_shade", "cloud_shade", "perspective_model"}
+    _subShaders = {"surface_shade", "cloud_shade", "distortion_model"}
 
     def __init__(self, valueCallback=None, rangeCallback=None):
         self.buffers = {}

@@ -24,7 +24,7 @@ import lz4.block
 import concurrent.futures
 from xml.etree import ElementTree as ET
 import time
-from .distortion import get_distortion_map
+from .distortion import get_distortion_model
 
 class VolumetricMovieError(Exception):
     pass
@@ -486,8 +486,6 @@ class VolumetricMovie:
     -------
     validate_info()
         Auto determines properties of the volumes from the first frame.
-    update_distortion()
-        Generates the distortion map info from the volume info.
     get_volume(index)
         Retrieves a volume.  Note that volumes may also be accessed by treating
         the VolumetricMovie object like a list; this is preferable for most
@@ -563,16 +561,17 @@ class VolumetricMovie:
         if 'creation_time' not in self.info:
             self.info['creation_time'] = time.time()
 
-        self.update_distortion()
+        self.distortion = get_distortion_model(self.info)
 
+        # self.update_distortion()
 
-    def update_distortion(self):
-        '''Update distortion map.
-
-        Should only need to be called diectly if volume info has changed
-        since initilization (which shouldn't usually happen).
-        '''
-        self.distortion = distortion.get_distortion_map(self.info)
+    # def update_distortion(self):
+    #     '''Update distortion map.
+    #
+    #     Should only need to be called diectly if volume info has changed
+    #     since initilization (which shouldn't usually happen).
+    #     '''
+    #     self.distortion = distortion.get_distortion_map(self.info)
 
 
     def get_volume(self, index):
@@ -988,7 +987,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
 
         self.vol_dtype = self.info['dtype']
 
-        self.update_distortion()
+        # self.update_distortion()
 
     def get_frame(self, i):
         return self.frames[i]

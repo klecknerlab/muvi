@@ -293,7 +293,7 @@ for n in range(1, MAX_CHANNELS + 1):
     ]
 
 ASSET_PARAMS['volume'] += [
-    ViewParam('vol_perspective_correction_factor', 'Perspective Coefficients', zero, min=-one, max=+one, step=0.05,
+    ViewParam('distortion_correction_factor', 'Distortion Coefficients', zero, min=-one, max=+one, step=0.05,
         tooltip='The coefficient for perspective correction along each axis (=Li/di).  Normally only one of x/y is nonzero.'),
     ViewParam('cloud_shade', 'Cloud Shade', 'colormap', options=SUBSHADER_NAMES['cloud_shade'],
         tooltip='The cloud color sub-shader to use for the display.  Normally not changed.'),
