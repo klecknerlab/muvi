@@ -511,7 +511,7 @@ class VolumetricMovie:
             `validate_info` method can take care of many basic attributes.)
     '''
 
-    def __init__(self, source, **kwargs):
+    def __init__(self, source, *info, **kwargs):
         '''
         Parameters
         ----------
@@ -523,7 +523,7 @@ class VolumetricMovie:
         '''
 
         self.volumes = source
-        self.info = VolumeProperties(**kwargs)
+        self.info = VolumeProperties(*info, **kwargs)
         self.info['Nt'] = len(source)
         self.validate_info()
 

@@ -80,12 +80,12 @@ class DistortionModel:
         self.var['vol_N'] = np.array(info.get_list('Nx', 'Ny', 'Nz'), dtype='d')
         self.var['vol_L'] = np.array(info.get_list('Lx', 'Ly', 'Lz'), dtype='d')
 
-        if 'Nx' in info and 'dx' in info:
-            self.var["distortion_correction_factor"][0] = info['Nx'] / info['dx']
-        if 'Ny' in info and 'dy' in info:
-            self.var["distortion_correction_factor"][0] = info['Ny'] / info['dy']
-        if 'Nz' in info and 'dz' in info:
-            self.var["distortion_correction_factor"][0] = info['Nz'] / info['dz']
+        if 'Lx' in info and 'dx' in info:
+            self.var["distortion_correction_factor"][0] = info['Lx'] / info['dx']
+        if 'Ly' in info and 'dy' in info:
+            self.var["distortion_correction_factor"][1] = info['Ly'] / info['dy']
+        if 'Lz' in info and 'dz' in info:
+            self.var["distortion_correction_factor"][2] = info['Lz'] / info['dz']
 
     def convert(self, X, input="index", output="physical"):
         '''Convert coordinates between spaces.
@@ -248,6 +248,7 @@ if __name__ == "__main__":
         Ly = 30,
         Lz = 40,
         dx = -15,
+        dy = 10,
         dz = 10
     )
 
