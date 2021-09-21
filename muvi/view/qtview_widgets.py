@@ -558,7 +558,7 @@ PARAM_FIELDS = {
     'options':'options',
 }
 
-def controlFromParam(param, view=None, prefix=""):
+def controlFromParam(param, view=None, prefix="", defaults={}):
     if hasattr(param, 'action'):
         button = QPushButton(param.display_name)
         func = getattr(view, param.action, None)
@@ -566,15 +566,22 @@ def controlFromParam(param, view=None, prefix=""):
             button.clicked.connect(lambda: func(*param.args, **param.kw))
         return button
 
+    full_name = prefix + param.name
+
     kwargs = dict(
         title = param.display_name + ":",
-        param = prefix + param.name
+        param = full_name
     )
 
     for p, k in PARAM_FIELDS.items():
         v = getattr(param, p, None)
         if v is not None:
             kwargs[k] = v
+
+    if full_name in defaults:
+        kwargs['default'] = defaults[full_name]
+    elif param in defaults:
+        kwargs['default'] = defaults[param]
 
     if param.type == bool:
         return BoolControl(**kwargs)
@@ -596,7 +603,7 @@ def controlFromParam(param, view=None, prefix=""):
     else:
         return None
 
-def paramListToVBox(params, vbox, view=None, prefix=""):
+def paramListToVBox(params, vbox, view=None, prefix="", defaults={}):
     param_controls = {}
 
     sub_vbox = vbox
@@ -609,7 +616,7 @@ def paramListToVBox(params, vbox, view=None, prefix=""):
             tabs.setStyleSheet('QTabWidget {background-color: palette(window);}')
             for cat, param_list in param.items():
                 tab_vbox = QVBoxLayout()
-                param_controls.update(paramListToVBox(param_list, tab_vbox, prefix=prefix))
+                param_controls.update(paramListToVBox(param_list, tab_vbox, prefix=prefix, defaults=defaults))
                 widget = QWidget()
                 widget.setLayout(tab_vbox)
                 tabs.addTab(widget, cat)
@@ -626,191 +633,10 @@ def paramListToVBox(params, vbox, view=None, prefix=""):
 
         else:
             # This is just an item
-            control = controlFromParam(param, view, prefix=prefix)
+            control = controlFromParam(param, view, prefix=prefix, defaults=defaults)
             if control is not None:
                 sub_vbox.addWidget(control)
                 if hasattr(param, 'name'):
                     param_controls[prefix + param.name] = control
 
     return param_controls
-
-
-# class VolumetricView(QOpenGLWidget):
-#     frameChanged = QtCore.pyqtSignal(int)
-#
-#     def __init__(self, parent=None, volume=None):
-#         fmt = QSurfaceFormat()
-#         fmt.setSwapInterval(1)
-#         QSurfaceFormat.setDefaultFormat(fmt)
-#
-#         super().__init__(parent)
-#
-#         self.setUpdateBehavior(1)
-#         self.last_t = time.time()
-#
-#         self.parent = parent
-#         self.lastPos = QtCore.QPoint()
-#
-#         self.timer = QtCore.QTimer()
-#         self.timer.setInterval(5)
-#         self.timer.timeout.connect(self.update)
-#         # self.timer.start()
-#
-#         self._isPlaying = False
-#         self.hasUpdate = True
-#
-#         self.makeCurrent()
-#         self.view = view.View()
-#         self.doneCurrent()
-#
-#         self._updates = {}
-#         # if volume is not None:
-#             # self.attachVolume(volume)
-#
-#     def setPlaying(self, isPlaying):
-#         if isPlaying:
-#             self.play()
-#         else:
-#             self.pause()
-#
-#     def play(self):
-#         if hasattr(self.view, 'volume'):
-#             self._isPlaying = True
-#             self._tStart = time.time()
-#             self.timer.start()
-#
-#     def pause(self):
-#         self._isPlaying = False
-#         self.timer.stop()
-#
-#     def attachVolume(self, volume):
-#         self.makeCurrent()
-#         self.volume = volume
-#         self.view.attach_volume(volume)
-#         self.view.draw()
-#         self.doneCurrent()
-#
-#     def minimumSizeHint(self):
-#         return QtCore.QSize(300, 300)
-#
-#     def sizeHint(self):
-#         return QtCore.QSize(800, 600)
-#
-#     def initializeGL(self):
-#         try:
-#             # This sets the output to be sRGB -- unfortunately doesn't work with old versions of Qt!
-#             # As a result, the opengl renderer must create an offscreen buffer
-#             #   to acheive the same result. ):
-#             # self.setTextureFormat(GL_SRGB8_ALPHA8)
-#             self.dpr = self.devicePixelRatio()
-#             self.view.resize(width=self.width()*self.dpr,
-#                 height=self.height()*self.dpr)
-#         except:
-#             traceback.print_exc()
-#             self.parent.close()
-#
-#     def paintGL(self):
-#         try:
-#             if self._isPlaying:
-#                 t = time.time()
-#                 fps = self.view.params['framerate']
-#                 advance = int((t - self._tStart) * fps)
-#                 if advance:
-#                     if self.view.volume is not None:
-#                         nvol = len(self.view.volume)
-#                     else:
-#                         nvol = 1
-#                     frame = (self.view.params['frame'] + advance) % nvol
-#                     self.updateParam('frame', frame)
-#                     self._tStart += advance / fps
-#                     self.frameChanged.emit(frame)
-#
-#             # print(t - self.last_t)
-#             # dt = t - self.last_t
-#             # self.last_t = t
-#
-#             if self.hasUpdate:
-#                 self._updateParams()
-#                 self.view.draw()
-#
-#         except:
-#             traceback.print_exc()
-#             self.parent.close()
-#
-#     def resizeGL(self, width, height):
-#         self.view.resize(width*self.dpr, height*self.dpr)
-#         self.hasUpdate = True
-#
-#     def mousePressEvent(self, event):
-#         self.lastPos = event.pos()
-#         self.view.buttons_pressed = int(event.buttons())
-#         self.hasUpdate = True
-#         self.update()
-#
-#     def mouseReleaseEvent(self, event):
-#         self.view.buttons_pressed = int(event.buttons())
-#         self.hasUpdate = True
-#         self.update()
-#
-#     def mouseMoveEvent(self, event):
-#         x = event.x()
-#         y = event.y()
-#         dx = x - self.lastPos.x()
-#         dy = y - self.lastPos.y()
-#         self.lastPos = event.pos()
-#         self.view.buttons_pressed = int(event.buttons())
-#         if dx or dy:
-#             self.view.mouse_move(x*self.dpr, y*self.dpr, dx*self.dpr, dy*self.dpr)
-#             self.hasUpdate = True
-#             self.update()
-#
-#     def wheelEvent(self, event):
-#         self.view.params['scale'] *= 1.25**(event.angleDelta().y()/120)
-#         self.hasUpdate = True
-#         self.update()
-#
-#     def updateParams(self, **kwargs):
-#         self._updates.update(**kwargs)
-#         self.hasUpdate = True
-#         self.update()
-#
-#     def updateHiddenParams(self, **kwargs):
-#         self._updates.update(**kwargs)
-#         self.hasUpdate = True
-#
-#     def updateParam(self, p, v):
-#         self.updateParams(**{p:v})
-#
-#     def updateHiddenParam(self, p, v):
-#         self.updateHiddenParams(**{p:v})
-#
-#     def _updateParams(self):
-#         if self.hasUpdate:
-#             self.view.update_params(**self._updates)
-#             self._updates = {}
-#             self.hasUpdate = False
-#
-#     def previewImage(self):
-#         self.makeCurrent()
-#         self._updateParams()
-#         img = self.view.draw(offscreen=True, return_image=True)
-#         self.doneCurrent()
-#
-#         return img
-#
-#     def saveImage(self, fn=None, dir=None):
-#         if dir is None:
-#             dir = os.getcwd()
-#         if fn is None:
-#             fns = glob.glob(os.path.join(dir, 'muvi_screenshot_*.png'))
-#             for i in range(10**4):
-#                 fn = os.path.join(dir, 'muvi_screenshot_%08d.png' % i)
-#                 if fn not in fns:
-#                     break
-#
-#         self.makeCurrent()
-#         self._updateParams()
-#         img = self.view.draw(offscreen=True, save_image=fn)
-#         self.doneCurrent()
-#
-#         return fn, img

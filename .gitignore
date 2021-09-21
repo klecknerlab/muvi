@@ -12,8 +12,8 @@ util/*.vti
 *.muv
 
 # Example data
-examples/*_frames/*
 examples/*.vti
+examples/*/*
 
 # C extensions
 *.so

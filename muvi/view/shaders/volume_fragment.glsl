@@ -21,6 +21,8 @@ limitations under the License.
 uniform mat4 perspectiveMatrix;
 uniform mat4 viewMatrix;
 uniform vec3 camera_pos;
+uniform float fov;
+uniform vec3 look_at;
 
 uniform sampler3D volumeTextureId;
 uniform sampler2DRect depthTexture;
@@ -103,10 +105,16 @@ float z_from_depth(float depth)
             (perspectiveMatrix[2][2] + perspectiveMatrix[2][3] * d);
 }
 
-void main() {
+void main()
+{
     // Build the start and end of the ray, as well as distances along the ray
     vec3 Xf = camera_pos;
     vec3 Xb = vIn.worldPos;
+    if (fov < 1E-3)
+    {
+        Xf = Xb + camera_pos - look_at;
+    }
+
     vec3 delta = Xb - Xf;
     vec3 clip0 = max(-0.5*vol_L, disp_X0);
     vec3 clip1 = min(0.5*vol_L, disp_X1);

@@ -332,7 +332,7 @@ class AssetItem(QListWidgetItem):
         self.setToolTip('\n'.join(asset.info))
         self.asset = asset
 
-        self.tab = mainWindow.buildParamTab(asset.paramList(), prefix=self.prefix)
+        self.tab = mainWindow.buildParamTab(asset.paramList(), prefix=self.prefix, defaults=asset.allParams())
         self.label = asset.shader.capitalize()
 
 
@@ -596,10 +596,11 @@ class VolumetricViewer(QMainWindow):
             self.assetList.addItem(AssetItem(asset, self))
             self.update()
 
-    def buildParamTab(self, params, prefix=""):
+    def buildParamTab(self, params, prefix="", defaults={}):
         vbox = QVBoxLayout()
         vbox.setSpacing(10)
-        paramControls = paramListToVBox(params, vbox, self.display.view, prefix=prefix)
+
+        self.addParams(params, vbox, prefix=prefix, defaults=defaults)
 
         vbox.addStretch(1)
 
@@ -613,24 +614,19 @@ class VolumetricViewer(QMainWindow):
         widget.setFixedWidth(PARAM_WIDTH - (SCROLL_WIDTH + 5))
         sa.setWidget(widget)
 
-        for param, control in paramControls.items():
-            if hasattr(control, 'paramChanged'):
-                control.paramChanged.connect(self.display.updateParam)
-        # print(list(paramControls.keys()))
-
-        self.paramControls.update(paramControls)
-
         return sa
 
-    def addParamCategory(self, cat, vbox):
-        paramControls = paramListToVBox(PARAM_CATEGORIES[cat], vbox,
-            self.display.view)
+    def addParams(self, params, vbox, prefix="", defaults={}):
+        paramControls = paramListToVBox(params, vbox, self.display.view, prefix=prefix, defaults=defaults)
 
         for param, control in paramControls.items():
             if hasattr(control, 'paramChanged'):
                 control.paramChanged.connect(self.display.updateParam)
 
         self.paramControls.update(paramControls)
+
+    def addParamCategory(self, cat, vbox, prefix="", defaults={}):
+        self.addParams(PARAM_CATEGORIES[cat], vbox, prefix="", defaults=defaults)
 
     def selectAssetTab(self, asset):
         if asset is None:

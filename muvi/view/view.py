@@ -136,6 +136,7 @@ class ViewAsset:
             self.uniforms = dict(
                 vol_L = L,
                 vol_N = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f'),
+                distortion_correction_factor = self.volume.distortion.var.get('distortion_correction_factor', np.zeros(3, 'f'))
             )
             self.globalUniforms = {}
             self.globalUniformNames.update(self.parent._shaderDep[self.shader])
@@ -169,7 +170,10 @@ class ViewAsset:
         if self.frameRange is not None:
             self.info.append(f"Frames: {self.frameRange[0]}-{self.frameRange[1]}{' (missing)' if getattr(self, 'missingFrames', False) else ''}")
 
-        self.update(ASSET_DEFAULTS[self.shader])
+        for key, val in ASSET_DEFAULTS[self.shader].items():
+            if key in self.uniforms or key in self.globalUniforms:
+                continue
+            self[key] = val
 
     def paramList(self):
         return ASSET_PARAMS[self.shader]
