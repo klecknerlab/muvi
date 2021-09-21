@@ -151,6 +151,37 @@ class DistortionModel:
         else: # "corrected"
             return U
 
+    def update_data_frame(self, data, input="index-xyz", output="physical",
+            columns=('x', 'y', 'z'), output_columns=('xc', 'yc', 'zc')):
+        '''Perspective correct coordinates in a pandas DataFrame or
+        equivalent object.  Meant primarily to convert trackpy data.
+
+        Parameters
+        ----------
+        data : DataFrame or equivalent
+            The input data
+
+        Keywords
+        --------
+        input, output: str (default: `"index-xyz"`, `"physical"`)
+            The input/output coordinate format.  Note that unlike `convert`,
+            the default input format is `"index-xyz"`, as this is what
+            trackpy uses!
+        columns : iterable of 3 str (default: `('x', 'y', 'z')`)
+            The input columns to use for x/y/z
+        output_columns : iterable of 3 str (default: `('xc', 'yc', 'zc')`)
+            The output columns to use for the resulting data
+        '''
+        X = np.empty((len(data), 3), 'd')
+
+        for i, column in enumerate(columns):
+            X[:, i] = data[column]
+
+        Xc = self.convert(X, input, output)
+
+        for i, column in enumerate(output_columns):
+            data[column] = Xc[:, i]
+
     def raw_to_corrected(self, Up):
         '''Convert from raw to corrected coordinates.
 

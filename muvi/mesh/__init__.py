@@ -109,6 +109,9 @@ def generate_glyphs(X, glyph="sphere", a=1, color=None, N=np.array([1, 0, 0], dt
 
     tris = glyph.triangles.reshape(-1, 1, 3) + n_points * np.arange(n_glyphs).reshape(-1, 1)
 
+    if normals.shape[0] != points.shape[0]:
+        normals = np.tile(normals, (points.shape[0] // normals.shape[0], 1, 1))
+        
     output = Mesh(points.reshape(-1, 3), tris.reshape(-1, 3), normals.reshape(-1, 3))
 
     if color is not None:

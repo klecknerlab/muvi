@@ -93,6 +93,7 @@ class ViewAsset:
         self._frame = None
         self.uniforms = {}
         self.globalUniformNames = set()
+        self.globalUniforms = {}
 
         if isinstance(data, Mesh):
             self.shader = 'mesh'
@@ -138,7 +139,6 @@ class ViewAsset:
                 vol_N = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f'),
                 distortion_correction_factor = self.volume.distortion.var.get('distortion_correction_factor', np.zeros(3, 'f'))
             )
-            self.globalUniforms = {}
             self.globalUniformNames.update(self.parent._shaderDep[self.shader])
             self.globalUniformNames.update(self.parent._rebuildDep.keys())
 
