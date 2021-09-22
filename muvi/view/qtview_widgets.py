@@ -24,10 +24,12 @@ library uses underscore style naming to conform with Python standards.
 '''
 
 # import sys
-from PyQt5 import QtCore
+from PyQt5 import QtCore, QtGui
+Qt = QtCore.Qt
 from PyQt5.QtWidgets import QWidget, QSpinBox, QVBoxLayout, QHBoxLayout, \
     QDoubleSpinBox, QSlider, QLabel, QTabWidget, QGroupBox, QCheckBox, QFrame, \
-    QComboBox, QColorDialog, QPushButton, QLineEdit, QOpenGLWidget
+    QComboBox, QColorDialog, QPushButton, QLineEdit, QOpenGLWidget, QListWidget, \
+    QListWidgetItem, QAction, QMenu
 from PyQt5.QtGui import QColor, QSurfaceFormat
 # from OpenGL import GL
 # from .ooopengl import GL_SRGB8_ALPHA8
@@ -38,6 +40,7 @@ import time
 import glob
 import os
 import numpy as np
+from .view import View
 
 GAMMA_CORRECT = 2.2
 
@@ -187,6 +190,8 @@ class IntControl(ParamControl):
 
         self.spinBox.valueChanged.connect(self._paramChanged)
 
+        self.value = self.spinBox.value
+
     def setRange(self, minVal, maxVal):
         self.spinBox.setRange(minVal, maxVal)
         self.slider.setRange(minVal, maxVal)
@@ -220,6 +225,8 @@ class LinearControl(ParamControl):
         self.spinBox.valueChanged.connect(self.spinChanged)
 
         self.spinBox.valueChanged.connect(self._paramChanged)
+
+        self.value = self.spinBox.value
 
     def setRange(self, minVal, maxVal):
         step = (maxVal - minVal) / 10 if self.step is None else self.step
@@ -640,3 +647,234 @@ def paramListToVBox(params, vbox, view=None, prefix="", defaults={}):
                     param_controls[prefix + param.name] = control
 
     return param_controls
+
+
+class StaticViewWidget(QOpenGLWidget):
+    def __init__(self, parent):
+        self.parent = parent
+
+        fmt = QtGui.QSurfaceFormat()
+        fmt.setProfile(QtGui.QSurfaceFormat.CoreProfile)
+        fmt.setSwapInterval(1)
+        fmt.setVersion(3, 3)
+        QtGui.QSurfaceFormat.setDefaultFormat(fmt)
+
+        super().__init__(parent)
+        self.setMinimumSize(640, 480)
+        self.dpr = 1
+        self.view = View(getattr(parent, "valueCallback", None),
+                         getattr(parent, "rangeCallback", None))
+        self.view['fontSize'] = self.font().pointSize() / 72 * self.physicalDpiX() * 1.2
+
+    def updateParam(self, k, v, callback=False):
+        self.view.__setitem__(k, v, callback=callback)
+        self.hasUpdate = True
+        self.update()
+
+    def updateParams(self, params, callback=False):
+        self.view.update(params, callback=callback)
+        self.hasUpdate = True
+        self.update()
+
+    def paintGL(self):
+        try:
+            if self._isPlaying and self.view.frameRange is not None:
+                t = time.time()
+                fps = self.view['framerate']
+                advance = int((t - self._tStart) * fps)
+                if advance:
+                    frame = (self.view['frame'] + advance) % self.view.frameRange[1]
+                    self.view['frame'] = frame
+                    self._tStart += advance / fps
+                    self.frameChanged.emit(frame)
+
+            if self.hasUpdate:
+                self.view.draw(0, True)
+
+        except:
+            traceback.print_exc()
+            self.parent.close()
+
+    def offscreenRender(self, bufferId, scaleHeight=None):
+        self.makeCurrent()
+        self.view.draw(bufferId, scaleHeight=scaleHeight)
+        img = np.array(self.view.buffers[bufferId].texture)
+        self.doneCurrent()
+        return img
+
+    def resizeGL(self, width, height):
+        self.width, self.height = width * self.dpr, height * self.dpr
+        self.view.resizeBuffer(0, self.width, self.height)
+        self.hasUpdate = True
+        self.update()
+
+    def initializeGL(self):
+        # print(f'GL Version: {GL.glGetString(GL.GL_VERSION)}')
+        # print(f'GLSL Version: {GL.glGetString(GL.GL_SHADING_LANGUAGE_VERSION)}')
+        self.dpr = self.devicePixelRatio()
+        self.view.setup(self.width() * self.dpr, self.height() * self.dpr)
+        self.view['display_scaling'] = self.dpr
+
+    def close(self):
+        self.view.cleanup()
+
+    def resetView(self):
+        self.view.resetView()
+        self.update()
+
+
+class ViewWidget(StaticViewWidget):
+    frameChanged = QtCore.pyqtSignal(int)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.timer = QtCore.QTimer()
+        self.timer.setInterval(5)
+        self.timer.timeout.connect(self.update)
+
+        self._isPlaying = False
+        self.hasUpdate = True
+
+    def mousePressEvent(self, event):
+        self.lastPos = event.pos()
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        self.lastPos = event.pos()
+        self.update()
+
+    def mouseMoveEvent(self, event):
+        x = event.x()
+        y = event.y()
+        dx = x - self.lastPos.x()
+        dy = y - self.lastPos.y()
+        self.lastPos = event.pos()
+        buttonsPressed = int(event.buttons())
+
+        if dx or dy:
+            self.view.mouseMove(x*self.dpr, y*self.dpr, dx*self.dpr, dy*self.dpr, buttonsPressed)
+            self.hasUpdate = True
+            self.update()
+
+    def wheelEvent(self, event):
+        self.view.zoomCamera(1.25**(event.angleDelta().y()/120))
+        self.hasUpdate = True
+        self.update()
+
+    def setPlaying(self, isPlaying):
+        if isPlaying:
+            self.play()
+        else:
+            self.pause()
+
+    def play(self):
+        if self.view.frameRange is not None:
+            self._isPlaying = True
+            self._tStart = time.time()
+            self.timer.start()
+
+    def pause(self):
+        self._isPlaying = False
+        self.timer.stop()
+
+    def resetView(self):
+        self.view.resetView()
+        self.update()
+
+
+class AssetItem(QListWidgetItem):
+    def __init__(self, asset, mainWindow, parent=None):
+        super().__init__(asset.label, parent)
+        self.id = asset.id
+        self.isVolume = asset.isVolume
+        self.setFlags(self.flags() | Qt.ItemIsUserCheckable ) #
+        self.prefix = f'#{self.id}_'
+        self.setCheckState(Qt.Checked if asset.visible else Qt.Unchecked)
+        self.setToolTip('\n'.join(asset.info))
+        self.asset = asset
+
+        self.tab = mainWindow.buildParamTab(asset.paramList(), prefix=self.prefix, defaults=asset.allParams())
+        self.label = asset.shader.capitalize()
+
+
+class AssetList(QListWidget):
+    def __init__(self, mainWindow):
+        super().__init__(mainWindow)
+        self.mainWindow = mainWindow
+
+        self.currentRowChanged.connect(self.selectAssetTab)
+        self.itemChanged.connect(self.assetChanged)
+
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.contextMenu)
+
+        self.openAction = QAction('Open File')
+        self.openAction.triggered.connect(self.mainWindow.openFile)
+        self.removeAction = QAction('Remove Item')
+        self.limitsAction = QAction('Set Display Limits to Object Extent')
+
+        self.assets = {}
+
+    def selectAssetTab(self, row):
+        self.mainWindow.selectAssetTab(self.item(row))
+
+    def contextMenu(self, point):
+        item = self.itemAt(point)
+
+        menu = QMenu()
+        menu.addAction(self.openAction)
+
+        if item is not None:
+            menu.addAction(self.removeAction)
+            menu.addAction(self.limitsAction)
+
+        action = menu.exec_(QtGui.QCursor.pos())
+
+        if action == self.removeAction:
+            self.removeAsset(item)
+        elif action == self.limitsAction:
+            item.asset.X0
+            item.asset.X1
+            self.mainWindow.display.updateParams({
+                'disp_X0': item.asset.X0,
+                'disp_X1': item.asset.X1,
+            }, callback=True)
+
+    def assetChanged(self, asset):
+        checked = asset.checkState() == Qt.Checked
+
+        # Check if it's fully set up first...
+        if not hasattr(asset, 'prefix'):
+            return
+
+        params = {asset.prefix + "visible": checked}
+
+        # If we are activating a volume, deactivate all others!
+        if asset.isVolume and checked:
+            self.blockSignals(True)
+
+            # Turn off all other volumes, but block signals to prevent this
+            #   from getting called again
+            for asset2 in self.assets.values():
+                if asset.id == asset2.id or (not asset2.isVolume):
+                    continue
+
+                asset2.setCheckState(Qt.Unchecked)
+                params[asset2.prefix + "visible"] = False
+
+            self.blockSignals(False)
+        self.mainWindow.display.updateParams(params)
+
+    def removeAsset(self, item):
+        id = item.id
+        self.mainWindow.display.view.removeAsset(id)
+        self.takeItem(self.indexFromItem(item).row())
+        del self.assets[id]
+        self.mainWindow.display.update()
+
+    def addItem(self, assetItem):
+        self.assets[assetItem.id] = assetItem
+        super().addItem(assetItem)
+        self.setCurrentRow(self.indexFromItem(assetItem).row())
+        assetItem.setCheckState(Qt.Checked)

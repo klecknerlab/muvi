@@ -204,7 +204,7 @@ zero = np.zeros(3, dtype='f')
 one = np.ones(3, dtype='f')
 
 PARAM_CATEGORIES['Asset List'] = [
-    ViewParam('autoupdate_limits', 'Auto-update limits/view', True,
+    ViewParam('_autoupdate_limits', 'Auto-update limits/view', True,
     tooltip="If enabled, the display limits are automatically adjusted when the visible items are toggled."),
 ]
 

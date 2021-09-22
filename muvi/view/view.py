@@ -6,7 +6,8 @@ from .. import open_3D_movie, VolumetricMovie
 import numpy as np
 import sys, os
 # from text_render import TextRenderer
-from .params import PARAMS, MAX_CHANNELS, COLORMAPS, ASSET_DEFAULTS, ASSET_PARAMS
+from .params import PARAMS, MAX_CHANNELS, COLORMAPS, ASSET_DEFAULTS, \
+    ASSET_PARAMS, ALL_ASSET_PARAMS
 import re
 
 SHADER_DIR = os.path.join(os.path.split(__file__)[0], 'shaders')
@@ -46,6 +47,12 @@ CUBE_TRIANGLES = np.array([
     0, 2, 3, 0, 3, 1
 ], dtype='u4')
 
+def copyArray(x):
+    if isinstance(x, (np.ndarray, list, tuple)):
+        return x.copy()
+    else:
+        return x
+
 class ViewAsset:
     def __init__(self, data, id=0, parent=None):
         self.filename = None
@@ -54,6 +61,8 @@ class ViewAsset:
         self.id = id
 
         if isinstance(data, str):
+            self.buildStr = data
+
             bfn, ext = os.path.splitext(data)
             ext = ext.lower()
 
@@ -72,6 +81,7 @@ class ViewAsset:
                         m2 = regex.match(fn)
                         if m2:
                             data[int(m2.group(1))] = os.path.join(dir, fn)
+                    self.buildStr = data[min(data.keys())]
                 else:
                     self.filename = data
                     data = load_mesh(data)
@@ -186,7 +196,7 @@ class ViewAsset:
         elif key == 'frame':
             self.setFrame(val)
         elif key == 'visible':
-            if val and hasattr(self, 'globalUniforms'):
+            if val and (not self.visible) and hasattr(self, 'globalUniforms'):
                 self.parent.update(self.globalUniforms)
             self.visible = val
         else:
@@ -201,12 +211,11 @@ class ViewAsset:
             prefix = f'#{self.id}_'
 
         d = {prefix+'visible':self.visible}
-        d.update({prefix+k:v for k, v in self.uniforms.items()})
+        d.update({prefix+k:copyArray(v) for k, v in self.uniforms.items()})
         if hasattr(self, 'globalUniforms'):
-            d.update({prefix+k:v for k, v in self.globalUniforms.items()})
+            d.update({prefix+k:copyArray(v) for k, v in self.globalUniforms.items()})
 
         return d
-
 
     def setFrame(self, frame):
         if frame == self._frame or self.frameRange is None:
@@ -592,24 +601,32 @@ class View:
         elif buttonsPressed & 2:
             self.moveCamera(-self.viewportHeight() * (R * dx + U * dy))
 
-    def allParams(self):
-        d = {k:v for k, v in self._params.items()
-                if k in PARAMS and k not in ALL_ASSET_PARAMS}
+    def allParams(self, hidden=False):
+        d = {k:copyArray(v) for k, v in self._params.items()
+                if k in PARAMS and k not in ALL_ASSET_PARAMS
+                and (hidden or not k.startswith('_'))}
 
         for asset in self.assets.values():
             d.update(asset.allParams())
 
         return d
 
+    def assetSpec(self):
+        return {id:getattr(asset, 'buildStr', None) for id, asset in self.assets.items()}
+
     #--------------------------------------------------------
     # Adding/removing Data
     #--------------------------------------------------------
 
-    def openData(self, data):
+    def openData(self, data, id=None):
         if self.assets:
-            id = max(self.assets.keys()) + 1
+            if id is None:
+                id = max(self.assets.keys()) + 1
+            elif id in self.assets:
+                self.removeAsset(id)
         else:
-            id = 0
+            if id is None:
+                id = 0
         asset = ViewAsset(data, id, parent=self)
         self.assets[id] = asset
         # self[f'#{id}_visible'] = True # Will automatically trigger resetRange
@@ -674,7 +691,7 @@ class View:
         if frameRange is not None:
             self.updateRange('frame', frameRange[0], frameRange[1])
 
-        if self['autoupdate_limits']:
+        if self['_autoupdate_limits']:
             self.update({
                 # Default limits expanded to nearest *minor* tick
                 "disp_X0": np.floor(X0 / minorTick) * minorTick,

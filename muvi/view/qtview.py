@@ -22,16 +22,17 @@ application.
 import sys, os
 # from PyQt5.QtCore import Qt
 from PyQt5 import QtCore, QtGui
+Qt = QtCore.Qt
 from PyQt5.QtWidgets import QMainWindow, QApplication, QTabWidget, QHBoxLayout, \
     QVBoxLayout, QLabel, QWidget, QScrollArea, QAction, QFrame, QMessageBox, \
-    QFileDialog, QGridLayout, QPushButton, QStyle, QOpenGLWidget, \
-    QListWidget, QSplitter, QListWidgetItem, QMenu
-from .qtview_widgets import paramListToVBox, controlFromParam, ListControl
-from .view import View
+    QFileDialog, QGridLayout, QPushButton, QStyle, \
+    QSplitter, QMenu
+from .qt_script import KeyframeList
+from .qtview_widgets import paramListToVBox, controlFromParam, ListControl, \
+    IntControl, ViewWidget, AssetList, AssetItem
 import numpy as np
 import time
 import traceback
-Qt = QtCore.Qt
 import glob
 from PIL import Image
 
@@ -82,59 +83,62 @@ class ExportWindow(QWidget):
         self.image = QLabel()
         self.vbox.addWidget(self.image)
 
-        self.settings = QGridLayout()
-        self.vbox.addLayout(self.settings)
-
         self.exportButton = QPushButton("Export Current Frame")
         self.exportButton.clicked.connect(self.saveFrame)
-        self.settings.addWidget(self.exportButton, 2, 2, 1, 2)
 
         self.previewButton = QPushButton("Preview Current Frame")
         self.previewButton.clicked.connect(self.previewFrame)
-        self.settings.addWidget(self.previewButton, 2, 4, 1, 2)
 
-        halign = QHBoxLayout()
+        self.folderControl = QHBoxLayout()
         self.folderLabel = QLabel(os.getcwd())
         self.folderButton = QPushButton()
         self.folderButton.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
         self.folderButton.clicked.connect(self.selectExportFolder)
-        halign.addWidget(self.folderButton, 0)
-        self.settings.addLayout(halign, 3, 1, 1, 6)
-        halign.addWidget(self.folderLabel, 1)
+        self.folderControl.addWidget(self.folderButton, 0)
+        self.folderControl.addWidget(self.folderLabel, 1)
 
         self.fileLabel = QLabel("")
         self.fileLabel.setFixedWidth(512)
-        self.settings.addWidget(self.fileLabel, 4, 1, 1, 6)
 
         self.ss_sizes = [512, 640, 720, 768, 1024, 1080, 1280, 1920,
-            2048, 2160, 3072, 3240, 3840, 4096, 4320, 5760, 6144, 7680, 8192]
+            2048, 2160, 3072, 3240, 3840, 4096]
         self.widthControl = ListControl('Width:', 1920, self.ss_sizes, param='os_width')
         self.heightControl = ListControl('Height:', 1080, self.ss_sizes, param='os_height')
+        self.oversampleControl = IntControl('Oversample', 1, 1, 3, step=1, param='os_oversample',
+            tooltip='If > 1, render at a higher resolution and then downsample.\bThis will make export (much) slower, but is useful for publication-quality images.')
 
         def print_param(p, v):
             print(f'{p}: {v}')
         self.widthControl.paramChanged.connect(self.updateBuffer)
         self.heightControl.paramChanged.connect(self.updateBuffer)
+        self.oversampleControl.paramChanged.connect(self.updateBuffer)
 
         self.scaleControl = ListControl('Scale Height:', 1080, self.ss_sizes, param='scaling_height',
             tooltip='Effective screen height to use for axis scaling.  Used to prevent super thin lines and tiny text for high resolutions!')
         self.scaleHeight = self.scaleControl.value()
         self.scaleControl.paramChanged.connect(self.updatescaleHeight)
 
-        self.settings.setColumnStretch(0, 1)
-        self.settings.setColumnStretch(7, 1)
-        self.settings.addWidget(self.widthControl, 0, 1, 1, 2)
-        self.settings.addWidget(self.heightControl, 0, 3, 1, 2)
-        self.settings.addWidget(self.scaleControl, 0, 5, 1, 2)
 
+        self.settings = QGridLayout()
+        self.vbox.addLayout(self.settings)
+        self.settings.setColumnStretch(0, 1)
+        self.settings.setColumnStretch(5, 1)
+        self.settings.addWidget(self.widthControl,      0, 1, 1, 2)
+        self.settings.addWidget(self.heightControl,     1, 1, 1, 2)
+        self.settings.addWidget(self.scaleControl,      0, 3, 1, 2)
+        self.settings.addWidget(self.oversampleControl, 1, 3, 1, 2)
+        self.settings.addWidget(self.exportButton,      3, 1, 1, 2)
+        self.settings.addWidget(self.previewButton,     3, 3, 1, 2)
+        self.settings.addLayout(self.folderControl,     4, 1, 1, 4)
+        self.settings.addWidget(self.fileLabel,         5, 1, 1, 4)
 
         for i, (label, w, h) in enumerate([
                     ('720p', 1280, 720),
                     ('1080p', 1920, 1080),
                     ('1440p', 2560, 1440),
                     ('2160p (4K)', 3840, 2160),
-                    ('3240p (6K)', 5760, 3240),
-                    ('4320p (8K)', 7680, 4320,)
+                    # ('3240p (6K)', 5760, 3240),
+                    # ('4320p (8K)', 7680, 4320,)
                 ]):
             button = QPushButton(label)
 
@@ -143,19 +147,23 @@ class ExportWindow(QWidget):
                 self.heightControl.setValue(h)
 
             button.clicked.connect(cr)
-            self.settings.addWidget(button, 1, i+1)
+            j = i+1
+            # if j >= 3:
+                # j += 1
+            self.settings.addWidget(button, 2, j)
 
     def updatescaleHeight(self, key, val):
         self.scaleHeight = val
 
     def updateBuffer(self, key=None, val=None):
         width, height = self.widthControl.value(), self.heightControl.value()
+        oversample = self.oversampleControl.value()
 
         self.parent.display.makeCurrent()
         if not hasattr(self, 'bufferId'):
-            self.bufferId = self.parent.display.view.addBuffer(width, height)
+            self.bufferId = self.parent.display.view.addBuffer(width * oversample, height * oversample)
         else:
-            self.parent.display.view.resizeBuffer(self.bufferId, width, height)
+            self.parent.display.view.resizeBuffer(self.bufferId, width * oversample, height * oversample)
         self.parent.display.doneCurrent()
 
     def closeEvent(self, e):
@@ -169,7 +177,15 @@ class ExportWindow(QWidget):
         if not hasattr(self, 'bufferId'):
             self.updateBuffer()
 
-        return self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
+        img = self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
+        img = Image.fromarray(img[::-1])
+
+        oversample = self.oversampleControl.value()
+        if oversample > 1:
+            w, h = img.size
+            img = img.resize((w//oversample, h//oversample), Image.LANCZOS)
+
+        return img
 
     def saveFrame(self, event=None):
         dir = self.folderLabel.text()
@@ -180,7 +196,7 @@ class ExportWindow(QWidget):
                 break
 
         img = self.renderImage()
-        Image.fromarray(img[::-1]).save(os.path.join(dir, fn))
+        img.save(os.path.join(dir, fn))
 
         self.updatePreview(img)
         self.fileLabel.setText(f'Saved to: {os.path.split(fn)[1]}')
@@ -189,233 +205,12 @@ class ExportWindow(QWidget):
         self.updatePreview(self.renderImage())
 
     def updatePreview(self, img):
-        img = QtGui.QImage(np.require(img[::-1, :, :3], np.uint8, 'C'),
-            img.shape[1], img.shape[0], QtGui.QImage.Format_RGB888)
+        img = QtGui.QImage(img.tobytes("raw", "RGB"), img.size[0], img.size[1],
+            QtGui.QImage.Format_RGB888)
+        # img = QtGui.QImage(np.require(img[::-1, :, :3], np.uint8, 'C'),
+        #     img.shape[1], img.shape[0], QtGui.QImage.Format_RGB888)
         self.image.setPixmap(QtGui.QPixmap(img).scaledToWidth(1024))
 
-
-
-
-class GLWidget(QOpenGLWidget):
-    frameChanged = QtCore.pyqtSignal(int)
-
-    def __init__(self, parent):
-        self.parent = parent
-
-        fmt = QtGui.QSurfaceFormat()
-        fmt.setProfile(QtGui.QSurfaceFormat.CoreProfile)
-        fmt.setSwapInterval(1)
-        fmt.setVersion(3, 3)
-        QtGui.QSurfaceFormat.setDefaultFormat(fmt)
-
-        super().__init__(parent)
-        self.setMinimumSize(640, 480)
-        self.dpr = 1
-        self.view = View(getattr(parent, "valueCallback", None),
-                         getattr(parent, "rangeCallback", None))
-        self.view['fontSize'] = self.font().pointSize() / 72 * self.physicalDpiX() * 1.2
-
-        self.timer = QtCore.QTimer()
-        self.timer.setInterval(5)
-        self.timer.timeout.connect(self.update)
-
-        self._isPlaying = False
-        self.hasUpdate = True
-
-    def updateParam(self, k, v):
-        self.view[k] = v
-        self.hasUpdate = True
-        self.update()
-
-    def updateParams(self, params):
-        self.view.update(params)
-        self.hasUpdate = True
-        self.update()
-
-    def paintGL(self):
-        try:
-            if self._isPlaying and self.view.frameRange is not None:
-                t = time.time()
-                fps = self.view['framerate']
-                advance = int((t - self._tStart) * fps)
-                if advance:
-                    frame = (self.view['frame'] + advance) % self.view.frameRange[1]
-                    self.view['frame'] = frame
-                    self._tStart += advance / fps
-                    self.frameChanged.emit(frame)
-
-            if self.hasUpdate:
-                self.view.draw(0, True)
-
-        except:
-            traceback.print_exc()
-            self.parent.close()
-
-    def offscreenRender(self, bufferId, scaleHeight=None):
-        self.makeCurrent()
-        self.view.draw(bufferId, scaleHeight=scaleHeight)
-        img = np.array(self.view.buffers[bufferId].texture)
-        self.doneCurrent()
-        return img
-
-    def resizeGL(self, width, height):
-        self.width, self.height = width * self.dpr, height * self.dpr
-        self.view.resizeBuffer(0, self.width, self.height)
-        self.hasUpdate = True
-        self.update()
-
-    def initializeGL(self):
-        # print(f'GL Version: {GL.glGetString(GL.GL_VERSION)}')
-        # print(f'GLSL Version: {GL.glGetString(GL.GL_SHADING_LANGUAGE_VERSION)}')
-        self.dpr = self.devicePixelRatio()
-        self.view.setup(self.width() * self.dpr, self.height() * self.dpr)
-        self.view['display_scaling'] = self.dpr
-
-    def close(self):
-        self.view.cleanup()
-
-    def mousePressEvent(self, event):
-        self.lastPos = event.pos()
-        self.update()
-
-    def mouseReleaseEvent(self, event):
-        self.lastPos = event.pos()
-        self.update()
-
-    def mouseMoveEvent(self, event):
-        x = event.x()
-        y = event.y()
-        dx = x - self.lastPos.x()
-        dy = y - self.lastPos.y()
-        self.lastPos = event.pos()
-        buttonsPressed = int(event.buttons())
-
-        if dx or dy:
-            self.view.mouseMove(x*self.dpr, y*self.dpr, dx*self.dpr, dy*self.dpr, buttonsPressed)
-            self.hasUpdate = True
-            self.update()
-
-    def wheelEvent(self, event):
-        self.view.zoomCamera(1.25**(event.angleDelta().y()/120))
-        self.hasUpdate = True
-        self.update()
-
-    def setPlaying(self, isPlaying):
-        if isPlaying:
-            self.play()
-        else:
-            self.pause()
-
-    def play(self):
-        if self.view.frameRange is not None:
-            self._isPlaying = True
-            self._tStart = time.time()
-            self.timer.start()
-
-    def pause(self):
-        self._isPlaying = False
-        self.timer.stop()
-
-    def resetView(self):
-        self.view.resetView()
-        self.update()
-
-
-class AssetItem(QListWidgetItem):
-    def __init__(self, asset, mainWindow, parent=None):
-        super().__init__(asset.label, parent)
-        self.id = asset.id
-        self.isVolume = asset.isVolume
-        self.setFlags(self.flags() | Qt.ItemIsUserCheckable ) #
-        self.prefix = f'#{self.id}_'
-        self.setCheckState(Qt.Checked if asset.visible else Qt.Unchecked)
-        self.setToolTip('\n'.join(asset.info))
-        self.asset = asset
-
-        self.tab = mainWindow.buildParamTab(asset.paramList(), prefix=self.prefix, defaults=asset.allParams())
-        self.label = asset.shader.capitalize()
-
-
-class AssetList(QListWidget):
-    def __init__(self, mainWindow):
-        super().__init__(mainWindow)
-        self.mainWindow = mainWindow
-
-        self.currentRowChanged.connect(self.selectAssetTab)
-        self.itemChanged.connect(self.assetChanged)
-
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.contextMenu)
-
-        self.openAction = QAction('Open File')
-        self.openAction.triggered.connect(self.mainWindow.openFile)
-        self.removeAction = QAction('Remove Item')
-        self.limitsAction = QAction('Set Display Limits to Object Extent')
-
-        self.assets = {}
-
-    def selectAssetTab(self, row):
-        self.mainWindow.selectAssetTab(self.item(row))
-
-    def contextMenu(self, point):
-        item = self.itemAt(point)
-
-        menu = QMenu()
-        menu.addAction(self.openAction)
-
-        if item is not None:
-            menu.addAction(self.removeAction)
-            menu.addAction(self.limitsAction)
-
-        action = menu.exec_(QtGui.QCursor.pos())
-
-        if action == self.removeAction:
-            self.removeAsset(item)
-        elif action == self.limitsAction:
-            item.asset.X0
-            item.asset.X1
-            self.mainWindow.display.updateParams({
-                'disp_X0': item.asset.X0,
-                'disp_X1': item.asset.X1,
-            })
-
-    def assetChanged(self, asset):
-        checked = asset.checkState() == Qt.Checked
-
-        # Check if it's fully set up first...
-        if not hasattr(asset, 'prefix'):
-            return
-
-        params = {asset.prefix + "visible": checked}
-
-        # If we are activating a volume, deactivate all others!
-        if asset.isVolume and checked:
-            self.blockSignals(True)
-
-            # Turn off all other volumes, but block signals to prevent this
-            #   from getting called again
-            for asset2 in self.assets.values():
-                if asset.id == asset2.id or (not asset2.isVolume):
-                    continue
-
-                asset2.setCheckState(Qt.Unchecked)
-                params[asset2.prefix + "visible"] = False
-
-            self.blockSignals(False)
-        self.mainWindow.display.updateParams(params)
-
-    def removeAsset(self, item):
-        id = item.id
-        self.mainWindow.display.view.removeAsset(id)
-        self.takeItem(self.indexFromItem(item).row())
-        del self.assets[id]
-        self.mainWindow.display.update()
-
-    def addItem(self, assetItem):
-        self.assets[assetItem.id] = assetItem
-        super().addItem(assetItem)
-        self.setCurrentRow(self.indexFromItem(assetItem).row())
-        assetItem.setCheckState(Qt.Checked)
 
 
 class VolumetricViewer(QMainWindow):
@@ -427,8 +222,18 @@ class VolumetricViewer(QMainWindow):
         self.vbox = QVBoxLayout()
         self.vbox.setContentsMargins(0, 0, 0, 0)
 
+        self.keyframeVBox = QVBoxLayout()
+        self.keyframeVBox.setContentsMargins(5, 5, 5, 5)
+        self.keyframeList = KeyframeList(self)
+        self.keyframeVBox.addWidget(self.keyframeList)
+        self.keyframeEditor = QWidget()
+        self.keyframeEditor.setLayout(self.keyframeVBox)
+        self.keyframeEditor.setFixedWidth(PARAM_WIDTH)
+        self.keyframeEditor.setVisible(False)
+
         self.hbox = QHBoxLayout()
-        self.display = GLWidget(parent=self)
+        self.display = ViewWidget(parent=self)
+        self.hbox.addWidget(self.keyframeEditor)
         self.hbox.addWidget(self.display, 1)
         self.hbox.setContentsMargins(0, 0, 0, 0)
         self.hbox.setSpacing(0)
@@ -517,12 +322,22 @@ class VolumetricViewer(QMainWindow):
             'Quit the viewer.')
         self.addMenuItem(self.fileMenu, '&Open Data',
             self.openFile, 'Ctrl+O')
+        self.addMenuItem(self.fileMenu, '&Save Script File',
+            self.keyframeList.saveScript, 'Ctrl+S')
+
+        self.editMenu = menu.addMenu("Edit")
+        self.addMenuItem(self.editMenu, 'Insert &Keyframe',
+            self.addKeyframe, "k")
 
         self.viewMenu = menu.addMenu("View")
 
         self.showSettings = self.addMenuItem(self.viewMenu,
             'Hide View Settings', self.toggleSettings, 'Ctrl+/',
             'Show or hide settings option on right side of main window')
+
+        self.showKeyframeEditor = self.addMenuItem(self.viewMenu,
+            'Hide Keyframe List', self.toggleKeyframe, 'Ctrl+K',
+            'Show or hide keyframe list on right side of main window')
 
         self.save_image = self.addMenuItem(self.viewMenu,
             'Save Screenshot', self.exportWindow.saveFrame, 's',
@@ -547,6 +362,16 @@ class VolumetricViewer(QMainWindow):
 
         self.setAcceptDrops(True)
         self.show()
+
+    def addKeyframe(self):
+        self.keyframeList.addKeyframe()
+        self.toggleKeyframe(show = True)
+
+    # def createScript(self):
+    #     fn, ext = QFileDialog.getSaveFileName(self, 'Create MUVI Script File', os.getcwd(), "MUVI script (*.muvi_script)")
+    #
+    #     # with open(fn, 'wt') as f:
+    #     #     pass
 
     def valueCallback(self, param, value):
         control = self.paramControls.get(param, None)
@@ -650,6 +475,17 @@ class VolumetricViewer(QMainWindow):
             self.splitter.setVisible(True)
             self.showSettings.setText('Hide View Settings')
 
+    def toggleKeyframe(self, event=None, show=None):
+        if show is None:
+            show = not self.keyframeEditor.isVisible()
+        if show:
+            self.keyframeEditor.setVisible(True)
+            self.showKeyframeEditor.setText('Hide Keyframe List')
+        else:
+            self.keyframeEditor.setVisible(False)
+            self.showKeyframeEditor.setText('Show Keyframe List')
+
+
     def toggleExport(self):
         if self.exportWindow.isVisible():
             self.exportWindow.hide()
@@ -657,6 +493,14 @@ class VolumetricViewer(QMainWindow):
         else:
             self.exportWindow.show()
             self.showExport.setText('Hide Export Window')
+
+    def getExportSettings(self):
+        return {
+            "width": self.exportWindow.widthControl.value(),
+            "height": self.exportWindow.heightControl.value(),
+            "oversample": self.exportWindow.oversampleControl.value(),
+            "scale_height": self.exportWindow.scaleControl.value(),
+        }
 
     def closeEvent(self, event):
         # Prevents an error message by controlling deallocation order!
@@ -703,12 +547,7 @@ class VolumetricViewer(QMainWindow):
 
     def allParams(self):
         d = self.display.view.allParams()
-        for k, v in d.items():
-            print(f'{k:>20s}: {v}')
-
-        print(f'\nTotal bytes: {sum(sys.getsizeof(v) for v in d.values()) + sys.getsizeof(d)}')
-
-
+        return d
 
 
 def generateDarkPalette():
