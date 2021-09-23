@@ -25,12 +25,10 @@ from PyQt5 import QtCore, QtGui
 Qt = QtCore.Qt
 from PyQt5.QtWidgets import QMainWindow, QApplication, QTabWidget, QHBoxLayout, \
     QVBoxLayout, QLabel, QWidget, QScrollArea, QAction, QFrame, QMessageBox, \
-    QFileDialog, QGridLayout, QPushButton, QStyle, \
-    QSplitter, QMenu
-from .qt_script import KeyframeList
+    QFileDialog, QGridLayout, QPushButton, QStyle, QSplitter, QMenu
+from .qt_script import KeyframeEditor
 from .qtview_widgets import paramListToVBox, controlFromParam, ListControl, \
-    IntControl, ViewWidget, AssetList, AssetItem
-import numpy as np
+    IntControl, ViewWidget, AssetList, AssetItem, generateDarkPalette
 import time
 import traceback
 import glob
@@ -43,16 +41,19 @@ ORG_NAME = "MUVI Lab"
 APP_NAME = "MUVI Volumetric Movie Viewer"
 ICON_DIR = os.path.split(__file__)[0]
 
+PARAM_WIDTH = 250
+SCROLL_WIDTH = 15
+LOGICAL_DPI_BASELINE = None
+UI_EXTRA_SCALING = 1.0
 
 if sys.platform == 'win32':
     # On Windows, it appears to need a bit more width to display text
-    PARAM_WIDTH = 250
-    SCROLL_WIDTH = 15
-elif sys.platform == 'darwin':
-    # Good default for OS X
-    PARAM_WIDTH = 250
-    SCROLL_WIDTH = 15
+    # We need to play some games to get the icon to show up correctly!
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("MuviLab.Viewer")
+    LOGICAL_DPI_BASELINE = 96 #Used to correct fractional scaling, which does not show up in DPR!
 
+elif sys.platform == 'darwin':
     # Python 3: pip3 install pyobjc-framework-Cocoa
     try:
         from Foundation import NSBundle
@@ -65,10 +66,8 @@ elif sys.platform == 'darwin':
                 # print(app_info)
     except ImportError:
         raise ImportError('pyobjc-framework-Cocoa not installed (OS X only) -- run "pip3 install pyobjc-framework-Cocoa" or "conda install pyobjc-framework-Cocoa" first')
-else:
-    # Fallback -- if anyone ever uses this on Linux let me know what looks good!
-    PARAM_WIDTH = 250
-    SCROLL_WIDTH = 15
+
+    # OS X always does integer high DPI scaling, so no need to check logical DPI
 
 
 class ExportWindow(QWidget):
@@ -222,17 +221,12 @@ class VolumetricViewer(QMainWindow):
         self.vbox = QVBoxLayout()
         self.vbox.setContentsMargins(0, 0, 0, 0)
 
-        self.keyframeVBox = QVBoxLayout()
-        self.keyframeVBox.setContentsMargins(5, 5, 5, 5)
-        self.keyframeList = KeyframeList(self)
-        self.keyframeVBox.addWidget(self.keyframeList)
-        self.keyframeEditor = QWidget()
-        self.keyframeEditor.setLayout(self.keyframeVBox)
+        self.keyframeEditor = KeyframeEditor(self)
         self.keyframeEditor.setFixedWidth(PARAM_WIDTH)
         self.keyframeEditor.setVisible(False)
 
         self.hbox = QHBoxLayout()
-        self.display = ViewWidget(parent=self)
+        self.display = ViewWidget(parent=self, uiScale=UI_EXTRA_SCALING)
         self.hbox.addWidget(self.keyframeEditor)
         self.hbox.addWidget(self.display, 1)
         self.hbox.setContentsMargins(0, 0, 0, 0)
@@ -323,7 +317,7 @@ class VolumetricViewer(QMainWindow):
         self.addMenuItem(self.fileMenu, '&Open Data',
             self.openFile, 'Ctrl+O')
         self.addMenuItem(self.fileMenu, '&Save Script File',
-            self.keyframeList.saveScript, 'Ctrl+S')
+            self.keyframeEditor.saveScript, 'Ctrl+S')
 
         self.editMenu = menu.addMenu("Edit")
         self.addMenuItem(self.editMenu, 'Insert &Keyframe',
@@ -347,6 +341,9 @@ class VolumetricViewer(QMainWindow):
             'Show Export Window', self.toggleExport, 'Ctrl+E',
             'Show or hide the export window, used to take screenshots or make movies')
 
+        self.addMenuItem(self.viewMenu, 'Match Aspect Ratio to Export', self.matchAspect, "Ctrl+A",
+            tooltip="Adjust aspect ratio of main display to match export size; useful for previewing movies!")
+
         for i in range(3):
             axis = chr(ord('X') + i)
 
@@ -364,7 +361,7 @@ class VolumetricViewer(QMainWindow):
         self.show()
 
     def addKeyframe(self):
-        self.keyframeList.addKeyframe()
+        self.keyframeEditor.addKeyframe()
         self.toggleKeyframe(show = True)
 
     # def createScript(self):
@@ -452,6 +449,15 @@ class VolumetricViewer(QMainWindow):
 
     def addParamCategory(self, cat, vbox, prefix="", defaults={}):
         self.addParams(PARAM_CATEGORIES[cat], vbox, prefix="", defaults=defaults)
+
+    def matchAspect(self, event=None):
+        size = self.display.size()
+        w, h = size.width(), size.height()
+        we = self.exportWindow.widthControl.value()
+        he = self.exportWindow.heightControl.value()
+        newWidth = (we * h) // he
+        self.display.resize(newWidth, w)
+        self.update()
 
     def selectAssetTab(self, asset):
         if asset is None:
@@ -550,36 +556,12 @@ class VolumetricViewer(QMainWindow):
         return d
 
 
-def generateDarkPalette():
-    c = QtGui.QColor
 
-    palette = QtGui.QPalette()
-    palette.setColor(palette.Window,            c( 53,  53,  53))
-    palette.setColor(palette.WindowText,        c(255, 255, 255))
-    palette.setColor(palette.Text,              c(255, 255, 255))
-    palette.setColor(palette.HighlightedText,   c(255, 255, 255))
-    palette.setColor(palette.ButtonText,        c(255, 255, 255))
-    palette.setColor(palette.ToolTipBase,       c(  0,   0,   0))
-    palette.setColor(palette.ToolTipText,       c(255, 255, 255))
-    palette.setColor(palette.Light,             c(100, 100, 100))
-    palette.setColor(palette.Button,            c(70,   70,  70))
-    palette.setColor(palette.Dark,              c( 20, 20,  20))
-    palette.setColor(palette.Shadow,            c( 0,  0,  0))
-    palette.setColor(palette.Base,              c( 30,  30,  30))
-    palette.setColor(palette.AlternateBase,     c( 66,  66,  66))
-    palette.setColor(palette.Highlight,         c( 42, 130, 218))
-    palette.setColor(palette.BrightText,        c(255,   0,   0))
-    palette.setColor(palette.Link,              c( 42, 130, 218))
-    palette.setColor(palette.Highlight,         c( 42, 130, 218))
-    palette.setColor(palette.Disabled, palette.WindowText,      c(127, 127, 127))
-    palette.setColor(palette.Disabled, palette.Text,            c(127, 127, 127))
-    palette.setColor(palette.Disabled, palette.ButtonText,      c(127, 127, 127))
-    palette.setColor(palette.Disabled, palette.HighlightedText, c(127, 127, 127))
-
-    return palette
 
 
 def view_volume(vol=None, args=None, window_name=None):
+    global PARAM_WIDTH, SCROLL_WIDTH, UI_EXTRA_SCALING
+
     if window_name is None:
         window_name = APP_NAME
 
@@ -587,18 +569,22 @@ def view_volume(vol=None, args=None, window_name=None):
         args = sys.argv
 
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(args)
 
-    # start = time.time()
-    # QtGui.QFontDatabase.addApplicationFont(os.path.join(os.path.split(__file__)[0], "fonts/Inter-Regular.ttf"))
-    # print(time.time() - start)
+    if LOGICAL_DPI_BASELINE is not None:
+        # This is used to fix fractional scaling in Windows, which does
+        #   not show up as a devicePixelRatio!
+        UI_EXTRA_SCALING = QWidget().logicalDpiX() / LOGICAL_DPI_BASELINE
+        PARAM_WIDTH = int(PARAM_WIDTH * UI_EXTRA_SCALING)
+        SCROLL_WIDTH = int(SCROLL_WIDTH * UI_EXTRA_SCALING)
 
     app.setStyle('Fusion')
     app.setPalette(generateDarkPalette())
     app.setStyleSheet(f'''
         QWidget {{
-            font-size: 12px;
+            font-size: {int(12 * UI_EXTRA_SCALING)}px;
         }}
 
         QLabel, QSlider, QSpinBox, QDoubleSpinBox, QCheckBox {{

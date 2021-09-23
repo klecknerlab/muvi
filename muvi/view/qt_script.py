@@ -1,6 +1,6 @@
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QAction, QMenu, \
-    QFileDialog
+    QFileDialog, QVBoxLayout, QWidget
 import os
 Qt = QtCore.Qt
 import ast
@@ -37,44 +37,21 @@ class Keyframe(QListWidgetItem):
         self.setFlags(self.flags() | Qt.ItemIsEditable | Qt.ItemIsDragEnabled)
 
 
-class KeyframeList(QListWidget):
+class KeyframeEditor(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.mainWindow = parent
-        self.setDragDropMode(self.InternalMove)
 
-        # self.currentRowChanged.connect(self.testPrint)
-
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.contextMenu)
-
-        self.addOption = QAction('New Keyframe (from current view)')
-        self.addOption.triggered.connect(self.addKeyframe)
-
-        self.showOption = QAction('Show')
-
-
-    def testPrint(self, row):
-        print(self.item(row).data(Qt.UserRole))
-
-    def contextMenu(self, point):
-        item = self.itemAt(point)
-
-        menu = QMenu()
-        menu.addAction(self.addOption)
-
-        if item is not None:
-            menu.addAction(self.showOption)
-
-        action = menu.exec_(QtGui.QCursor.pos())
-
-        if action == self.showOption:
-            self.mainWindow.display.updateParams(item.data(Qt.UserRole), callback=True)
+        self.vbox = QVBoxLayout()
+        self.vbox.setContentsMargins(5, 5, 5, 5)
+        self.keyframeList = KeyframeList(self)
+        self.vbox.addWidget(self.keyframeList)
+        self.setLayout(self.vbox)
 
     def addKeyframe(self, event=None, data=None, label=None):
         if data is None:
             data = self.mainWindow.allParams()
-        Keyframe(data, label, self)
+        Keyframe(data, label, self.keyframeList)
 
     def saveScript(self, event=None, fn=None):
         if fn is None:
@@ -83,8 +60,8 @@ class KeyframeList(QListWidget):
 
         last = None
         frames = []
-        for row in range(self.count()):
-            item = self.item(row)
+        for row in range(self.keyframeList.count()):
+            item = self.keyframeList.item(row)
             params = {
                 '_label':item.text(),
             }
@@ -113,3 +90,31 @@ class KeyframeList(QListWidget):
             f.write(re.sub('"!@<@!(.*)!@>@!"', lambda m: m.group(1),
                 json.dumps(data, indent=2, cls=JSONEncoder))
             )
+
+class KeyframeList(QListWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.setDragDropMode(self.InternalMove)
+
+        # self.currentRowChanged.connect(self.testPrint)
+
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.contextMenu)
+        self.addOption = QAction('New Keyframe (from current view)')
+        self.addOption.triggered.connect(self.parent.addKeyframe)
+        self.showOption = QAction('Show')
+
+    def contextMenu(self, point):
+        item = self.itemAt(point)
+
+        menu = QMenu()
+        menu.addAction(self.addOption)
+
+        if item is not None:
+            menu.addAction(self.showOption)
+
+        action = menu.exec_(QtGui.QCursor.pos())
+
+        if action == self.showOption:
+            self.parent.mainWindow.display.updateParams(item.data(Qt.UserRole), callback=True)

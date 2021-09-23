@@ -650,8 +650,9 @@ def paramListToVBox(params, vbox, view=None, prefix="", defaults={}):
 
 
 class StaticViewWidget(QOpenGLWidget):
-    def __init__(self, parent):
+    def __init__(self, parent, uiScale=1.0):
         self.parent = parent
+        self.uiScale = uiScale
 
         fmt = QtGui.QSurfaceFormat()
         fmt.setProfile(QtGui.QSurfaceFormat.CoreProfile)
@@ -664,7 +665,8 @@ class StaticViewWidget(QOpenGLWidget):
         self.dpr = 1
         self.view = View(getattr(parent, "valueCallback", None),
                          getattr(parent, "rangeCallback", None))
-        self.view['fontSize'] = self.font().pointSize() / 72 * self.physicalDpiX() * 1.2
+        # self.view['fontSize'] = self.font().pointSize()
+        # print(self.font().pointSize())
 
     def updateParam(self, k, v, callback=False):
         self.view.__setitem__(k, v, callback=callback)
@@ -713,7 +715,7 @@ class StaticViewWidget(QOpenGLWidget):
         # print(f'GLSL Version: {GL.glGetString(GL.GL_SHADING_LANGUAGE_VERSION)}')
         self.dpr = self.devicePixelRatio()
         self.view.setup(self.width() * self.dpr, self.height() * self.dpr)
-        self.view['display_scaling'] = self.dpr
+        self.view['display_scaling'] = self.dpr * self.uiScale
 
     def close(self):
         self.view.cleanup()
@@ -726,8 +728,8 @@ class StaticViewWidget(QOpenGLWidget):
 class ViewWidget(StaticViewWidget):
     frameChanged = QtCore.pyqtSignal(int)
 
-    def __init__(self, parent):
-        super().__init__(parent)
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
 
         self.timer = QtCore.QTimer()
         self.timer.setInterval(5)
@@ -878,3 +880,33 @@ class AssetList(QListWidget):
         super().addItem(assetItem)
         self.setCurrentRow(self.indexFromItem(assetItem).row())
         assetItem.setCheckState(Qt.Checked)
+
+
+
+def generateDarkPalette():
+    c = QtGui.QColor
+
+    palette = QtGui.QPalette()
+    palette.setColor(palette.Window,            c( 53,  53,  53))
+    palette.setColor(palette.WindowText,        c(255, 255, 255))
+    palette.setColor(palette.Text,              c(255, 255, 255))
+    palette.setColor(palette.HighlightedText,   c(255, 255, 255))
+    palette.setColor(palette.ButtonText,        c(255, 255, 255))
+    palette.setColor(palette.ToolTipBase,       c(  0,   0,   0))
+    palette.setColor(palette.ToolTipText,       c(255, 255, 255))
+    palette.setColor(palette.Light,             c(100, 100, 100))
+    palette.setColor(palette.Button,            c(70,   70,  70))
+    palette.setColor(palette.Dark,              c( 20, 20,  20))
+    palette.setColor(palette.Shadow,            c( 0,  0,  0))
+    palette.setColor(palette.Base,              c( 30,  30,  30))
+    palette.setColor(palette.AlternateBase,     c( 66,  66,  66))
+    palette.setColor(palette.Highlight,         c( 42, 130, 218))
+    palette.setColor(palette.BrightText,        c(255,   0,   0))
+    palette.setColor(palette.Link,              c( 42, 130, 218))
+    palette.setColor(palette.Highlight,         c( 42, 130, 218))
+    palette.setColor(palette.Disabled, palette.WindowText,      c(127, 127, 127))
+    palette.setColor(palette.Disabled, palette.Text,            c(127, 127, 127))
+    palette.setColor(palette.Disabled, palette.ButtonText,      c(127, 127, 127))
+    palette.setColor(palette.Disabled, palette.HighlightedText, c(127, 127, 127))
+
+    return palette
