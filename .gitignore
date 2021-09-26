@@ -13,7 +13,10 @@ util/*.vti
 
 # Example data
 examples/*.vti
+examples/*.ply
+examples/*.muvi_script
 examples/*/*
+
 
 # C extensions
 *.so

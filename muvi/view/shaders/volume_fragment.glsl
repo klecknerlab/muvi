@@ -27,10 +27,10 @@ uniform vec3 look_at;
 uniform sampler3D volumeTextureId;
 uniform sampler2DRect depthTexture;
 
-uniform vec3 vol_L = vec3(100.0);
+uniform vec3 _vol_L = vec3(100.0);
 uniform vec3 disp_X0;
 uniform vec3 disp_X1;
-uniform vec3 vol_N = vec3(100.0);
+uniform vec3 _vol_N = vec3(100.0);
 
 uniform float vol_exposure1 = 0.0;
 uniform float vol_exposure2 = 0.0;
@@ -116,8 +116,8 @@ void main()
     }
 
     vec3 delta = Xb - Xf;
-    vec3 clip0 = max(-0.5*vol_L, disp_X0);
-    vec3 clip1 = min(0.5*vol_L, disp_X1);
+    vec3 clip0 = max(-0.5*_vol_L, disp_X0);
+    vec3 clip1 = min(0.5*_vol_L, disp_X1);
 
     float d0 = 0;
     float d1 = length(delta);
@@ -187,12 +187,12 @@ void main()
     }
 
     // Find the location of the segment ends in texture space
-    vec3 U0 = (Xf + d0 * N) / vol_L + 0.5;
-    vec3 U1 = (Xf + d1 * N) / vol_L + 0.5;
+    vec3 U0 = (Xf + d0 * N) / _vol_L + 0.5;
+    vec3 U1 = (Xf + d1 * N) / _vol_L + 0.5;
     delta = U1 - U0;
 
     // Length of the ray in voxels
-    float Lv = length(delta * vol_N);
+    float Lv = length(delta * _vol_N);
     delta *= vol_step_size / Lv;
 
     // Round up the number of steps... sort of.  If needed, the last step can
@@ -232,7 +232,7 @@ void main()
 
     // Check to make sure that our ray makes sense; if not abort to
     //    avoid ending up in a super long loop.
-    if (Lv < 1.1*length(vol_N)) {
+    if (Lv < 1.1*length(_vol_N)) {
         for (int i = num_steps; i > 0; i --) {
             // Since the last step is a little differently sized, adjust
             //    the opacity accordingly.
@@ -295,14 +295,14 @@ void main()
                     mat3 mg = distortion_map_gradient(U);
                     mat3 gradient;
 
-                    vec3 X = U * vol_L;
+                    vec3 X = U * _vol_L;
 
                     // Derivative in each direction is a 2-point stencil
                     // Do all colors at once.
                     // Note: since we will normalize the gradient, we can ignore
                     // vol_exposure, gamma, etc.
                     for (int j = 0; j < 3; j++) {
-                        mg[j] /= vol_N;
+                        mg[j] /= _vol_N;
                         // mg[j] *= 0.5;
                         gradient[j] = texture(volumeTextureId, Uc + mg[j]).<<COLOR_REMAP>> -
                             texture(volumeTextureId, Uc - mg[j]).<<COLOR_REMAP>>;

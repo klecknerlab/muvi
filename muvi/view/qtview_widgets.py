@@ -366,6 +366,8 @@ class OptionsControl(ParamControl):
         else:
             self.comboBox.setCurrentIndex(self.option_values.index(value))
 
+    def value(self):
+        return self.option_values[self.comboBox.currentIndex()]
 
 def fromQColor(qc, has_alpha):
     if has_alpha:
@@ -679,6 +681,9 @@ class StaticViewWidget(QOpenGLWidget):
         self.update()
 
     def paintGL(self):
+        if not getattr(self, "_enabled", True):
+            return
+
         try:
             if self._isPlaying and self.view.frameRange is not None:
                 t = time.time()
@@ -719,6 +724,12 @@ class StaticViewWidget(QOpenGLWidget):
 
     def close(self):
         self.view.cleanup()
+
+    def enable(self):
+        self._enabled = True
+
+    def disable(self):
+        self._enabled = False
 
     def resetView(self):
         self.view.resetView()

@@ -203,6 +203,30 @@ PARAM_CATEGORIES['Playback'] = [
 zero = np.zeros(3, dtype='f')
 one = np.ones(3, dtype='f')
 
+PARAM_CATEGORIES['Keyframe'] = [
+    ViewParam("frames", "Output Frames", -1, -1, 100, step=10,
+        tooltip='''The number of frames assigned to this keyframe.
+    -1 indicates automatic determination:
+        - 1 if this is the first frame
+        - number of elapsed frames if the frame # changes
+        - 15 for any other situation.
+    0 can be used to change parameters without outputing a frame.'''),
+    ViewParam("_interp", "Interpolation:", "smooth", options = {
+        "smooth": "Smooth Ramp",
+        "linear": "Linear",
+    }, tooltip = "The method used to interpolate all vectors for this keyframe."),
+    ViewParam("_camera", "Camera Motion:", "object", options = {
+        "object": "Maintain distance",
+        "direct": "Direct"
+    }, tooltip = """The type of camera motion interpolation used.
+        - Maintain distance: smoothly interpolate the rotation and distance to object.
+            Gives the appearance of a rotating object.
+        - Direct: smoothly interpolate the camera position and look at location.
+            Gives the appearance of a camera flying around the object."""),
+    ViewParam("visible", "Active", False, param_type="hidden"),
+    ViewParam("_label", "Label", "label", param_type="hidden"),
+]
+
 PARAM_CATEGORIES['Asset List'] = [
     ViewParam('_autoupdate_limits', 'Auto-update limits/view', True,
     tooltip="If enabled, the display limits are automatically adjusted when the visible items are toggled."),

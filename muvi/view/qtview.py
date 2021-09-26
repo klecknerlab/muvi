@@ -25,7 +25,8 @@ from PyQt5 import QtCore, QtGui
 Qt = QtCore.Qt
 from PyQt5.QtWidgets import QMainWindow, QApplication, QTabWidget, QHBoxLayout, \
     QVBoxLayout, QLabel, QWidget, QScrollArea, QAction, QFrame, QMessageBox, \
-    QFileDialog, QGridLayout, QPushButton, QStyle, QSplitter, QMenu
+    QFileDialog, QGridLayout, QPushButton, QStyle, QSplitter, QMenu, \
+    QSizePolicy, QProgressBar
 from .qt_script import KeyframeEditor
 from .qtview_widgets import paramListToVBox, controlFromParam, ListControl, \
     IntControl, ViewWidget, AssetList, AssetItem, generateDarkPalette
@@ -62,15 +63,97 @@ elif sys.platform == 'darwin':
             app_info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
             if app_info:
                 app_info['CFBundleName'] = APP_NAME
-                app_info['NSRequiresAquaSystemAppearance'] = 'No'
-                # print(app_info)
+                app_info['NSRequiresAquaSystemAppearance'] = 'NO'
     except ImportError:
         raise ImportError('pyobjc-framework-Cocoa not installed (OS X only) -- run "pip3 install pyobjc-framework-Cocoa" or "conda install pyobjc-framework-Cocoa" first')
 
     # OS X always does integer high DPI scaling, so no need to check logical DPI
 
+class ImageDisplay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.image = None
+        self.scaleFactor = 1
+        self.dpr = self.devicePixelRatio()
+
+    def paintEvent(self, event=None):
+        if self.image is not None:
+            qp = QtGui.QPainter()
+            qp.begin(self)
+            qp.drawPixmap(0, 0, self.w * self.scale, self.h * self.scale, self.image, 0, 0, self.w, self.h)
+            qp.end()
+
+    def adjustSize(self, event=None):
+        if self.image is not None:
+            self.scale = self.scaleFactor / self.dpr
+            self.setFixedSize(int(self.w*self.scale), int(self.h*self.scale))
+            self.update()
+
+    def zoomIn(self, event=None):
+        self.setScaleFactor(self.scaleFactor * 2)
+
+    def zoomOut(self, event=None):
+        self.setScaleFactor(self.scaleFactor / 2)
+
+    def zoomFit(self, event=None):
+        if self.image is not None:
+            parentSize = self.parent().size()
+            w, h = parentSize.width(), parentSize.height()
+            sf = min(w / self.w * self.dpr, h / self.h * self.dpr)
+            # print(w, h, sf)
+            self.setScaleFactor(sf)
+
+    def setScaleFactor(self, factor):
+        self.scaleFactor = factor
+        self.adjustSize()
+
+    def setImage(self, image):
+        self.image =  QtGui.QPixmap(image)
+        size = self.image.size()
+        self.w, self.h = size.width(), size.height()
+        self.adjustSize()
+
+
+# class ExportWorker(QtCore.QObject):
+#     finished = QtCore.pyqtSignal()
+#     progress = QtCore.pyqtSignal(int)
+#     progressRange = QtCore.pyqtSignal(int, int)
+#
+#     def __init__(self, parent):
+#         super().__init__() # No parent!
+#         self.parent = parent
+#         self.queue = []
+#
+#     def run(self):
+#         print('start')
+#         for n in range(10):
+#             time.sleep(0.1)
+#
+#         for fn, params in self.queue:
+#             img = self.parent.renderImage()
+#             img.save(fn)
+#             self.parent.updatePreview(img)
+#             self.parent.fileLabel.setText(f'Saved to: {os.path.split(fn)[1]}')
+#
+#         self.queue = []
+#
+#         # self.progressRange.emit(0, 1)
+#
+#         self.progressRange.emit(0, 1)
+#         self.finished.emit()
+#         print('end')
+#
+#     def exportSingle(self, fn):
+#         self.queue = [(fn, {})]
+#         self.progressRange.emit(0, 0)
+#         # self.parent.progress.repaint()
+#         # self.progress.emit(5)
+#         self.parent.exportThread.start()
+
 
 class ExportWindow(QWidget):
+    exportFrame = QtCore.pyqtSignal()
+
     def __init__(self, parent):
         super().__init__(parent=parent, flags=Qt.Window)
         self.setWindowTitle("Image Export")
@@ -79,8 +162,26 @@ class ExportWindow(QWidget):
         self.vbox = QVBoxLayout()
         self.setLayout(self.vbox)
 
-        self.image = QLabel()
-        self.vbox.addWidget(self.image)
+        self.scrollArea = QScrollArea()
+        self.scrollArea.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        self.image = ImageDisplay(self.scrollArea)
+        self.scrollArea.setWidget(self.image)
+        self.scrollArea.setMinimumSize(1920//3, 1080//3)
+        self.vbox.addWidget(self.scrollArea)
+
+        self.zoomOut = QPushButton("Zoom Out")
+        self.zoomOut.clicked.connect(self.image.zoomOut)
+        self.zoomFit = QPushButton("Fit")
+        self.zoomFit.clicked.connect(self.image.zoomFit)
+        self.zoomIn = QPushButton("Zoom In")
+        self.zoomIn.clicked.connect(self.image.zoomIn)
+        self.hbox = QHBoxLayout()
+        self.hbox.addStretch(1)
+        self.hbox.addWidget(self.zoomOut)
+        self.hbox.addWidget(self.zoomFit)
+        self.hbox.addWidget(self.zoomIn)
+        self.vbox.addLayout(self.hbox)
+        self.hbox.addStretch(1)
 
         self.exportButton = QPushButton("Export Current Frame")
         self.exportButton.clicked.connect(self.saveFrame)
@@ -89,12 +190,15 @@ class ExportWindow(QWidget):
         self.previewButton.clicked.connect(self.previewFrame)
 
         self.folderControl = QHBoxLayout()
-        self.folderLabel = QLabel(os.getcwd())
+        self.folderLabel = QLabel(os.path.abspath(os.getcwd()))
         self.folderButton = QPushButton()
         self.folderButton.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
         self.folderButton.clicked.connect(self.selectExportFolder)
         self.folderControl.addWidget(self.folderButton, 0)
         self.folderControl.addWidget(self.folderLabel, 1)
+
+        self.movieButton = QPushButton("Export Movie Frames")
+        self.movieButton.clicked.connect(self.exportMovie)
 
         self.fileLabel = QLabel("")
         self.fileLabel.setFixedWidth(512)
@@ -116,7 +220,29 @@ class ExportWindow(QWidget):
             tooltip='Effective screen height to use for axis scaling.  Used to prevent super thin lines and tiny text for high resolutions!')
         self.scaleHeight = self.scaleControl.value()
         self.scaleControl.paramChanged.connect(self.updatescaleHeight)
+        self.progress = QProgressBar()
+        self.pauseButton = QPushButton()
+        self.pauseButton.setEnabled(False)
 
+        # self.exportWorker = ExportWorker(self)
+        # self.exportThread = QtCore.QThread()
+        # self.exportWorker.progressRange.connect(self.progress.setRange)
+        # self.exportWorker.progress.connect(self.progress.setValue)
+        # self.exportWorker.moveToThread(self.exportThread)
+        # self.exportWorker.finished.connect(self.exportThread.quit)
+        # self.exportThread.started.connect(self.exportWorker.run)
+
+        self.queue = []
+        # Why this strangeness?  By triggering exportFrame through the signals
+        #   method, we give a chance for other updates to happen!
+        # self.exportFrame.connect(self._exportFrame)
+        self.exportTimer = QtCore.QTimer()
+        # This is how long we wait to export each frame.
+        # Nominally, this gives time for the progressbar to update!
+        # Theoretically, a timer of 1 should be ok, but that doesn't actually
+        #   seem to work like I expect...
+        self.exportTimer.setInterval(35)
+        self.exportTimer.timeout.connect(self._exportFrame)
 
         self.settings = QGridLayout()
         self.vbox.addLayout(self.settings)
@@ -129,7 +255,10 @@ class ExportWindow(QWidget):
         self.settings.addWidget(self.exportButton,      3, 1, 1, 2)
         self.settings.addWidget(self.previewButton,     3, 3, 1, 2)
         self.settings.addLayout(self.folderControl,     4, 1, 1, 4)
-        self.settings.addWidget(self.fileLabel,         5, 1, 1, 4)
+        self.settings.addWidget(self.movieButton,       5, 1, 1, 4)
+        self.settings.addWidget(self.fileLabel,         6, 1, 1, 4)
+        self.settings.addWidget(self.progress,          7, 0, 1, 5)
+        self.settings.addWidget(self.pauseButton,       7, 5, 1, 1)
 
         for i, (label, w, h) in enumerate([
                     ('720p', 1280, 720),
@@ -172,19 +301,94 @@ class ExportWindow(QWidget):
         self.folderLabel.setText(QFileDialog.getExistingDirectory(
             self, "Select Export Folder", self.folderLabel.text()))
 
-    def renderImage(self):
+    # def renderImage(self):
+    #     # self.progress.setRange(0, 0)
+    #     # self.progress.update()
+    #     # print('start')
+    #     # QApplication.processEvents()
+    #
+    #     if not hasattr(self, 'bufferId'):
+    #         self.updateBuffer()
+    #
+    #     img = self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
+    #     img = Image.fromarray(img[::-1])
+    #
+    #     oversample = self.oversampleControl.value()
+    #     if oversample > 1:
+    #         w, h = img.size
+    #         img = img.resize((w//oversample, h//oversample), Image.LANCZOS)
+    #     # self.progress.setRange(0, 1)
+    #
+    #     return img
+
+    def exportMovie(self, event=None):
+        dir = os.path.join(self.folderLabel.text(), 'muvi_frames')
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+
+        frames = self.parent.keyframeEditor.frames()
+        # print(frames)
+        for frame, params in enumerate(frames):
+            fn = os.path.join(dir, f'frame{frame:08d}.png')
+            self.queue.append((fn, params))
+
+        # This triggers an update w/o drawing anything!
+        self.queue.append((False, self.parent.allParams()))
+
+        self.progress.setRange(0, len(frames))
+        self.progress.setValue(0)
+        self.startExport()
+
+    def startExport(self):
+        self.exportButton.setDisabled(True)
+        self.previewButton.setDisabled(True)
+        self.movieButton.setDisabled(True)
+        self.parent.display.disable()
+
+        self.exportTimer.start()
+
+    def _exportFrame(self):
+        if not self.queue:
+            return
+
+        QApplication.processEvents()
+
+        fn, updates = self.queue.pop(0)
+
         if not hasattr(self, 'bufferId'):
             self.updateBuffer()
 
-        img = self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
-        img = Image.fromarray(img[::-1])
+        if updates:
+            self.parent.display.updateParams(updates)
 
-        oversample = self.oversampleControl.value()
-        if oversample > 1:
-            w, h = img.size
-            img = img.resize((w//oversample, h//oversample), Image.LANCZOS)
+        if fn is not False:
+            img = self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
+            img = Image.fromarray(img[::-1])
 
-        return img
+            oversample = self.oversampleControl.value()
+            if oversample > 1:
+                w, h = img.size
+                img = img.resize((w//oversample, h//oversample), Image.LANCZOS)
+
+            if fn is not None:
+                img.save(fn)
+                self.fileLabel.setText(f'Saved to: {os.path.split(fn)[1]}')
+
+            img = QtGui.QImage(img.tobytes("raw", "RGB"), img.size[0], img.size[1],
+                QtGui.QImage.Format_RGB888)
+            self.image.setImage(img)
+
+        if self.queue:
+            self.progress.setValue(self.progress.value() + 1)
+            self.progress.repaint()
+        else:
+            self.exportButton.setEnabled(True)
+            self.previewButton.setEnabled(True)
+            self.movieButton.setEnabled(True)
+            self.exportTimer.stop()
+            self.progress.setRange(0, 1)
+            self.progress.reset()
+            self.parent.display.enable()
 
     def saveFrame(self, event=None):
         dir = self.folderLabel.text()
@@ -193,31 +397,41 @@ class ExportWindow(QWidget):
             fn = os.path.join(dir, 'muvi_screenshot_%08d.png' % i)
             if fn not in fns:
                 break
-
-        img = self.renderImage()
-        img.save(os.path.join(dir, fn))
-
-        self.updatePreview(img)
-        self.fileLabel.setText(f'Saved to: {os.path.split(fn)[1]}')
+        # self.exportWorker.exportSingle(os.path.join(dir, fn))
+        self.progress.setRange(0, 0)
+        self.progress.repaint()
+        self.queue.append((fn, {}))
+        self.startExport()
+        # self.exportFrame.emit()
 
     def previewFrame(self, event=None):
-        self.updatePreview(self.renderImage())
+        self.progress.setRange(0, 0)
+        self.progress.repaint()
+        self.queue.append((None, {}))
+        self.startExport()
+        # self.exportFrame.emit()
+        # self.updatePreview(self.renderImage())
 
-    def updatePreview(self, img):
-        img = QtGui.QImage(img.tobytes("raw", "RGB"), img.size[0], img.size[1],
-            QtGui.QImage.Format_RGB888)
-        # img = QtGui.QImage(np.require(img[::-1, :, :3], np.uint8, 'C'),
-        #     img.shape[1], img.shape[0], QtGui.QImage.Format_RGB888)
-        self.image.setPixmap(QtGui.QPixmap(img).scaledToWidth(1024))
+    # def updatePreview(self, img):
+    #     img = QtGui.QImage(img.tobytes("raw", "RGB"), img.size[0], img.size[1],
+    #         QtGui.QImage.Format_RGB888)
+    #     # img = QtGui.QImage(np.require(img[::-1, :, :3], np.uint8, 'C'),
+    #     #     img.shape[1], img.shape[0], QtGui.QImage.Format_RGB888)
+    #     # self.image.setPixmap(QtGui.QPixmap(img).scaledToWidth(1024))
+    #     # pixmap = QtGui.QPixmap(img)
+    #     # pixmap.setDevicePixelRatio(1)
+    #     self.image.setImage(img)
+    #     # self.image.adjustSize()
 
 
 
 class VolumetricViewer(QMainWindow):
-    def __init__(self, parent=None, window_name=None):
+    def __init__(self, parent=None, clipboard=None, window_name=None):
         super().__init__(parent)
 
         self.setWindowTitle(window_name)
 
+        self.clipboard = clipboard
         self.vbox = QVBoxLayout()
         self.vbox.setContentsMargins(0, 0, 0, 0)
 
@@ -394,15 +608,21 @@ class VolumetricViewer(QMainWindow):
         return action
 
     def openFile(self):
-        fn, ext = QFileDialog.getOpenFileName(self, 'Open Volumetric Movie / Mesh Sequence', os.getcwd(), "Volumetric Movie (*.vti);; Polygon Mesh (*.ply)")
+        fn, ext = QFileDialog.getOpenFileName(self,
+            'Open Volumetric Movie / Mesh Sequence', os.getcwd(),
+            "Volumetric Movie (*.vti);; Polygon Mesh (*.ply);; MUVI Script (*.muvi_script)")
         if fn:
             self.openData(fn)
 
     def openData(self, dat):
         try:
-            self.display.makeCurrent()
-            asset = self.display.view.openData(dat)
-            self.display.doneCurrent()
+            if isinstance(dat, str) and os.path.splitext(dat)[1] == ".muvi_script":
+                self.keyframeEditor.openScript(dat)
+                asset = None
+            else:
+                self.display.makeCurrent()
+                asset = self.display.view.openData(dat)
+                self.display.doneCurrent()
         except Exception as e:
             ec = e.__class__.__name__
             msg = QMessageBox()
@@ -415,8 +635,34 @@ class VolumetricViewer(QMainWindow):
             msg.exec_()
             # raise
         else:
-            self.assetList.addItem(AssetItem(asset, self))
+            if asset is not None:
+                self.assetList.addItem(AssetItem(asset, self))
             self.update()
+
+    def openAssets(self, assets):
+        try:
+            self.newIds = self.display.view.openAssets(assets)
+        except Exception as e:
+            ec = e.__class__.__name__
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle(str(ec))
+            msg.setText(str(ec) + ": " + str(e))
+            msg.setDetailedText(traceback.format_exc())
+            msg.setStyleSheet("QTextEdit {font-family: Courier; min-width: 600px;}")
+            msg.setStandardButtons(QMessageBox.Cancel)
+            msg.exec_()
+        else:
+            relabel = {}
+            for id, asset in self.newIds.items():
+                if isinstance(asset, int):
+                    relabel[id] = asset
+                else:
+                    relabel[id] = asset.id
+                    self.assetList.addItem(AssetItem(asset, self))
+
+            self.update()
+            return relabel
 
     def buildParamTab(self, params, prefix="", defaults={}):
         vbox = QVBoxLayout()
@@ -555,12 +801,8 @@ class VolumetricViewer(QMainWindow):
         d = self.display.view.allParams()
         return d
 
-
-
-
-
 def view_volume(vol=None, args=None, window_name=None):
-    global PARAM_WIDTH, SCROLL_WIDTH, UI_EXTRA_SCALING
+    global PARAM_WIDTH, SCROLL_WIDTH, UI_EXTRA_SCALING, CLIPBOARD, app
 
     if window_name is None:
         window_name = APP_NAME
@@ -614,11 +856,11 @@ def view_volume(vol=None, args=None, window_name=None):
     ''')
 
     app.setApplicationDisplayName(window_name)
-    window = VolumetricViewer(window_name=window_name)
+    window = VolumetricViewer(clipboard=app.clipboard(), window_name=window_name)
     if vol is not None:
         window.openData(vol)
     app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap(os.path.join(ICON_DIR, 'muvi_logo.png'))))
-    return(app.exec_())
+    return(app.exec())
 
 
 def qt_viewer(args=None, window_name=None):

@@ -56,12 +56,12 @@ def copyArray(x):
 class ViewAsset:
     def __init__(self, data, id=0, parent=None):
         self.filename = None
-        self.info = []
         self.parent = parent
         self.id = id
+        self.info = [f'Id: {self.id}']
 
         if isinstance(data, str):
-            self.buildStr = data
+            self.abspath = os.path.abspath(data)
 
             bfn, ext = os.path.splitext(data)
             ext = ext.lower()
@@ -81,7 +81,7 @@ class ViewAsset:
                         m2 = regex.match(fn)
                         if m2:
                             data[int(m2.group(1))] = os.path.join(dir, fn)
-                    self.buildStr = data[min(data.keys())]
+                    self.abspath = os.path.abspath(data[min(data.keys())])
                 else:
                     self.filename = data
                     data = load_mesh(data)
@@ -94,7 +94,7 @@ class ViewAsset:
             self.filename = '-'
         else:
             dir, self.filename = os.path.split(self.filename)
-            self.info.append(f'Directory: {dir}')
+            self.info.append(f'Directory: {os.path.abspath(dir)}')
 
         self.isVolume = False
         self.visible = False
@@ -145,8 +145,8 @@ class ViewAsset:
             self.X0 = -0.5 * L
             self.X1 = 0.5 * L
             self.uniforms = dict(
-                vol_L = L,
-                vol_N = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f'),
+                _vol_L = L,
+                _vol_N = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f'),
                 distortion_correction_factor = self.volume.distortion.var.get('distortion_correction_factor', np.zeros(3, 'f'))
             )
             self.globalUniformNames.update(self.parent._shaderDep[self.shader])
@@ -206,14 +206,23 @@ class ViewAsset:
         for k, v in d.items():
             self.__setitem__(k, v)
 
-    def allParams(self, prefix=True):
+    def allParams(self, prefix=True, hidden=False):
         if prefix is True:
             prefix = f'#{self.id}_'
 
         d = {prefix+'visible':self.visible}
-        d.update({prefix+k:copyArray(v) for k, v in self.uniforms.items()})
+        d.update({
+            prefix+k:copyArray(v)
+            for k, v in self.uniforms.items()
+            if (hidden or (not k.startswith('_')))
+        })
+
         if hasattr(self, 'globalUniforms'):
-            d.update({prefix+k:copyArray(v) for k, v in self.globalUniforms.items()})
+            d.update({
+                prefix+k:copyArray(v)
+                for k, v in self.globalUniforms.items()
+                if (hidden or (not k.startswith('_')))
+            })
 
         return d
 
@@ -491,7 +500,7 @@ class View:
     # UI Interaction methods
     #--------------------------------------------------------
 
-    _assetRe = re.compile('\#([0-8]+)_(.*)')
+    _assetRe = re.compile('\#([0-9]+)_(.*)')
 
     def __setitem__(self, key, val, callback=False):
         self._params[key] = val
@@ -612,7 +621,7 @@ class View:
         return d
 
     def assetSpec(self):
-        return {id:getattr(asset, 'buildStr', None) for id, asset in self.assets.items()}
+        return {id:getattr(asset, 'abspath', None) for id, asset in self.assets.items()}
 
     #--------------------------------------------------------
     # Adding/removing Data
@@ -632,6 +641,29 @@ class View:
         # self[f'#{id}_visible'] = True # Will automatically trigger resetRange
         # self.resetView()
         return asset
+
+    def openAssets(self, assets):
+        newIds = {}
+
+        for id, fn in assets.items():
+            if isinstance(id, (str, bytes)):
+                id = int(id)
+
+            for id2, asset in self.assets.items():
+                if getattr(asset, "abspath", False) == fn:
+                    # This asset already exists!  Return id instead of asser
+                    #  object to indicate we didn't load something new!
+                    newIds[id] = asset.id
+                    break
+            else:
+                if id in self.assets:
+                    # We don't want to replace an existing asset
+                    newIds[id] = self.openData(fn)
+                else:
+                    newIds[id] = self.openData(fn, id)
+
+
+        return newIds
 
     def removeAsset(self, id):
         asset = self.assets[id]
