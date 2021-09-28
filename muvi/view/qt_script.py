@@ -10,6 +10,8 @@ import numpy as np
 import json
 import re
 import traceback
+from scipy.spatial.transform import Rotation, Slerp
+from .ogl import cameraMatrix, mag, norm
 
 
 def unArray(d):
@@ -32,6 +34,17 @@ class JSONEncoder(json.JSONEncoder):
 
 
 _assetRe = re.compile('\#([0-9]+)_(.*)')
+_copyRe = re.compile('(.*)\s+Copy(\s+[0-9]+)?')
+
+
+def smoothStep(x):
+    x = np.clip(x, 0, 1)
+    return 3*x**2 - 2*x**3
+
+def smootherStep(x):
+    x = np.clip(x, 0, 1)
+    return 6*x**5 - 15*x**4 + 10*x**3
+
 
 class Keyframe(QListWidgetItem):
     def __init__(self, params, label=None, parent=None):
@@ -39,7 +52,7 @@ class Keyframe(QListWidgetItem):
             if "_label" in params:
                 label = params.pop('_label')
             else:
-                label = f'Keyframe #{parent.count()+1}'
+                label = f'Keyframe'
         super().__init__(label, parent)
         self.setData(Qt.UserRole, params)
         self.setFlags(self.flags() | Qt.ItemIsEditable | Qt.ItemIsDragEnabled)
@@ -82,7 +95,13 @@ class KeyframeEditor(QWidget):
             for param, control in self.controls.items():
                 data[param] = control.value()
 
-        Keyframe(data, label, self.keyframeList)
+        if label is None:
+            label = f'Keyframe #{self.keyframeList.count()+1}'
+
+        row = self.keyframeList.currentRow() + 1
+        self.keyframeList.insertItem(row, Keyframe(data, label))
+        self.keyframeList.setCurrentRow(row)
+
         self.isSaved = False
 
     def updateKeyframe(self, param, value):
@@ -275,16 +294,59 @@ class KeyframeEditor(QWidget):
             elif num > 1:
                 f = [{} for n in range(num)]
 
+                if interp == "smooth":
+                    interp_func = smoothStep
+                elif interp == "smoother":
+                    interp_func = smootherStep
+                else:
+                    interp_func = lambda x: x
+
+                # If the camera is moving, handle that specially!
+                interp_vals = interp_func(np.arange(1, num+1, dtype='d')/num)
+
+                if 'camera_pos' in updates or 'look_at' in updates or 'up' in updates:
+                    def get_param(var):
+                        return params[var], updates.get(var, params[var])
+
+                    c0, c1 = get_param('camera_pos')
+                    l0, l1 = get_param('look_at')
+                    u0, u1 = get_param('up')
+                    d0 = mag(c0 - l0)
+                    d1 = mag(c1 - l1)
+
+
+                    if camera == 'object':
+                        R = np.zeros((2, 3, 3), dtype='d')
+                        R[0] = cameraMatrix(c0, l0, u0)[:3, :3]
+                        R[1] = cameraMatrix(c1, l1, u1)[:3, :3]
+                        R = Rotation.from_matrix(R)
+                        slerp = Slerp([0, 1], R)
+                        for i, x in enumerate(interp_vals):
+                            Ri = slerp(x).as_matrix()
+                            f[i]['look_at'] = l0 * (1-x) + l1 * x
+                            d = d0 * (1-x) + d1 * x
+                            f[i]['camera_pos'] = f[i]['look_at'] + d * Ri[:, 2]
+                            f[i]['up'] = Ri[:, 1]
+
+                    else: # Direct interpolation mode
+                        for i, x in enumerate(interp_vals):
+                            f[i]['camera'] = c0 * (1-x) + c1 * x
+                            f[i]['up'] = u0 * (1-x) + u1 * x
+                            f[i]['look_at'] = l0 * (1-x) + l1 * x
+
+
                 for param, val1 in updates.items():
                     val0 = params[param]
 
                     if param == 'frame':
                         for i in range(num):
-                            x = (i+1)/num
+                            x = (i+1)/num # Always has linear interpolation!
                             f[i][param] = int(val0 * (1-x) + val1 * x + 0.5)
+                    elif param in {'camera_pos', 'up', 'look_at'}:
+                        # Note that look_at is handled normally!
+                        continue
                     elif isinstance(val0, (float, np.ndarray)):
-                        for i in range(num):
-                            x = (i+1)/num
+                        for i, x in enumerate(interp_vals):
                             f[i][param] = val0 * (1-x) + val1 * x
                     else:
                         for i in range(num):
@@ -307,8 +369,11 @@ class KeyframeList(QListWidget):
         self.customContextMenuRequested.connect(self.contextMenu)
         self.addOption = QAction('New Keyframe (from current view)')
         self.addOption.triggered.connect(parent.addKeyframe)
+        self.deleteOption = QAction('Delete')
+        self.duplicateOption = QAction('Duplicate')
         self.showOption = QAction('Show')
-        self.copyOption = QAction('Copy Parameters')
+        self.copyOption = QAction('Copy Parameters to Clipboard')
+
 
     def contextMenu(self, point):
         item = self.itemAt(point)
@@ -317,6 +382,8 @@ class KeyframeList(QListWidget):
         menu.addAction(self.addOption)
 
         if item is not None:
+            menu.addAction(self.deleteOption)
+            menu.addAction(self.duplicateOption)
             menu.addAction(self.showOption)
             menu.addAction(self.copyOption)
 
@@ -329,3 +396,8 @@ class KeyframeList(QListWidget):
             if clipboard is not None:
                 clipboard.setText(re.sub('"!@<@!(.*)!@>@!"', lambda m: m.group(1),
                     json.dumps(item.data(Qt.UserRole), indent=2, cls=JSONEncoder)))
+        elif action == self.deleteOption:
+            self.takeItem(self.row(item))
+        elif action == self.duplicateOption:
+            params = item.data(Qt.UserRole)
+            self.parent().addKeyframe(params)

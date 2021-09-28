@@ -211,11 +211,12 @@ PARAM_CATEGORIES['Keyframe'] = [
         - number of elapsed frames if the frame # changes
         - 15 for any other situation.
     0 can be used to change parameters without outputing a frame.'''),
-    ViewParam("_interp", "Interpolation:", "smooth", options = {
-        "smooth": "Smooth Ramp",
+    ViewParam("_interp", "Interpolation", "smooth", options = {
+        "smooth": "Smooth Step",
+        "smoother": "Smoother Step",
         "linear": "Linear",
     }, tooltip = "The method used to interpolate all vectors for this keyframe."),
-    ViewParam("_camera", "Camera Motion:", "object", options = {
+    ViewParam("_camera", "Camera Motion", "object", options = {
         "object": "Maintain distance",
         "direct": "Direct"
     }, tooltip = """The type of camera motion interpolation used.

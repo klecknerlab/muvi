@@ -48,6 +48,25 @@ def dot1(X, Y):
 
 cross = np.cross
 
+def cameraMatrix(camera, look_at, up, dtype='f'):
+    forward = norm(look_at - camera)
+    right = norm(cross(forward, up))
+    up = cross(right, forward)
+
+    viewMatrix = np.eye(4, dtype=dtype)
+    viewMatrix[:3, 0] = right
+    viewMatrix[:3, 1] = up
+    viewMatrix[:3, 2] = -forward
+    viewMatrix[3, 0] = -dot(right, camera)
+    viewMatrix[3, 1] = -dot(up, camera)
+    viewMatrix[3, 2] = +dot(forward, camera)
+
+    return viewMatrix
+
+#--------------------------------------------------------
+# Converting between opengl and numpy types
+#--------------------------------------------------------
+
 GL_VEC_TYPES = {
     GL.GL_SAMPLER_1D: ('i4', (1,), "GL_SAMPLER_1D", GL.GL_INT, GL.glUniform1iv),
     GL.GL_SAMPLER_2D: ('i4', (1,), "GL_SAMPLER_2D", GL.GL_INT, GL.glUniform1iv),
@@ -86,6 +105,36 @@ for gl_var_type, np_dtype in [('GL_FLOAT', 'f'), ('GL_DOUBLE', 'd'), \
 
         GL_VEC_TYPES[const] = (np_dtype, np_shape, gl_type, getattr(GL, gl_var_type), _uf)
 
+
+_npToGl = {
+    np.dtype('int8'): GL.GL_BYTE,
+    np.dtype('uint8'): GL.GL_UNSIGNED_BYTE,
+    np.dtype('int16'): GL.GL_SHORT,
+    np.dtype('uint16'): GL.GL_UNSIGNED_SHORT,
+    np.dtype('int32'): GL.GL_INT,
+    np.dtype('uint32'): GL.GL_UNSIGNED_INT,
+    np.dtype('f'): GL.GL_FLOAT
+}
+
+def npToGl(t):
+    t = np.dtype(t)
+    if t not in _npToGl:
+        raise ValueError('Data type of array should be one of: [%s] (found %s)', (','.join(_npToGl.keys()), t))
+    else:
+        return _npToGl[t]
+
+
+_glToNp = {v:k for k, v in _npToGl.items()}
+
+def glToNp(t):
+    if t not in _glToNp:
+        raise ValueError('Data type of array should be one of: [%s] (found %s)', (','.join(dts.keys()), arr.dtype))
+    else:
+        return _glToNp[t]
+
+#--------------------------------------------------------
+# Shader Compilation
+#--------------------------------------------------------
 
 def raise_nice_compile_errors(err):
     if err.args[0].startswith('Shader compile failure'):
@@ -303,6 +352,10 @@ class AttributeError(Exception):
     pass
 
 
+#--------------------------------------------------------
+# Vertex Array Objects
+#--------------------------------------------------------
+
 class VertexArray:
     def __init__(self, data, numElements=None, usage=GL.GL_DYNAMIC_DRAW):
         if isinstance(data, np.ndarray):
@@ -397,33 +450,9 @@ class VertexArray:
         GL.glBindVertexArray(self.id)
         GL.glDrawArrays(mode, first, count)
 
-
-_npToGl = {
-    np.dtype('int8'): GL.GL_BYTE,
-    np.dtype('uint8'): GL.GL_UNSIGNED_BYTE,
-    np.dtype('int16'): GL.GL_SHORT,
-    np.dtype('uint16'): GL.GL_UNSIGNED_SHORT,
-    np.dtype('int32'): GL.GL_INT,
-    np.dtype('uint32'): GL.GL_UNSIGNED_INT,
-    np.dtype('f'): GL.GL_FLOAT
-}
-
-def npToGl(t):
-    t = np.dtype(t)
-    if t not in _npToGl:
-        raise ValueError('Data type of array should be one of: [%s] (found %s)', (','.join(_npToGl.keys()), t))
-    else:
-        return _npToGl[t]
-
-
-_glToNp = {v:k for k, v in _npToGl.items()}
-
-def glToNp(t):
-    if t not in _glToNp:
-        raise ValueError('Data type of array should be one of: [%s] (found %s)', (','.join(dts.keys()), arr.dtype))
-    else:
-        return _glToNp[t]
-
+#--------------------------------------------------------
+# Textures
+#--------------------------------------------------------
 
 class Texture:
     '''OpenGL Texture Object
@@ -718,6 +747,9 @@ class FrameBuffer:
     def __array__(self):
         return self.texture.__array__()
 
+#--------------------------------------------------------
+# Text Rendering -- requires separate glsl files
+#--------------------------------------------------------
 
 class TextRenderer:
     # From shader:

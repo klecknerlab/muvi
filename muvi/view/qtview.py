@@ -535,7 +535,7 @@ class VolumetricViewer(QMainWindow):
 
         self.editMenu = menu.addMenu("Edit")
         self.addMenuItem(self.editMenu, 'Insert &Keyframe',
-            self.addKeyframe, "k")
+            self.addKeyframe, "Ctrl+K")
 
         self.viewMenu = menu.addMenu("View")
 
@@ -544,7 +544,7 @@ class VolumetricViewer(QMainWindow):
             'Show or hide settings option on right side of main window')
 
         self.showKeyframeEditor = self.addMenuItem(self.viewMenu,
-            'Hide Keyframe List', self.toggleKeyframe, 'Ctrl+K',
+            'Hide Keyframe List', self.toggleKeyframe, 'Ctrl+L',
             'Show or hide keyframe list on right side of main window')
 
         self.save_image = self.addMenuItem(self.viewMenu,

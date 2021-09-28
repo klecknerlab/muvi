@@ -1,5 +1,6 @@
 from .ogl import ShaderProgram, GL, VertexArray, FrameBuffer, useProgram, \
-    norm, cross, mag, dot, dot1, textureFromArray, Texture, TextRenderer
+    norm, cross, mag, dot, dot1, textureFromArray, Texture, TextRenderer, \
+    cameraMatrix
 from scipy.spatial.transform import Rotation
 from ..mesh import load_mesh, Mesh
 from .. import open_3D_movie, VolumetricMovie
@@ -774,21 +775,23 @@ class View:
     #-----------------------------------------------------------
 
     def build_viewMatrix(self):
-        cp = self['camera_pos']
+        # cp = self['camera_pos']
+        #
+        # forward = norm(self['look_at'] - cp)
+        # right = norm(cross(forward, self['up']))
+        # up = cross(right, forward)
+        #
+        # # print(cp, self['look_at'], self['up'], forward, right, up)
+        #
+        # viewMatrix = np.eye(4, dtype='f')
+        # viewMatrix[:3, 0] = right
+        # viewMatrix[:3, 1] = up
+        # viewMatrix[:3, 2] = -forward
+        # viewMatrix[3, 0] = -dot(right, cp)
+        # viewMatrix[3, 1] = -dot(up, cp)
+        # viewMatrix[3, 2] = +dot(forward, cp)
 
-        forward = norm(self['look_at'] - cp)
-        right = norm(cross(forward, self['up']))
-        up = cross(right, forward)
-
-        # print(cp, self['look_at'], self['up'], forward, right, up)
-
-        viewMatrix = np.eye(4, dtype='f')
-        viewMatrix[:3, 0] = right
-        viewMatrix[:3, 1] = up
-        viewMatrix[:3, 2] = -forward
-        viewMatrix[3, 0] = -dot(right, cp)
-        viewMatrix[3, 1] = -dot(up, cp)
-        viewMatrix[3, 2] = +dot(forward, cp)
+        viewMatrix = cameraMatrix(self['camera_pos'], self['look_at'], self['up'])
 
         X0 = self['disp_X0']
         X1 = self['disp_X1']
@@ -801,7 +804,6 @@ class View:
         midDepth = -(center * viewMatrix[:, 2]).sum()
         self['near'] = max(midDepth - r, r/1000)
         self['far'] = midDepth + r
-        # print(self['near'], self['far'])
         self['viewMatrix'] = viewMatrix
 
     def build_perspectiveMatrix(self):
