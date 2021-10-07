@@ -356,6 +356,17 @@ ASSET_PARAMS['volume'] += [
         tooltip='Reshuffles the color channels in the corresponding order.  Can be used, for example, to have multiple isosurfaces.'),
 ]
 
+# _ASSET = 'text'
+#
+# ASSET_PARAMS['text'] += [
+#     ViewParam('text_type', 'Type', 'overlay', options={'overlay':'Overlay', 'marker':'Marker'},
+#         tooltip='Type of text label, either an overlay (on top of data), or marker (inside data)'),
+#     ViewParam('maker_pos', 'Marked Position', zero, min=-100*one, max=100*one, range_update="data_limits",
+#         tooltip='Marked location for marker text (ignored for inline data'),
+#     # ViewParam('alignment', 'Al)
+# ]
+
+
 _ASSET = None
 
 THEMES = {

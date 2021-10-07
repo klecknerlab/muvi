@@ -54,6 +54,8 @@ def copyArray(x):
     else:
         return x
 
+# <<TEXT>>
+
 class ViewAsset:
     def __init__(self, data, id=0, parent=None):
         self.filename = None
@@ -91,7 +93,7 @@ class ViewAsset:
 
 
         if self.filename is None:
-            self.info.append('Source: Object passed directly to viewer')
+            # self.info.append('Source: Object passed directly to viewer')
             self.filename = '-'
         else:
             dir, self.filename = os.path.split(self.filename)
@@ -294,8 +296,9 @@ def meshToVertexArray(m):
     else:
         vert['color'] = 1.0
 
-    X0 = m.points.min(0)
-    X1 = m.points.max(0)
+    points = m.points[~(np.isnan(m.points).any(1))]
+    X0 = points.min(0)
+    X1 = points.max(0)
 
     va = VertexArray(vert)
     va.attachElements(m.triangles.astype('u4'))
