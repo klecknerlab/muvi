@@ -49,7 +49,7 @@ CUBE_TRIANGLES = np.array([
 ], dtype='u4')
 
 def copyArray(x):
-    if isinstance(x, (np.ndarray, list, tuple)):
+    if isinstance(x, (np.ndarray, list)):
         return x.copy()
     else:
         return x
