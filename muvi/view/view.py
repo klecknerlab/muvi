@@ -373,9 +373,9 @@ class View:
         # disp_X1 = np.full(3, 100, dtype='f'),
         depthTexture = 0,
         volumeTextureId = 1,
-        colormap1Texture = 2,
-        colormap2Texture = 3,
-        colormap3Texture = 4,
+        colormapTextureId = 2,
+        # colormap2Texture = 3,
+        # colormap3Texture = 4,
         # color_remap = "rgb",
         # mesh_clip = True,
         # mesh_scale = 20,
@@ -1027,24 +1027,29 @@ class View:
         # self.totalAxisPoints = self.axisEdge.size
         self.totalAxisPoints = self.axisEdge.size + 16 * start
 
+    # Old version of build colormaps uploaded new textures; new version uses
+    #    unified texture and just updates offset to desired texture
+    # def build_colormaps(self):
+    #     if not hasattr(self, 'colormapTextures'):
+    #         self.colormapTextures = [
+    #             Texture(size = (256, ), format=GL.GL_RGB,
+    #                 wrap=GL.GL_CLAMP_TO_EDGE, internalFormat=GL.GL_SRGB)
+    #             for i in range(MAX_CHANNELS)]
+    #
+    #     for i in range(3):
+    #         name = self[f'vol_colormap{i+1}']
+    #         if name != self._colormap[i]:
+    #             GL.glActiveTexture(GL.GL_TEXTURE0 + self[f'colormap{i+1}Texture'])
+    #             if name not in COLORMAPS:
+    #                 raise ValueError("unknown colormap '%s'" % name)
+    #             self.colormapTextures[i].replace(COLORMAPS[name].data)
+    #             self._colormap[i] = name
+    #
+    #     GL.glActiveTexture(GL.GL_TEXTURE0)
+
     def build_colormaps(self):
-        if not hasattr(self, 'colormapTextures'):
-            self.colormapTextures = [
-                Texture(size = (256, ), format=GL.GL_RGB,
-                    wrap=GL.GL_CLAMP_TO_EDGE, internalFormat=GL.GL_SRGB)
-                for i in range(MAX_CHANNELS)]
-
-        for i in range(3):
-            name = self[f'vol_colormap{i+1}']
-            if name != self._colormap[i]:
-                GL.glActiveTexture(GL.GL_TEXTURE0 + self[f'colormap{i+1}Texture'])
-                if name not in COLORMAPS:
-                    raise ValueError("unknown colormap '%s'" % name)
-                self.colormapTextures[i].replace(COLORMAPS[name].data)
-                self._colormap[i] = name
-
-        GL.glActiveTexture(GL.GL_TEXTURE0)
-
+        for i in range(1, MAX_CHANNELS+1):
+            self[f'colormap{i}Offset'] = self.colormapOffsets[self[f'vol_colormap{i}']]
 
     #--------------------------------------------------------
     # Volume Management
@@ -1125,6 +1130,23 @@ class View:
 
         self.resetRange()
         self.resetView()
+
+        colormaps = []
+        self.colormapOffsets = {}
+        for i, (name, cm) in enumerate(COLORMAPS.items()):
+            colormaps.append(np.frombuffer(cm.data, dtype='u1').reshape(-1, 3))
+            self.colormapOffsets[name] = i + 0.5
+
+        print(np.array(colormaps).shape)
+
+        self.colormapTexture = textureFromArray(np.array(colormaps),
+            wrap=GL.GL_CLAMP_TO_EDGE, internalFormat=GL.GL_SRGB,
+            target=GL.GL_TEXTURE_RECTANGLE)
+
+        GL.glActiveTexture(GL.GL_TEXTURE2)
+        self.colormapTexture.bind()
+
+        GL.glActiveTexture(GL.GL_TEXTURE0)
 
     #--------------------------------------------------------
     # Buffer management

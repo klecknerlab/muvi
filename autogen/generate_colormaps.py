@@ -25,6 +25,7 @@ import base64
 
 colormaps = {
     'viridis': 'Viridis',
+    'gray': 'Greyscale',
     'plasma': 'Plasma',
     'inferno': 'Inferno',
     'magma': 'Magma',
