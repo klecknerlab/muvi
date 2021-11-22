@@ -224,6 +224,15 @@ PARAM_CATEGORIES['Keyframe'] = [
             Gives the appearance of a rotating object.
         - Direct: smoothly interpolate the camera position and look at location.
             Gives the appearance of a camera flying around the object."""),
+    ViewParam("_spin", "Spin", "none", options = {
+        "none": "No spin",
+        "+x": "+x",
+        "-x": "-x",
+        "+y": "+y",
+        "-y": "-y",
+        "+z": "+z",
+        "-z": "-z"
+    }, tooltip="If specified, the axis around which to spin the volume following this keyframe (right hand rule direction)"),
     ViewParam("visible", "Active", False, param_type="hidden"),
     ViewParam("_label", "Label", "label", param_type="hidden"),
 ]

@@ -46,6 +46,19 @@ def smootherStep(x):
     return 6*x**5 - 15*x**4 + 10*x**3
 
 
+def rotAxis(X, ax, phi):
+    a1 = (ax + 1) % 3
+    a2 = (ax + 2) % 3
+
+    Xr = X.copy()
+    s, c = np.sin(phi), np.cos(phi)
+
+    Xr[..., a1] = c * X[..., a1] - s * X[..., a2]
+    Xr[..., a2] = s * X[..., a1] + c * X[..., a2]
+
+    return Xr
+
+
 class Keyframe(QListWidgetItem):
     def __init__(self, params, label=None, parent=None):
         if label is None:
@@ -262,6 +275,7 @@ class KeyframeEditor(QWidget):
         params = self.mainWindow.allParams()
         interp = 'smooth'
         camera = 'object'
+        spin = 'none'
 
         for row in range(self.keyframeList.count()):
             num = -1
@@ -276,6 +290,8 @@ class KeyframeEditor(QWidget):
                         interp = val
                     elif param == '_camera':
                         camera = val
+                    elif param == '_spin':
+                        spin = val
                 elif not arrayEquiv(val, params.get(param, None)):
                     updates[param] = val
 
@@ -330,10 +346,9 @@ class KeyframeEditor(QWidget):
 
                     else: # Direct interpolation mode
                         for i, x in enumerate(interp_vals):
-                            f[i]['camera'] = c0 * (1-x) + c1 * x
+                            f[i]['camera_pos'] = c0 * (1-x) + c1 * x
                             f[i]['up'] = u0 * (1-x) + u1 * x
                             f[i]['look_at'] = l0 * (1-x) + l1 * x
-
 
                 for param, val1 in updates.items():
                     val0 = params[param]
@@ -352,7 +367,31 @@ class KeyframeEditor(QWidget):
                         for i in range(num):
                             f[i][param] = val1
 
+                if spin != 'none':
+                    cp = params['camera_pos']
+                    la = params['look_at']
+                    up = params['up']
+
+                    dir = -1 if spin.startswith('+') else +1
+                    if spin[1] == 'x':
+                        ax = 0
+                    elif spin[1] == 'y':
+                        ax = 1
+                    else:
+                        ax = 2
+
+                    for i, x in enumerate(interp_vals):
+                        phi = dir * x * 2 * np.pi
+                        cf = f[i]
+                        cp = cf.get('camera_pos', cp)
+                        la = cf.get('look_at', la)
+                        up = cf.get('up', up)
+
+                        cf['camera_pos'] = rotAxis(cp - la, ax, phi) + la
+                        cf['up'] = rotAxis(up, ax, phi)
+
                 frames += f
+
 
             params.update(updates)
 

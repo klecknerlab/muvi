@@ -1137,8 +1137,6 @@ class View:
             colormaps.append(np.frombuffer(cm.data, dtype='u1').reshape(-1, 3))
             self.colormapOffsets[name] = i + 0.5
 
-        print(np.array(colormaps).shape)
-
         self.colormapTexture = textureFromArray(np.array(colormaps),
             wrap=GL.GL_CLAMP_TO_EDGE, internalFormat=GL.GL_SRGB,
             target=GL.GL_TEXTURE_RECTANGLE)
