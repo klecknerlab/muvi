@@ -111,15 +111,19 @@ def generate_glyphs(X, glyph="sphere", a=1, color=None, N=np.array([1, 0, 0], dt
 
     if normals.shape[0] != points.shape[0]:
         normals = np.tile(normals, (points.shape[0] // normals.shape[0], 1, 1))
-        
+
     output = Mesh(points.reshape(-1, 3), tris.reshape(-1, 3), normals.reshape(-1, 3))
 
     if color is not None:
         # color = enforce_shape(color, (len(points),))
-        if clim is None:
-            clim = (color.min(), color.max())
-        rgba = cm.get_cmap(cmap)((color - clim[0]) / (clim[1] - clim[0]))
-        output.colors = np.tile(rgba[:, np.newaxis, :3], (1, n_points, 1)).reshape(-1, 3)
+        if isinstance(color, (str, bytes)):
+            import matplotlib.colors
+            output.colors = np.tile(matplotlib.colors.colorConverter.to_rgba(color), (n_points * n_glyphs, 1))
+        else:
+            if clim is None:
+                clim = (color.min(), color.max())
+            rgba = cm.get_cmap(cmap)((color - clim[0]) / (clim[1] - clim[0]))
+            output.colors = np.tile(rgba[:, np.newaxis, :3], (1, n_points, 1)).reshape(-1, 3)
     else:
         colors = getattr(glyph, 'colors', None)
         if colors is not None:

@@ -101,7 +101,7 @@ def arb_perp(V):
     '''For each vector, return an arbitrary unit vector that is perpendicular.
 
     **Note: arbitrary does not mean random!**'''
-    p = np.eye(3, dtype=V.dtype)[np.argmin(V, -1)]
+    p = np.eye(3, dtype=V.dtype)[np.argmin(abs(V), -1)]
     return norm(p - proj(p, V))
 
 
@@ -231,7 +231,7 @@ def generate_basis(N, B=None):
     Keywords
     --------
     B : (..., 3) shaped array
-        The binormal vector; will be normalized using Gram-Shmidt.  If not
+        The binormal vector; will be normalized using Gram-Schmidt.  If not
         specified `arb_perp` is used to find a perpendicular vector.
 
     Returns
