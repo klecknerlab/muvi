@@ -41,7 +41,7 @@ vec4 shadeSurface(vec4 color, vec3 pos, vec3 N)
 {
     vec3 C = normalize(pos - camera_pos);
 
-    // If we're looking at the back side, dark it.
+    // If we're looking at the back side, darken it.
     if (dot(C, N) > 0)
     {
         N *= -1.0;

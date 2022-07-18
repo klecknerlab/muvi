@@ -781,7 +781,7 @@ _'''.format(**vol_info).encode('UTF-8'))
         remaining = self._write_end - self._write_current
 
         if remaining <= 0:
-            self._write_file.write(b'  </AppendedData>\n</VTKFile>')
+            self._write_file.write(b'\n  </AppendedData>\n</VTKFile>')
 
             for n, (hoff, doff) in enumerate(zip(self._write_header_offsets, self._write_data_offsets)):
                 doff = doff - self._write_data_offsets[0]
