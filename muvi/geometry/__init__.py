@@ -14,12 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .points import Points, PointSequence, PointsFromFile
+from .points import Points, PointSequence, PointsFromFile, PointSequenceFromFile
 from ..filetypes.vtk import VTKReader
 
 def load_geometry(fn):
     vtk = VTKReader(fn)
     if vtk.main.tag == 'PolyData':
-        return PointsFromFile(vtk)
+        if 'TimeValues' in vtk.main.attrib:
+            return PointSequenceFromFile(vtk)
+        else:
+            return PointsFromFile(vtk)
     else:
         raise ValueError(f"File '{fn}' does not contain geometry of a recognizable type")

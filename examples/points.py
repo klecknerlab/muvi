@@ -60,6 +60,7 @@ points.save('points.vtp')
 
 # Check that the VTP file contains the same points
 points_loaded = geometry.load_geometry('points.vtp')
+print(f'Type of object returned from loading "points.vtp": {type(points_loaded)}')
 print(f"RMS difference between original and saved data: {(points['pos'] - points_loaded['pos']).std():.2e}")
 print('Note: nonzero because of double -> single precision conversion!')
 
@@ -98,3 +99,16 @@ for i in range(10, 50):
 
 # Turn this into a sequence, and save!
 geometry.PointSequence(seq).save('sequence.vtp')
+
+# Check that the saved data is the same
+seq2 = geometry.load_geometry('sequence.vtp')
+print(f'Type of object returned from loading "sequence.vtp": {type(seq2)}')
+
+frame = 30
+p1 = seq[frame]
+p2 = seq2[frame]
+#
+# print(p1.keys())
+# print(p2.keys())
+
+print(f"Sequence: RMS difference between original and saved data: {(p1['pos'] - p2['pos']).std():.2e}")

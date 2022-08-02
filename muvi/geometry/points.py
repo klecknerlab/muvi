@@ -13,6 +13,7 @@ def vec_names(N, prefix=None):
     else:
         return [prefix + str(n+1) for n in range(N)]
 
+
 class PointItems:
     def __init__(self, points, force_floats=None, force_length=None):
         '''See `Points.items` method for more information.'''
@@ -297,7 +298,7 @@ class PointSequence:
 
         # Don't fetch new data if we are asking for the same point
         # Useful when loading from disk!
-        if i != self.current:
+        if i != getattr(self, 'current', None):
             self.current_data = self._get(i)
             self.current = i
 
@@ -412,55 +413,72 @@ class PointsFromFile(Points):
 
 
 
-# Work in progress!
-# class PointSequenceFromFile(PointSequence):
-#     def __init__(self, f):
-#         '''A class for Points data loaded from a VTP file.
-#
-#         Parameters
-#         ----------
-#         f : string or VTKReader class
-#             Input file
-#         '''
-#         if isinstance(f, VTKReader):
-#             self.vtk = f
-#         else:
-#             self.vtk = VTKReader(f)
-#
-#         # Check that we have the right type of data in this file.
-#         if 'TimeValues' not in self.vtk.main.attrib:
-#             raise ValueError(f"'{self.vtk.filename}' contains a Points object, not PointSequence")
-#         if self.vtk.main.tag != 'PolyData':
-#             raise ValueError(f"Wrong VTK file type (found '{vtk.main.tag}', should be 'PolyData')")
-#
-#         # Get the mapping between 'TimeStep' and actual value
-#         self._ts = tuple(map(int, self.vtk.main.attrib['TimeValues'].split()))
-#
-#         # Manually set number of points
-#         self._N = self.vtk.contents.attrib['NumberOfPoints']
-#
-#         # Get point positions
-#         for tag in self.vtk.contents.findall('Points/DataArray'):
-#
-#
-#         if points is None:
-#             raise ValueError(f"VTK file '{self.vtk.filename}' is missing Points/DataArray tag")
-#
-#         self._d = {}
-#         self['pos'] = self.vtk.get_data_from_tag(points)
-#
-#         # Get point data
-#         point_data = self.vtk.contents.findall('PointData/DataArray')
-#         for tag in point_data:
-#             if 'Name' not in tag.attrib:
-#                 raise ValueError(f"VTK file '{self.vtk.filename}' has PointData DataArray which is missing the 'Name' field")
-#             self[tag.attrib['Name']] = self.vtk.get_data_from_tag(tag)
-#
-#     def _get(self, i):
-#         if i not in self._d:
-#             raise KeyError(f"Invalid timestep: {i}")
-#
-#         points, point_data = self._d[i]
-#         pos = self.vtk.get_data_from_tag(points)
-#         cutoff = np.max(np.where(np.isfinite(test).all(1))[0])+1
-#         pos = pos[:cutoff]
+class PointSequenceFromFile(PointSequence):
+    def __init__(self, f):
+        '''A class for PointsSequence data loaded from a VTP file.
+
+        Parameters
+        ----------
+        f : string or VTKReader class
+            Input file
+        '''
+        if isinstance(f, VTKReader):
+            self.vtk = f
+        else:
+            self.vtk = VTKReader(f)
+
+        # Check that we have the right type of data in this file.
+        if 'TimeValues' not in self.vtk.main.attrib:
+            raise ValueError(f"'{self.vtk.filename}' contains a Points object, not PointSequence")
+        if self.vtk.main.tag != 'PolyData':
+            raise ValueError(f"Wrong VTK file type (found '{vtk.main.tag}', should be 'PolyData')")
+
+        # Get the mapping between 'TimeStep' and actual value
+        self._ts = tuple(map(int, self.vtk.main.attrib['TimeValues'].split()))
+
+        # Manually set number of points
+        self._N = self.vtk.contents.attrib['NumberOfPoints']
+
+        # Make empty data dictionaries
+        self._d = {ts:{} for ts in self._ts}
+
+        # Get point positions
+        points = self.vtk.contents.findall('Points/DataArray')
+        for tag in points:
+            if 'TimeStep' in tag.attrib:
+                ts = self._ts[int(tag.attrib['TimeStep'])]
+                self._d[ts]['pos'] = tag
+            else:
+                for data in self._d.items():
+                    data['pos'] = tag
+
+        if points is None:
+            raise ValueError(f"VTK file '{self.vtk.filename}' is missing Points/DataArray tag")
+
+        # Get point data
+        point_data = self.vtk.contents.findall('PointData/DataArray')
+        for tag in point_data:
+            if 'Name' not in tag.attrib:
+                raise ValueError(f"VTK file '{self.vtk.filename}' has PointData DataArray which is missing the 'Name' field")
+            key = tag.attrib['Name']
+
+            if 'TimeStep' in tag.attrib:
+                ts = self._ts[int(tag.attrib['TimeStep'])]
+                self._d[ts][key] = tag
+            else:
+                for data in self._d.items():
+                    data[key] = tag
+
+
+    def _get(self, i):
+        if i not in self._d:
+            raise KeyError(f"Invalid timestep: {i}")
+
+        data = {key:self.vtk.get_data_from_tag(tag) for key, tag in self._d[i].items()}
+        pos = data.pop('pos')
+
+        cutoff = np.max(np.where(np.isfinite(pos).all(1))[0])+1
+        pos = pos[:cutoff]
+        data = {key:data[:cutoff] for key, data in data.items()}
+
+        return Points(pos, **data)
