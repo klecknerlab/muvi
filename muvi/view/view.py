@@ -356,6 +356,7 @@ class View:
 
     # Note: Camel case params are generated automatically, underscore versions
     #  correspond to external params.
+    # Note 2: Most of this is handled by "params.py" now
     _defaults = dict(
         # surface_shade = "camera",
         # cloud_shade = "colormap",
@@ -702,7 +703,12 @@ class View:
 
         self.frameRange = frameRange
 
-        D = max(X1 - X0) * np.ones(3, 'f')
+        # Old version of tick spacing: use maximum axis
+        # D = max(X1 - X0) * np.ones(3, 'f')
+
+        # New version: use median length axis
+        # (Better for long skinny volumes!)
+        D = sorted(abs(X1 - X0))[1] * np.ones(3, 'f')
 
         # Build the tick spacing, which is the nearest 125 increment that
         #  has less than the specified number of (major) ticks
@@ -896,6 +902,7 @@ class View:
         X0 = self['disp_X0']
         X1 = self['disp_X1']
         spacing = self['axis_major_tick_spacing']
+        label_type = float if (spacing % 1) else int
         # Let's make sure the axes have actually changed...
         key = (tuple(X0), tuple(X1), spacing)
         if getattr(self, '_lastaxisLabel', None) == key:
@@ -937,7 +944,7 @@ class View:
                 for x in np.arange(i0[axis], i1[axis]+1) * spacing:
                     offset[axis] = x
                     start = self.textRender.write(self.axisLabel, offset,
-                        f'{x}', flags=48 + visFlag, padding=0.5,
+                        f'{label_type(x)}', flags=48 + visFlag, padding=0.5,
                         start=start, baseline=baseline, up=up)
 
                 offset[axis] = 0.5 * (X0[axis] + X1[axis])
