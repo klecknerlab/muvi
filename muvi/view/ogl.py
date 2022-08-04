@@ -1,3 +1,19 @@
+#!/usr/bin/python3
+#
+# Copyright 2021 Dustin Kleckner
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # from muvi.view.ooopengl import ShaderProgram
 
 try:
@@ -868,3 +884,15 @@ def _writeText (s, start, cap_height, line_height, output, atlas):
         output[j, 3] += height
 
     return i
+
+
+# A cube... used in various places
+CUBE_CORNERS = ((np.arange(8).reshape(-1, 1) // 2**np.arange(3)) % 2).astype('f')
+CUBE_TRIANGLES = np.array([
+    0, 1, 5, 0, 5, 4,
+    1, 3, 7, 1, 7, 5,
+    2, 7, 3, 2, 6, 7,
+    0, 4, 2, 2, 4, 6,
+    4, 5, 7, 4, 7, 6,
+    0, 2, 3, 0, 3, 1
+], dtype='u4')

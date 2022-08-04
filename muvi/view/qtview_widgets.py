@@ -800,12 +800,12 @@ class AssetItem(QListWidgetItem):
     def __init__(self, asset, mainWindow, parent=None):
         super().__init__(asset.label, parent)
         self.id = asset.id
-        self.isVolume = asset.isVolume
         self.setFlags(self.flags() | Qt.ItemIsUserCheckable ) #
         self.prefix = f'#{self.id}_'
         self.setCheckState(Qt.Checked if asset.visible else Qt.Unchecked)
-        self.setToolTip('\n'.join(asset.info))
+        self.setToolTip('\n'.join(asset.get_info()))
         self.asset = asset
+        self.shader = asset.shader
 
         self.tab = mainWindow.buildParamTab(asset.paramList(), prefix=self.prefix, defaults=asset.allParams())
         self.label = asset.shader.capitalize()
@@ -864,13 +864,13 @@ class AssetList(QListWidget):
         params = {asset.prefix + "visible": checked}
 
         # If we are activating a volume, deactivate all others!
-        if asset.isVolume and checked:
+        if asset.shader == 'volume' and checked:
             self.blockSignals(True)
 
             # Turn off all other volumes, but block signals to prevent this
             #   from getting called again
             for asset2 in self.assets.values():
-                if asset.id == asset2.id or (not asset2.isVolume):
+                if asset.id == asset2.id or (asset2.shader != "volume"):
                     continue
 
                 asset2.setCheckState(Qt.Unchecked)

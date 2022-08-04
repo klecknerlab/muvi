@@ -251,7 +251,7 @@ PARAM_CATEGORIES['Limits'] = [
         max=50*one, range_update='data_limits+',
         tooltip='Upper limit of displayed volume (in physical units)'),
     ViewParam('mesh_clip', 'Clip Mesh to Limits', True,
-        tooltip='If True, clip Mesh to volumetric data limits.'),
+        tooltip='If True, clip mesh and glyphs to volumetric data limits.'),
 ]
 
 PARAM_CATEGORIES['View'] = [
@@ -306,6 +306,16 @@ PARAM_CATEGORIES['Display'] = [
 
 MAX_CHANNELS = 3
 _default_colormaps = ['inferno', 'viridis', 'cividis']
+
+_ASSET = "glyph"
+ASSET_PARAMS['glyph'] = [
+    ViewParam(f'glyph_colormap', 'Colormap', 'RdBu',
+        options=_colormap_names,
+        tooltip='Select the color map used to display glyphs'),
+    ViewParam(f'glyph_c0', 'Minimum range of colormap', -1.0, -10.0, 10.0),
+    ViewParam(f'glyph_c1', 'Maximum range of colormap', +1.0, +10.0, 10.0),
+    # ViewParam(f'')
+]
 
 _ASSET = "mesh"
 

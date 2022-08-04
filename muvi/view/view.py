@@ -1,14 +1,28 @@
+#!/usr/bin/python3
+#
+# Copyright 2022 Dustin Kleckner
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from .ogl import ShaderProgram, GL, VertexArray, FrameBuffer, useProgram, \
     norm, cross, mag, dot, dot1, textureFromArray, Texture, TextRenderer, \
-    cameraMatrix
+    cameraMatrix, CUBE_CORNERS, CUBE_TRIANGLES
+from .assets import load_asset
 from scipy.spatial.transform import Rotation
-from ..mesh import load_mesh, Mesh
-from .. import open_3D_movie, VolumetricMovie
 import numpy as np
 import sys, os
 # from text_render import TextRenderer
-from .params import PARAMS, MAX_CHANNELS, COLORMAPS, ASSET_DEFAULTS, \
-    ASSET_PARAMS, ALL_ASSET_PARAMS
+from .params import PARAMS, MAX_CHANNELS, COLORMAPS, ALL_ASSET_PARAMS
 import re
 
 SHADER_DIR = os.path.join(os.path.split(__file__)[0], 'shaders')
@@ -32,278 +46,6 @@ def log125(x):
     l10 = int(np.floor(np.log10(x)))
     wl = np.where(x >= _OTF*10**l10)[0]
     return l10 * 3 + ((wl).max() if len(wl) else 0)
-
-
-#----------------------------------------------------------------
-# ViewAsset class: an object that can be displayed by the viewer
-#----------------------------------------------------------------
-
-CUBE_CORNERS = ((np.arange(8).reshape(-1, 1) // 2**np.arange(3)) % 2).astype('f')
-CUBE_TRIANGLES = np.array([
-    0, 1, 5, 0, 5, 4,
-    1, 3, 7, 1, 7, 5,
-    2, 7, 3, 2, 6, 7,
-    0, 4, 2, 2, 4, 6,
-    4, 5, 7, 4, 7, 6,
-    0, 2, 3, 0, 3, 1
-], dtype='u4')
-
-def copyArray(x):
-    if isinstance(x, (np.ndarray, list)):
-        return x.copy()
-    else:
-        return x
-
-# <<TEXT>>
-
-class ViewAsset:
-    def __init__(self, data, id=0, parent=None):
-        self.filename = None
-        self.parent = parent
-        self.id = id
-        self.info = [f'Id: {self.id}']
-
-        if isinstance(data, str):
-            self.abspath = os.path.abspath(data)
-
-            bfn, ext = os.path.splitext(data)
-            ext = ext.lower()
-
-            if ext in ('.vti', '.cine'):
-                self.filename = data
-                data = open_3D_movie(data)
-            elif ext in ('.ply'):
-                dir, bfn = os.path.split(bfn)
-                m = re.match('(.*_)frame([0-9]+)', bfn)
-                if m: # This is a sequence of polygon meshes!
-                    self.filename = m.group(1) + "[frame]" + ext
-                    data = {}
-                    regex = re.compile(f'{m.group(1)}frame([0-9]+)' + ext)
-
-                    for fn in os.listdir(dir):
-                        m2 = regex.match(fn)
-                        if m2:
-                            data[int(m2.group(1))] = os.path.join(dir, fn)
-                    self.abspath = os.path.abspath(data[min(data.keys())])
-                else:
-                    self.filename = data
-                    data = load_mesh(data)
-            else:
-                raise ValueError('Supported file types are VTI, CINE, and PLY')
-
-
-        if self.filename is None:
-            # self.info.append('Source: Object passed directly to viewer')
-            self.filename = '-'
-        else:
-            dir, self.filename = os.path.split(self.filename)
-            self.info.append(f'Directory: {os.path.abspath(dir)}')
-
-        self.isVolume = False
-        self.visible = False
-        self.vertexArray = None
-        self.validFrame = True
-        self._frame = None
-        self.uniforms = {}
-        self.globalUniformNames = set()
-        self.globalUniforms = {}
-
-        if isinstance(data, Mesh):
-            self.shader = 'mesh'
-            self.vertexArray, self.X0, self.X1 = meshToVertexArray(data)
-            self.frameRange = None
-            self.label = f'Mesh: {self.filename}'
-
-        elif isinstance(data, dict):
-            self.shader = 'mesh'
-            self.X0 = None
-            self.X1 = None
-            self.meshSeq = {}
-
-            X0s = []
-            X1s = []
-
-            for key, mesh in data.items():
-                if isinstance(mesh, str):
-                    mesh = load_mesh(mesh)
-                va, X0, X1 = meshToVertexArray(mesh)
-                self.meshSeq[key] = va
-                X0s.append(X0)
-                X1s.append(X1)
-
-            self.X0 = np.min(X0s, axis=0)
-            self.X1 = np.max(X1s, axis=0)
-
-            keys = self.meshSeq.keys()
-            self.frameRange = (min(keys), max(keys))
-            self.missingFrames = len(keys) != (self.frameRange[1] - self.frameRange[0] + 1)
-
-            self.label = f'Mesh Sequence: {self.filename}'
-
-        elif isinstance(data, VolumetricMovie):
-            self.volume = data
-            self.isVolume = True
-            self.shader = 'volume'
-            L = np.array(self.volume.info.get_list('Lx', 'Ly', 'Lz'), dtype='f')
-            self.X0 = -0.5 * L
-            self.X1 = 0.5 * L
-            self.uniforms = dict(
-                _vol_L = L,
-                _vol_N = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f'),
-                distortion_correction_factor = self.volume.distortion.var.get('distortion_correction_factor', np.zeros(3, 'f'))
-            )
-            self.globalUniformNames.update(self.parent._shaderDep[self.shader])
-            self.globalUniformNames.update(self.parent._rebuildDep.keys())
-
-            self.frameRange = (0, len(self.volume) - 1)
-
-            vol = self.volume[0]
-            if vol.ndim == 3:
-                vol = vol[..., np.newaxis]
-
-            GL.glActiveTexture(GL.GL_TEXTURE1)
-            self.volumeTexture = textureFromArray(vol, wrap=GL.GL_CLAMP_TO_EDGE)
-            GL.glActiveTexture(GL.GL_TEXTURE0)
-
-
-            points = np.empty(len(CUBE_CORNERS), _volVertType)
-            points['position'] = CUBE_CORNERS
-            self.vertexArray = VertexArray(points)
-            self.vertexArray.attachElements(CUBE_TRIANGLES)
-
-            self.label = f"Volumes: {self.filename}"
-
-        else:
-            raise ValueError('asset data should be a filename, Mesh/VolumetricMovie object, or dictionary of {frameNumber:Mesh}')
-
-        with np.printoptions(precision=4) as opts:
-            self.info.append(f'Lower Extent: {self.X0}')
-            self.info.append(f'Upper Extent: {self.X1}')
-
-        if self.frameRange is not None:
-            self.info.append(f"Frames: {self.frameRange[0]}-{self.frameRange[1]}{' (missing)' if getattr(self, 'missingFrames', False) else ''}")
-
-        for key, val in ASSET_DEFAULTS[self.shader].items():
-            if key in self.uniforms or key in self.globalUniforms:
-                continue
-            self[key] = val
-
-    def paramList(self):
-        return ASSET_PARAMS[self.shader]
-
-    def __setitem__(self, key, val):
-        if key in self.globalUniformNames:
-            if self.visible:
-                self.parent[key] = val
-            self.globalUniforms[key] = val
-        elif key == 'frame':
-            self.setFrame(val)
-        elif key == 'visible':
-            if val and (not self.visible) and hasattr(self, 'globalUniforms'):
-                self.parent.update(self.globalUniforms)
-            self.visible = val
-        else:
-            self.uniforms[key] = val
-
-    def update(self, d):
-        for k, v in d.items():
-            self.__setitem__(k, v)
-
-    def allParams(self, prefix=True, hidden=False):
-        if prefix is True:
-            prefix = f'#{self.id}_'
-
-        d = {prefix+'visible':self.visible}
-        d.update({
-            prefix+k:copyArray(v)
-            for k, v in self.uniforms.items()
-            if (hidden or (not k.startswith('_')))
-        })
-
-        if hasattr(self, 'globalUniforms'):
-            d.update({
-                prefix+k:copyArray(v)
-                for k, v in self.globalUniforms.items()
-                if (hidden or (not k.startswith('_')))
-            })
-
-        return d
-
-    def setFrame(self, frame):
-        if frame == self._frame or self.frameRange is None:
-            return
-        if frame < self.frameRange[0] or frame > self.frameRange[1]:
-            self.validFrame = False
-            return
-        self.validFrame = True
-
-        if self.isVolume:
-            if frame != getattr(self, '_frame', None):
-                GL.glActiveTexture(GL.GL_TEXTURE1)
-                self.volumeTexture.replace(self.volume[frame])
-
-        elif hasattr(self, 'meshSeq'):
-            self.vertexArray = self.meshSeq.get(frame, None)
-            if self.vertexArray is None:
-                self.validFrame = False
-
-        self._frame = frame
-
-    def draw(self):
-        if self.validFrame:
-            self.vertexArray.draw()
-
-    def delete(self):
-        # Explicitly clean up opengl storage.
-        # Trusting the garbage collector to do this isn't a good idea, as it
-        #   doesn't work well on app shutdown.
-        if hasattr(self, 'volumeTexture'):
-            self.volumeTexture.delete()
-        if hasattr(self, 'meshSeq'):
-            for item in self.meshSeq.values():
-                item.delete()
-            del self.vertexArray
-        if hasattr(self, 'vertexArray'):
-            self.vertexArray.delete()
-
-_meshVertType = np.dtype([
-    ('position', '3float32'),
-    ('normal',   '3float32'),
-    ('color',    '4float32')
-])
-
-_volVertType = np.dtype([
-    ('position', '3float32'),
-])
-
-def meshToVertexArray(m):
-    N = len(m.points)
-    vert = np.empty(N, _meshVertType)
-
-    if not hasattr(m, 'normals'):
-        raise ValueError('Displayed meshes must include point normals!')
-
-    vert['position'] = m.points
-    vert['normal'] = m.normals
-
-    if hasattr(m, 'colors'):
-        N, channels = m.colors.shape
-        m.ensure_linear_colors()
-        vert['color'][:, :channels] = m.colors
-
-        if channels == 3:
-            vert['color'][:, 3] = 1.0
-    else:
-        vert['color'] = 1.0
-
-    points = m.points[~(np.isnan(m.points).any(1))]
-    X0 = points.min(0)
-    X1 = points.max(0)
-
-    va = VertexArray(vert)
-    va.attachElements(m.triangles.astype('u4'))
-
-    return va, X0, X1
 
 
 #--------------------------------------------------------
@@ -641,7 +383,8 @@ class View:
         else:
             if id is None:
                 id = 0
-        asset = ViewAsset(data, id, parent=self)
+        # asset = ViewAsset(data, id, parent=self)
+        asset = load_asset(data, id, parent=self)
         self.assets[id] = asset
         # self[f'#{id}_visible'] = True # Will automatically trigger resetRange
         # self.resetView()
@@ -656,7 +399,7 @@ class View:
 
             for id2, asset in self.assets.items():
                 if getattr(asset, "abspath", False) == fn:
-                    # This asset already exists!  Return id instead of asser
+                    # This asset already exists!  Return id instead of asset
                     #  object to indicate we didn't load something new!
                     newIds[id] = asset.id
                     break
@@ -666,7 +409,6 @@ class View:
                     newIds[id] = self.openData(fn)
                 else:
                     newIds[id] = self.openData(fn, id)
-
 
         return newIds
 
