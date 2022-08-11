@@ -250,8 +250,8 @@ PARAM_CATEGORIES['Limits'] = [
     ViewParam('disp_X1', 'Displayed Volume Upper Limit', 50*one, min=-50*one,
         max=50*one, range_update='data_limits+',
         tooltip='Upper limit of displayed volume (in physical units)'),
-    ViewParam('mesh_clip', 'Clip Mesh to Limits', True,
-        tooltip='If True, clip mesh and glyphs to volumetric data limits.'),
+    ViewParam('mesh_clip', 'Clip geometry to Limits', True,
+        tooltip='If True, clip non-volumetric data to volumetric data limits.'),
 ]
 
 PARAM_CATEGORIES['View'] = [
@@ -305,20 +305,33 @@ PARAM_CATEGORIES['Display'] = [
 ]
 
 MAX_CHANNELS = 3
-_default_colormaps = ['inferno', 'viridis', 'cividis']
+_default_colormaps = ('inferno', 'viridis', 'cividis')
 
-_ASSET = "glyph"
-ASSET_PARAMS['glyph'] = [
-    ViewParam(f'glyph_colormap', 'Colormap', 'RdBu',
-        options=_colormap_names,
+VECTOR_OPTIONS = ('+x', '+y', '+z', '-x', '-y', '-z')
+SCALAR_OPTIONS = ('1', )
+GLYPH_TYPES = {0:'Sphere', 1:'Arrow', 2:'Tick', 3:'Cylinder'}
+
+_ASSET = "points"
+ASSET_PARAMS['points'] = [
+    ViewParam('geometry_color', 'Color', '1', options=SCALAR_OPTIONS,
+        tooltip='Parameter used to color glyphs'),
+    ViewParam('geometry_colormap', 'Colormap', 'RdBu', options=_colormap_names,
         tooltip='Select the color map used to display glyphs'),
-    ViewParam(f'glyph_c0', 'Minimum range of colormap', -1.0, -10.0, 10.0),
-    ViewParam(f'glyph_c1', 'Maximum range of colormap', +1.0, +10.0, 10.0),
-    # ViewParam(f'')
+    ViewParam('geometry_c0', 'Min. value', -1.0, -10.0, 10.0,
+        tooltip='Minimum value used in color scaling'),
+    ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0,
+        tooltip='Maximum value used in color scaling'),
+    ViewParam('points_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
+        tooltip='Orientation vector of the glyphs'),
+    ViewParam('geometry_size', 'Size', '1', options=SCALAR_OPTIONS,
+        tooltip='Parameter used to size glyphs'),
+    ViewParam('geometry_scale', 'Scale factor', 1.0, 1E-3, 1000, logstep=2,
+        tooltip='Scale factor for glyphs'),
+    ViewParam('points_glyph', 'Glyph', 1, options=GLYPH_TYPES,
+        tooltip='Type of glyph to display at each point')
 ]
 
 _ASSET = "mesh"
-
 ASSET_PARAMS['mesh'] = [
     ViewParam('mesh_scale', 'Scale of Mesh', 1.0, 1E-3, 1000, logstep=2**0.5,
         tooltip='Scale of the mesh, relative to the volumetric data units.'),
@@ -327,7 +340,6 @@ ASSET_PARAMS['mesh'] = [
 ]
 
 _ASSET = "volume"
-
 ASSET_PARAMS['volume'] = [
     ViewParam('vol_density', 'Density', 0.5, min=2**-10, max=2, logstep=2**(1/2),
         tooltip='The density of the cloud rendering.  If glow=1, this is the opacity of a single voxel with maximum vaue.'),

@@ -61,6 +61,7 @@ class View:
             "color_remap", "vol_cloud1", "vol_cloud2", "vol_cloud3", "vol_iso1",
             "vol_iso2", "vol_iso3", "gamma2"},
         "mesh": {"surface_shade", "mesh_clip"},
+        "points": {"surface_shade", "mesh_clip"},
         "text": {},
         "axis": {},
     }
@@ -157,8 +158,9 @@ class View:
         self.shaders = {}
         self.volFrames = 0
         self.visibleAssets = {
-            "volume":set(),
-            "mesh":set(),
+            "volume": set(),
+            "mesh": set(),
+            "points": set(),
         }
         self.assets = {}
 
@@ -644,6 +646,14 @@ class View:
         X0 = self['disp_X0']
         X1 = self['disp_X1']
         spacing = self['axis_major_tick_spacing']
+
+        digits = -int(np.floor(np.log10(self['axis_major_tick_spacing'])))
+        if digits > 0:
+            label_fmt = f'%.{digits}f'
+        else:
+            label_fmt = '%i'
+
+
         label_type = float if (spacing % 1) else int
         # Let's make sure the axes have actually changed...
         key = (tuple(X0), tuple(X1), spacing)
@@ -686,7 +696,7 @@ class View:
                 for x in np.arange(i0[axis], i1[axis]+1) * spacing:
                     offset[axis] = x
                     start = self.textRender.write(self.axisLabel, offset,
-                        f'{label_type(x)}', flags=48 + visFlag, padding=0.5,
+                        label_fmt % x, flags=48 + visFlag, padding=0.5,
                         start=start, baseline=baseline, up=up)
 
                 offset[axis] = 0.5 * (X0[axis] + X1[axis])
@@ -968,23 +978,29 @@ class View:
 
         frame = self['frame']
 
-        # ---- Draw the Mesh ----
-        if self.visibleAssets['mesh']:
-            GL.glEnable(GL.GL_DEPTH_TEST)
-            # Don't draw the back side of meshes... unless we are clipping!
-            if not self["mesh_clip"]:
-                GL.glEnable(GL.GL_CULL_FACE)
-            else:
-                GL.glDisable(GL.GL_CULL_FACE)
+        # ---- Draw polygon based assets ----
+        # if self.visibleAssets['mesh']:
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        # Don't draw the back side of meshes... unless we are clipping!
+        if not self["mesh_clip"]:
+            GL.glEnable(GL.GL_CULL_FACE)
+        else:
+            GL.glDisable(GL.GL_CULL_FACE)
 
-            GL.glCullFace(GL.GL_BACK)
-            GL.glDisable(GL.GL_BLEND)
+        GL.glCullFace(GL.GL_BACK)
+        GL.glDisable(GL.GL_BLEND)
 
-            shader = self.useShader('mesh')
+
+        for shader_type in ('mesh', 'points'):
+            assets = self.visibleAssets[shader_type]
+            if not assets:
+                continue
+
+            shader = self.useShader(shader_type)
             # Note: perspective matrix is per-buffer, so we need to update!
             shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
 
-            for id in self.visibleAssets['mesh']:
+            for id in assets:
                 asset = self.assets[id]
                 asset.setFrame(frame)
                 if asset.validFrame:

@@ -346,7 +346,7 @@ class OptionsControl(ParamControl):
             self.option_names = tuple(options.values())
         else:
             self.option_values = tuple(options)
-            self.option_names = option_values
+            self.option_names = self.option_values
 
         self.comboBox.clear()
 
@@ -807,7 +807,9 @@ class AssetItem(QListWidgetItem):
         self.asset = asset
         self.shader = asset.shader
 
-        self.tab = mainWindow.buildParamTab(asset.paramList(), prefix=self.prefix, defaults=asset.allParams())
+        pl = asset.paramList()
+        # self.tab = mainWindow.buildParamTab(pl, prefix=self.prefix, defaults=asset.allParams())
+        self.tab = mainWindow.buildParamTab(pl, prefix=self.prefix)
         self.label = asset.shader.capitalize()
 
 

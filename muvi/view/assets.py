@@ -20,11 +20,14 @@
 
 from .. import open_3D_movie, VolumetricMovie
 from ..mesh import load_mesh, Mesh
-from .ogl import GL, VertexArray, textureFromArray, CUBE_CORNERS, CUBE_TRIANGLES
-from .params import ASSET_DEFAULTS, ASSET_PARAMS
+from .ogl import GL, VertexArray, textureFromArray, CUBE_CORNERS, \
+    CUBE_TRIANGLES, mag
+from .params import ASSET_DEFAULTS, ASSET_PARAMS, VECTOR_OPTIONS, SCALAR_OPTIONS
+from .. import geometry
 import re
 import numpy as np
 import os
+from copy import copy
 
 #----------------------------------------------------------------------------
 # Utility functions
@@ -46,7 +49,7 @@ def load_asset(fn, id=0, parent=None):
     if ext in ('.vti', '.vts', '.cine'):
         return VolumeAsset(fn, id, parent)
     elif ext in ('.vtp'):
-        return GlyphAsset(fn, id, parent)
+        return GeometryAsset(fn, id, parent)
     elif ext in ('.ply'):
         dir, bfn = os.path.split(fn)
         m = _SEQUENCE_RE.match(bfn)
@@ -71,9 +74,9 @@ def load_asset(fn, id=0, parent=None):
 
 class DisplayAsset:
     shader = None
-    _LABEL = 'Asset:'
+    _LABEL = 'Asset'
 
-    def __init__(self, data, id, parent):
+    def __init__(self, data, id, parent, _loaded_from=None):
         '''Base class for display assets.  Not meant to be used directly, but
         other classes derived from it.
 
@@ -88,18 +91,22 @@ class DisplayAsset:
             The view object which is displaying this asset.
         '''
 
+        if _loaded_from is not None:
+            source = _loaded_from
+        else:
+            source = data
+
         self.parent = parent
         self.id = id
         self.filename = f'#{id}' # Placeholder!
-        self._sourcedata = data
 
-        if isinstance(data, str):
+        if isinstance(source, str):
             # We are loading data from a file, as is usually the case!
-            self.dir, self.filename = os.path.split(data)
-            self.abspath = os.path.abspath(data)
-        elif isinstance(data, dict):
+            self.dir, self.filename = os.path.split(source)
+            self.abspath = os.path.abspath(source)
+        elif isinstance(source, dict):
             # A frame sequence...
-            fn0 = data[min(data.keys())]
+            fn0 = data[min(source.keys())]
             if isinstance(fn0, str): # A frame sequence with files!
                 bfn, ext = os.path.splitext(fn0)
                 m = _SEQUENCE_RE.match(bfn)
@@ -108,12 +115,13 @@ class DisplayAsset:
                 self.dir, self.filename = os.path.split(fn0)
                 self.abspath = os.path.abspath(fn0)
 
-        self.label = self._LABEL + " " + self.filename
+        self.label = f"{self._LABEL}: {self.filename}"
 
         self.visible = False
         # self.vertexArray = None
         self.validFrame = True
-        self.frameRange = None
+        if not hasattr(self, 'frameRange'):
+            self.frameRange = None
         self._frame = None
         self.uniforms = {}
         self.globalUniformNames = set()
@@ -127,10 +135,8 @@ class DisplayAsset:
         self.globalUniformNames.update(self.parent._shaderDep[self.shader])
         self.globalUniformNames.update(self.parent._rebuildDep.keys())
 
-        self._load(data)
-
-    def reload(self):
-        self._load(self._sourcedata)
+        if _loaded_from is None:
+            self._load(data)
 
     def _load(self):
         # used by derived classes, here just a placeholder
@@ -198,7 +204,7 @@ class DisplayAsset:
     def setFrame(self, frame):
         if frame == self._frame or self.frameRange is None:
             pass
-        if frame < self.frameRange[0] or frame > self.frameRange[1]:
+        elif frame < self.frameRange[0] or frame > self.frameRange[1]:
             self.validFrame = False
         else:
             self.validFrame = True
@@ -217,32 +223,13 @@ class DisplayAsset:
         # used by derived classes, here just a placeholder
         pass
 
-
-
-
-class GlyphAsset(DisplayAsset):
-    shader = 'glyph'
-    _LABEL = 'Glyph:'
-    _VERT_TYPE = np.dtype([
-        ('position', '3float32'),
-        ('X',        '3float32'),
-        ('Y',        '3float32'),
-        ('scale',    '3float32'),
-        ('color',    'float32'),
-        ('glyphType','uint32'),
-    ])
-
-
-
 #----------------------------------------------------------------------------
 # Display class and misc. functions for volumetric data
 #----------------------------------------------------------------------------
 
-
-
 class VolumeAsset(DisplayAsset):
     shader = 'volume'
-    _LABEL = 'Volume:'
+    _LABEL = 'Volume'
     _VERT_TYPE = np.dtype([
         ('position', '3float32'),
     ])
@@ -303,7 +290,7 @@ class VolumeAsset(DisplayAsset):
 
 class MeshAsset(DisplayAsset):
     shader = 'mesh'
-    _LABEL = 'Surface:'
+    _LABEL = 'Mesh'
     _VERT_TYPE = np.dtype([
         ('position', '3float32'),
         ('normal',   '3float32'),
@@ -392,3 +379,184 @@ class MeshAsset(DisplayAsset):
 #----------------------------------------------------------------------------
 # Display class and misc. functions for glyph data
 #----------------------------------------------------------------------------
+
+_COMPONENT_RE = re.compile('(.*)\.(x|y|z|mag)')
+X, Y, Z = np.eye(3)
+CONST_VARS = {
+    '+x': X,
+    '-x': -X,
+    '+y': Y,
+    '-y': -Y,
+    '+z': Z,
+    '-z': -Z,
+    '1': 1,
+}
+
+class GeometryAsset(DisplayAsset):
+    def __init__(self, data, id, parent):
+        source = None
+        is_sequence = False
+
+        if isinstance(data, str):
+            source = data
+            data = geometry.load_geometry(data)
+
+        if isinstance(data, (geometry.Points, geometry.PointSequence)):
+            self.shader = 'points'
+            self._LABEL = 'Points'
+            self._VERT_TYPE = np.dtype([
+                ('position',  '3float32'),
+                ('normal',    '3float32'),
+                ('size',      'float32'),
+                ('color',     'float32'),
+                ('glyphType', 'uint32'),
+            ])
+            self.uniform_vars = {
+                'points_normal':  'normal',
+                'geometry_size':  'size',
+                'geometry_color': 'color',
+                'points_glyph':   'glyphType',
+            }
+
+            if isinstance(data, geometry.Points):
+                self.current_data = data
+
+            else: #PointSequence
+                frames = data.keys()
+                self.frameRange = (min(frames), max(frames))
+                self.frame = min(frames)
+                self.current_data = data[self.frame]
+                self.is_sequence = True
+                self.seq = data
+
+        else:
+            raise ValueError('Data type is not displayable by this viewer!')
+
+        super().__init__(data, id, parent, _loaded_from=source)
+
+        self.scalar_options = list(SCALAR_OPTIONS)
+        self.vector_options = list(VECTOR_OPTIONS)
+        self.scalar_min = None
+        self.scalar_max = None
+
+        for key, arr in self.current_data.items():
+            minval, maxval = arr.min(), arr.max()
+            if self.scalar_min is None or self.scalar_min > minval:
+                self.scalar_min = minval
+            if self.scalar_max is None or self.scalar_min < maxval:
+                self.scalar_max = maxval
+
+            if arr.ndim == 1:
+                self.scalar_options.append(key)
+            elif arr.ndim == 2 and arr.shape[1] == 3:
+                self.vector_options.append(key)
+                self.scalar_options += [f'{key}.{c}' for c in ('x', 'y', 'z', 'mag')]
+
+
+        if 'pos' not in self.current_data:
+            raise ValueError('Points object lacking "pos" key... this should never happen!')
+        pos = self.current_data['pos']
+        self.X0 = pos.min(0)
+        self.X1 = pos.max(0)
+        self._N = len(pos)
+
+    def get_var(self, key):
+        if key in self.current_data:
+            return(self.current_data[key])
+        elif key in CONST_VARS:
+            return CONST_VARS[key]
+
+        m = _COMPONENT_RE.match(key)
+        if m:
+            key = m.group(1)
+            c = m.group(2)
+            if key in self.current_data:
+                data = self.current_data[key]
+                if c == 'x':
+                    return data[..., 0]
+                elif c == 'y':
+                    return data[..., 1]
+                elif c == 'z':
+                    return data[..., 2]
+                elif c == 'mag':
+                    return mag(data)
+
+        # If we haven't already returned... this is in invalid key!
+        raise ValueError(f'Invalid scalar variable: "{key}"')
+
+    def _build_arrays(self):
+        if hasattr(self, 'vertexArray'):
+            self.vertexArray.delete()
+
+        pos = self.current_data['pos']
+        arr = np.empty(len(pos), self._VERT_TYPE)
+        arr['position'] = pos
+        for u, var in self.uniform_vars.items():
+            val = self.uniforms[u]
+            if isinstance(val, str):
+                val = self.get_var(val)
+            arr[var] = val
+
+        # print(arr[:5])
+        self.vertexArray = VertexArray(arr)
+        self._N = len(arr)
+
+
+    def _set_frame(self, frame):
+        if frame in self.seq:
+            self.current_data = self.seq[int(frame)]
+            self._build_arrays()
+        else:
+            self.validFrame = False
+
+
+    def draw(self):
+        if self.validFrame:
+            self.vertexArray.drawArrays(GL.GL_POINTS, 0, self._N)
+
+    def modify_param(self, name, **kwargs):
+        if name in self.param_order:
+            i = self.param_order[name]
+            p = copy(self.params[i])
+            for key, val in kwargs.items():
+                setattr(p, key, val)
+            self.params[i] = p
+
+            if 'default' in kwargs:
+                self[name] = kwargs['default']
+
+    def paramList(self):
+        # The parameter list needs to be updated based on the available data
+        self.params = ASSET_PARAMS[self.shader].copy()
+        self.param_order = {p.name:i
+            for i, p in enumerate(self.params) if hasattr(p, 'name')}
+
+        color_mod = dict(options=self.scalar_options, default='pos.mag')
+        normal_mod = dict(options=self.vector_options)
+        if 'vel' in self.vector_options:
+            color_mod['default'] = 'vel.mag'
+            normal_mod['default'] = 'vel'
+        self.modify_param('geometry_color', **color_mod)
+        self.modify_param('points_normal', **normal_mod)
+
+        c = self.get_var(color_mod['default'])
+        self.modify_param('geometry_c0', min=self.scalar_min,
+            max=self.scalar_max, default=c.min())
+        self.modify_param('geometry_c1', min=self.scalar_min,
+            max=self.scalar_max, default=c.max())
+
+        self.modify_param('geometry_size', options=self.scalar_options)
+        L = mag(self.X1 - self.X0)
+        self.modify_param('geometry_scale', default = L / np.sqrt(self._N))
+
+        return self.params
+
+    def __setitem__(self, key, val):
+        # Handle changes that require us to
+        super().__setitem__(key, val)
+
+        if key in self.uniform_vars and self.visible:
+            self._build_arrays()
+
+        if key == 'geometry_colormap':
+            self.uniforms['colormapOffset'] = self.parent.colormapOffsets[val]

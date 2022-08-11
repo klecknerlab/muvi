@@ -97,6 +97,9 @@ class Points:
         '''Return an iterable of all the attributes'''
         return self._d.keys()
 
+    def __contains__(self, key):
+        return key in self._d
+
     def items(self, force_floats=None, force_length=None):
         '''Return an iterator class with the attribute names and values of the
         points.
@@ -318,6 +321,9 @@ class PointSequence:
 
     def keys(self):
         return self._d.keys()
+
+    def __contains__(self, key):
+        return key in self._d
 
     def save(self, fn, filetype='vtp', force_floats='f'):
         '''Save the points into a file.
