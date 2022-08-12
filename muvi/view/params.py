@@ -147,7 +147,7 @@ _ASSET = None
 class ViewParam:
     def __init__(self, name, display_name, default, min=None,
             max=None, step=None, logstep=None, options=None, param_type=None,
-            tooltip=None, max_from_vol=None, range_update=None):
+            tooltip=None, max_from_vol=None, range_update=None, extend=None):
         self.name = name
         self.display_name = display_name
         self.default = default
@@ -170,6 +170,8 @@ class ViewParam:
             PARAMS_WITH_VOLUME_RANGES[name] = self
         if range_update is not None:
             self.range_update = range_update
+        if extend is not None:
+            self.extend = extend
 
         if param_type is None:
             self.type = type(self.default)
@@ -245,10 +247,10 @@ PARAM_CATEGORIES['Asset List'] = [
 PARAM_CATEGORIES['Limits'] = [
     # ViewAction('resetView', 'Recenter View', None, None),
     ViewParam('disp_X0', 'Displayed Volume Lower Limit', -50*one, min=-50*one,
-        max=50*one, range_update='data_limits+',
+        max=50*one, range_update='data_limits+', extend=1,
         tooltip='Lower limit of displayed volume (in physical units)'),
     ViewParam('disp_X1', 'Displayed Volume Upper Limit', 50*one, min=-50*one,
-        max=50*one, range_update='data_limits+',
+        max=50*one, range_update='data_limits+', extend=1,
         tooltip='Upper limit of displayed volume (in physical units)'),
     ViewParam('mesh_clip', 'Clip geometry to Limits', True,
         tooltip='If True, clip non-volumetric data to volumetric data limits.'),
@@ -317,9 +319,9 @@ ASSET_PARAMS['points'] = [
         tooltip='Parameter used to color glyphs'),
     ViewParam('geometry_colormap', 'Colormap', 'RdBu', options=_colormap_names,
         tooltip='Select the color map used to display glyphs'),
-    ViewParam('geometry_c0', 'Min. value', -1.0, -10.0, 10.0,
+    ViewParam('geometry_c0', 'Min. value', -1.0, -10.0, 10.0, extend=2,
         tooltip='Minimum value used in color scaling'),
-    ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0,
+    ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0, extend=2,
         tooltip='Maximum value used in color scaling'),
     ViewParam('points_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
         tooltip='Orientation vector of the glyphs'),

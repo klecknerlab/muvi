@@ -173,11 +173,12 @@ class BoolControl(ParamControl):
 
 class IntControl(ParamControl):
     def __init__(self, title="Value:", default=50, minVal=0, maxVal=100,
-            step=None, tooltip=None, param=None):
+            step=None, tooltip=None, param=None, extend=0):
         self.spinBox = UnwheelSpinBox()
 
         super().__init__(title, param, tooltip, w=self.spinBox, slider=True)
 
+        self.extend = extend
         self.setRange(minVal, maxVal)
         self.setValue(default)
 
@@ -193,7 +194,8 @@ class IntControl(ParamControl):
         self.value = self.spinBox.value
 
     def setRange(self, minVal, maxVal):
-        self.spinBox.setRange(minVal, maxVal)
+        extend = (maxVal - minVal) * self.extend
+        self.spinBox.setRange(minVal - extend, maxVal + extend)
         self.slider.setRange(minVal, maxVal)
 
     def setValue(self, value, silent=False):
@@ -208,7 +210,8 @@ class IntControl(ParamControl):
 
 class LinearControl(ParamControl):
     def __init__(self, title="Value:", default=50, minVal=0, maxVal=100,
-            step=None, decimals=None, tooltip=None, param=None, subdiv=5):
+            step=None, decimals=None, tooltip=None, param=None, subdiv=5,
+            extend=0):
 
         self.spinBox = UnwheelDoubleSpinBox()
 
@@ -218,6 +221,7 @@ class LinearControl(ParamControl):
         self.step = step
 
         self.decimals = decimals
+        self.extend = extend
         self.setRange(minVal, maxVal)
         self.setValue(default)
 
@@ -237,7 +241,8 @@ class LinearControl(ParamControl):
         self.minVal = minVal
         self.maxVal = maxVal
         self.ratio = self.sliderSteps / (self.maxVal - self.minVal)
-        self.spinBox.setRange(minVal, maxVal)
+        extend = (maxVal - minVal) * self.extend
+        self.spinBox.setRange(minVal - extend, maxVal + extend)
         self.slider.setRange(0, self.sliderSteps)
         self.spinBox.setSingleStep(step)
         self.slider.setSingleStep(self.subdiv)
@@ -276,7 +281,8 @@ class LogSpinBox(UnwheelDoubleSpinBox):
 
 class LogControl(ParamControl):
     def __init__(self, title="Value:", default=50, minVal=0, maxVal=100,
-            step=None, decimals=None, tooltip=None, param=None, subdiv=5):
+            step=None, decimals=None, tooltip=None, param=None, subdiv=5,
+            extend=0):
         self.spinBox = LogSpinBox()
 
         super().__init__(title, param, tooltip, w=self.spinBox, slider=True)
@@ -292,6 +298,7 @@ class LogControl(ParamControl):
         self.subdiv = subdiv
         self.step = step
 
+        self.extend = extend
         self.setRange(minVal, maxVal)
 
         # self.setRange(minVal, maxVal, math.ceil((math.log10(maxVal) - math.log10(minVal)) / math.log10(step) - 1E-6) * subdiv)
@@ -310,7 +317,8 @@ class LogControl(ParamControl):
         self.steps = math.ceil((self.logMax-self.logMin) / self.logStep)
         self.sliderSteps = self.steps * self.subdiv
         self.ratio = self.sliderSteps / (self.logMax - self.logMin)
-        self.spinBox.setRange(minVal, maxVal)
+        extend = (maxVal - minVal) * self.extend
+        self.spinBox.setRange(minVal - extend, maxVal + extend)
         self.slider.setRange(0, self.sliderSteps)
         self.spinBox.setSingleStep(self.step)
         self.slider.setSingleStep(self.subdiv)
@@ -492,7 +500,7 @@ class VectorControl(QWidget):
 
     def __init__(self, title="Vector:", default=np.zeros(3), minVal=np.zeros(3),
             maxVal=np.ones(3), step=None, param=None, tooltip=None, subdiv=5,
-            labels=['X:', 'Y:', 'Z:', 'W:']):
+            labels=['X:', 'Y:', 'Z:', 'W:'], extend=0):
         super().__init__()
 
 
@@ -519,7 +527,8 @@ class VectorControl(QWidget):
 
         for i in range(len(default)):
             control = LinearControl(labels[i], default[i], minVal[i], maxVal[i],
-                self.step, param=str(i), subdiv=subdiv, tooltip=tooltip)
+                self.step, param=str(i), subdiv=subdiv, tooltip=tooltip,
+                extend=extend)
             self.sub_vbox.addWidget(control)
             control.paramChanged.connect(self._paramChanged)
             self.controls.append(control)
@@ -565,6 +574,7 @@ PARAM_FIELDS = {
     'step':'step',
     'logstep':'step',
     'options':'options',
+    'extend':'extend'
 }
 
 def controlFromParam(param, view=None, prefix="", defaults={}):
