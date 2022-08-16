@@ -356,7 +356,7 @@ class VTKReader:
             self.header_struct_type = 'L'
         else:
             raise ValueError(f'Header data type is "{self.header_numpy_type.str}", should be uint32 or uint64')
-        self.header_size = self.header_numpy_type.num
+        self.header_size = self.header_numpy_type.itemsize
 
         # Check that the compression is what we expect
         # In the future, it would be nice to support uncompressed files!
