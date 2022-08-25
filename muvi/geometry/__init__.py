@@ -16,6 +16,7 @@
 
 from .points import Points, PointSequence, PointsFromFile, PointSequenceFromFile
 from ..filetypes.vtk import VTKReader
+import numpy as np
 
 def load_geometry(fn):
     vtk = VTKReader(fn)
@@ -26,3 +27,58 @@ def load_geometry(fn):
             return PointsFromFile(vtk)
     else:
         raise ValueError(f"File '{fn}' does not contain geometry of a recognizable type")
+
+def from_pandas(dat, frame='frame', pos=('xc', 'yc', 'zc'), fields={'voxel_index':('x', 'y', 'z')}):
+    '''Convert Pandas data array to a Points or PointSequence
+
+    Parameters
+    ----------
+    dat : Pandas DataFrame object
+
+    Keywords
+    --------
+    frame : string (default: 'frame')
+        The column to use as frame number.  If `None`, then a Points object is
+        returned instead of PointSequence
+    pos : list (default: ('x', 'y', 'z'))
+        The columns to use as the point position
+    fields : dictionary (default: fields={'voxel_index':('x', 'y', 'z')})
+        A dictionary of the fields to include in the output.  The key is the
+        name of the variable in the points file, and the value is either a
+        single string (corresponding to a column) or a list of strings (in
+        which case it is encoded as a vector).
+
+
+    Returns
+    -------
+    points : Points or PointSequence object
+    '''
+
+    f = {col:col for col in dat.columns}
+
+    pos = list(pos)
+    for col in pos:
+        f.pop(col)
+
+    if frame is not None:
+        f.pop(frame)
+        frames = np.unique(dat['frame'])
+
+    for field, cols in fields.items():
+        if hasattr(col, '__iter__'):
+            for col in cols:
+                f.pop(col)
+            f[field] = list(cols)
+        else:
+            f[field] = cols
+
+    if frame is not None:
+        seq = {}
+        for frame in frames:
+            dat_f = dat[dat['frame'] == frame]
+            d = {f:dat_f[c].to_numpy() for f, c in f.items()}
+            seq[int(frame)] = Points(dat_f[pos].to_numpy(), **d)
+        return PointSequence(seq)
+    else:
+        d = {f:dat[c].to_numpy() for f, c in f.items()}
+        return Points(dat[pos].to_numpy(), **d)

@@ -700,7 +700,9 @@ class StaticViewWidget(QOpenGLWidget):
                 fps = self.view['framerate']
                 advance = int((t - self._tStart) * fps)
                 if advance:
-                    frame = (self.view['frame'] + advance) % self.view.frameRange[1]
+                    frame = self.view['frame'] + advance
+                    if frame > self.view.frameRange[1]:
+                        frame =  self.view.frameRange[0]
                     self.view['frame'] = frame
                     self._tStart += advance / fps
                     self.frameChanged.emit(frame)
