@@ -27,6 +27,11 @@ import re
 
 SHADER_DIR = os.path.join(os.path.split(__file__)[0], 'shaders')
 
+def copyArray(x):
+    if isinstance(x, (np.ndarray, list)):
+        return x.copy()
+    else:
+        return x
 
 #--------------------------------------------------------
 # Rounding to nearest 1/2/5, used for axes
