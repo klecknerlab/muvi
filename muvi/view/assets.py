@@ -556,7 +556,11 @@ class GeometryAsset(DisplayAsset):
         super().__setitem__(key, val)
 
         if key in self.uniform_vars and self.visible:
-            self._build_arrays()
+            # self._build_arrays()
+            self._frame = None # Rather than rebuild immediately, delay it
+            # until the draw -- should fix issues on Windows!  (Note that
+            # setFrame is *always* called at draw time; setting _frame to None
+            # will trigger a rebuild of the drawArrays)
 
         if key == 'geometry_colormap':
             self.uniforms['colormapOffset'] = self.parent.colormapOffsets[val]
