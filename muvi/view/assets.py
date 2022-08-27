@@ -396,6 +396,7 @@ class GeometryAsset(DisplayAsset):
     def __init__(self, data, id, parent):
         source = None
         is_sequence = False
+        self._loaded = False # Prevent range updates during loading and init
 
         if isinstance(data, str):
             source = data
@@ -432,19 +433,18 @@ class GeometryAsset(DisplayAsset):
         else:
             raise ValueError('Data type is not displayable by this viewer!')
 
-        super().__init__(data, id, parent, _loaded_from=source)
-
         self.scalar_options = list(SCALAR_OPTIONS)
         self.vector_options = list(VECTOR_OPTIONS)
-        self.scalar_min = None
-        self.scalar_max = None
+        # self.scalar_min = None
+        # self.scalar_max = None
+
 
         for key, arr in self.current_data.items():
-            minval, maxval = arr.min(), arr.max()
-            if self.scalar_min is None or self.scalar_min > minval:
-                self.scalar_min = minval
-            if self.scalar_max is None or self.scalar_min < maxval:
-                self.scalar_max = maxval
+            # minval, maxval = arr.min(), arr.max()
+            # if self.scalar_min is None or self.scalar_min > minval:
+            #     self.scalar_min = minval
+            # if self.scalar_max is None or self.scalar_min < maxval:
+            #     self.scalar_max = maxval
 
             if arr.ndim == 1:
                 self.scalar_options.append(key)
@@ -459,6 +459,18 @@ class GeometryAsset(DisplayAsset):
         self.X0 = pos.min(0)
         self.X1 = pos.max(0)
         self._N = len(pos)
+
+        # Note: we should store the ranges of the scalar values in the file
+        # and just load them... but this isn't implemented yet.
+        # Here we just use the first frame, which is not ideal.
+        self.scalar_range = {}
+        for var in self.scalar_options:
+            vals = self.get_var(var)
+            self.scalar_range[var] = (np.min(vals), np.max(vals))
+
+        super().__init__(data, id, parent, _loaded_from=source)
+        self._loaded = True
+
 
     def get_var(self, key):
         if key in self.current_data:
@@ -501,14 +513,12 @@ class GeometryAsset(DisplayAsset):
         self.vertexArray = VertexArray(arr)
         self._N = len(arr)
 
-
     def _set_frame(self, frame):
         if frame in self.seq:
             self.current_data = self.seq[int(frame)]
             self._build_arrays()
         else:
             self.validFrame = False
-
 
     def draw(self):
         if self.validFrame:
@@ -539,11 +549,19 @@ class GeometryAsset(DisplayAsset):
         self.modify_param('geometry_color', **color_mod)
         self.modify_param('points_normal', **normal_mod)
 
+        # This is now handled separately...
+        # c = self.get_var(color_mod['default'])
+        # self.modify_param('geometry_c0', min=self.scalar_min,
+        #     max=self.scalar_max, default=c.min())
+        # self.modify_param('geometry_c1', min=self.scalar_min,
+        #     max=self.scalar_max, default=c.max())
         c = self.get_var(color_mod['default'])
-        self.modify_param('geometry_c0', min=self.scalar_min,
-            max=self.scalar_max, default=c.min())
-        self.modify_param('geometry_c1', min=self.scalar_min,
-            max=self.scalar_max, default=c.max())
+        m, M = np.min(c), np.max(c)
+        self.modify_param('geometry_c0', min=m,
+            max=M, default=m)
+        self.modify_param('geometry_c1', min=m,
+            max=M, default=M)
+
 
         self.modify_param('geometry_size', options=self.scalar_options)
         L = mag(self.X1 - self.X0)
@@ -564,3 +582,16 @@ class GeometryAsset(DisplayAsset):
 
         if key == 'geometry_colormap':
             self.uniforms['colormapOffset'] = self.parent.colormapOffsets[val]
+
+        if key == 'geometry_color' and self._loaded:
+            r = self.scalar_range[val]
+            id = f'#{self.id}_'
+            # print(id + 'geometry_c0')
+            # print(self.parent._params.keys())
+            # print(self.parent[id + 'geometry_c0'])
+            self.parent.updateRange(id + 'geometry_c0', *r)
+            self.parent.updateRange(id + 'geometry_c1', *r)
+            self.parent.update({
+                id + 'geometry_c0': r[0],
+                id + 'geometry_c1': r[1],
+            }, callback=True)

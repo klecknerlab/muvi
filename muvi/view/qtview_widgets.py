@@ -56,6 +56,7 @@ class UnwheelDoubleSpinBox(QDoubleSpinBox):
     def wheelEvent(self, event):
         event.ignore()
 
+
 class ParamControl(QWidget):
     paramChanged = QtCore.pyqtSignal(str, object)
 
@@ -93,6 +94,12 @@ class ParamControl(QWidget):
             self.setLayout(self.hbox)
 
         self.silent = False
+
+    # def update(self):
+    #     if hasattr(self, 'slider'):
+    #         self.slider.update()
+    #     if hasattr(self, 'spinBox'):
+    #         self.spinBox.update()
 
     def _paramChanged(self, value):
         if not self.silent:
@@ -256,6 +263,7 @@ class LinearControl(ParamControl):
     def setValue(self, value, silent=False):
         self.spinBox.setValue(value)
         self.slider.setValue(int((value - self.minVal) * self.ratio + 0.5))
+        # print(self.param, value, silent)
 
     def setSilent(self, value):
         silent = self.silent

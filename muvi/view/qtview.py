@@ -588,6 +588,7 @@ class VolumetricViewer(QMainWindow):
         control = self.paramControls.get(param, None)
         if control is not None:
             control.setValue(value)
+            control.update()
 
     def rangeCallback(self, param, minVal, maxVal):
         control = self.paramControls.get(param, None)
