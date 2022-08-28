@@ -14,8 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+
 #version 330
 
+uniform vec3 disp_X0;
+uniform vec3 disp_X1;
 uniform mat4 viewMatrix = mat4(1.0);
 uniform mat4 perspectiveMatrix = mat4(1.0);
 
@@ -39,8 +43,20 @@ out VertexData {
     float c;
 } vOut;
 
+//<<INSERT_SHARED_FUNCS>>
+
 void main()
 {
+    #ifdef MESH_CLIP
+    vec3 wp = gIn[0].position;
+    if (wp.x < disp_X0.x || wp.x > disp_X1.x ||
+        wp.y < disp_X0.y || wp.y > disp_X1.y ||
+        wp.z < disp_X0.z || wp.z > disp_X1.z )
+    {
+        return;
+    }
+    #endif
+
     vOut.c = gIn[0].color;
 
     vec3 X = normalize(gIn[0].normal);
@@ -76,6 +92,8 @@ void main()
     vec4 pos;
     vec4 p = vec4(0.0, 0.0, 0.0, 0.0);
     // vec4(gIn[0].position, 0.0);
+
+
 
     // Everything below this line is auto-generated -- do not edit!
     // <<START GLYPH VERTICES>>
