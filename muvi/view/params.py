@@ -284,6 +284,7 @@ PARAM_CATEGORIES['Display'] = [
         tooltip='Show the axes.'),
     ViewParam('axis_color', 'Color', one, param_type='color',
         tooltip='The color of the axis lines and labels.'),
+    ViewParam('axis_ticks_out', 'Ticks Face Out', False),
     ViewParam('axis_line_width', 'Line Width', 1., 0.5, 10.0, step=1.0),
     ViewParam('axis_major_tick_spacing', 'Major Tick Spacing', 20.0, min=1E-3, max=1E3, logstep=2,
         tooltip='The spacing of major ticks on the axis.'),
@@ -297,6 +298,8 @@ PARAM_CATEGORIES['Display'] = [
     'Axis Labels',
     ViewParam('show_axis_labels', 'Show', True,
         tooltip='Show the axes labels.'),
+    ViewParam('axis_label_color', 'Color', one, param_type='color',
+        tooltip='The color of the axis lines and labels.'),
     ViewParam('axis_label_size', 'Font Size', 12., 6., 60., step=1.0),
     ViewParam('axis_single_label', 'One Label per Axis', True,
         tooltip='If true, one label per axis is drawn at most.'),
@@ -349,6 +352,8 @@ ASSET_PARAMS['volume'] = [
         tooltip='Increasing glow makes the cloud more transparent while proportionally increasing the brightness, giving the appearance of a glowing cloud.'),
     ViewParam('vol_step_size', 'Render Step', 1.0, min=0.125, max=2, logstep=2**(1/2),
         tooltip='The step size used in the internal rendering algorithm.  Decreasing this will improve the quality of the display, but slows down the rendering engine proportionally.'),
+    ViewParam('vol_background_color', 'Background', np.zeros(4), param_type='color',
+        tooltip='The color of the display background'),
     OrderedDict()
 ]
 

@@ -78,6 +78,7 @@ class View:
         "fov":{"perspectiveMatrix", "visibleAxis"},
         "near":{"perspectiveMatrix"},
         "far":{"perspectiveMatrix"},
+        "axis_ticks_out":{"axisLine", "axisLabel"},
         "disp_X0":{"axisLine", "visibleAxis", "viewMatrix", "axisLabel"},
         "disp_X1":{"axisLine", "visibleAxis", "viewMatrix", "axisLabel"},
         "axis_major_tick_spacing":{"axisLine", "axisLabel"},
@@ -295,7 +296,6 @@ class View:
         if callback:
             for func in self._valueCallbacks:
                 func(key, val)
-
 
     def update(self, d, callback=False):
         for k, v in d.items():
@@ -721,6 +721,9 @@ class View:
         mS = MS / self['axis_minor_ticks']
         ML = MS * self['axis_major_tick_length_ratio']
         mL = ML * self['axis_minor_tick_length_ratio']
+        if self['axis_ticks_out']:
+            mL *= -1
+            ML *= -1
 
         # Let's make sure the axes have actually changed...
         key = (tuple(X0), tuple(X1), MS, mS, ML, mL)
@@ -1027,7 +1030,7 @@ class View:
             shader['viewportSize'] = viewportSize
             shader['axis_scaling'] = axisScaling
             shader['font_size'] = self['axis_label_size']
-            shader['font_color'] = self['axis_color']
+            shader['font_color'] = self['axis_label_color']
 
             GL.glActiveTexture(GL.GL_TEXTURE0)
             self.textRender.texture.bind()

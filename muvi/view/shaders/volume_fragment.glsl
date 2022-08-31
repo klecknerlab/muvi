@@ -49,6 +49,8 @@ uniform float vol_iso1_opacity = 0.9;
 uniform float vol_iso2_opacity = 0.5;
 uniform float vol_iso3_opacity = 0.5;
 
+uniform vec4 vol_background_color = vec4(0.0, 0.0, 0.0, 1.0);
+
 vec3 distortion_map(in vec3 U);
 mat3 distortion_map_gradient(in vec3 U);
 vec4 cloud_color(in vec4 color, in vec3 X);
@@ -338,6 +340,12 @@ void main()
     } else {
         color = vec4(1.0, 0.0, 0.0, 0.5);
     }
+
+    // Accumulate the background color
+    vec4 c = vol_background_color;
+    c.a *= 1.0 - clamp(color.a, 0.0, 1.0);
+    // c.rgb *= c.a * vol_glow;
+    color += c;
 
     fragColor = color;
 }

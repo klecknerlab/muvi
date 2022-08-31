@@ -68,13 +68,14 @@ In order to run the tools, you will need several Python packages installed, incl
   * pyopengl
   * lz4
   * numba
+  * pyobjc-framework-cocoa (MacOS only)
 
 This is easiest to do with some sort of package manager; the code is being developed using Anaconda (https://www.anaconda.com/).  Note that the only Python 3.X is supported.
 
 Assuming you have Anaconda installed, you can get the require packages with:
 
 ```shell
-$ conda install numba lz4 pyopengl pyqt
+$ conda install numba lz4 pyopengl pyqt pyobjc-framework-cocoa
 ```
 
 ### Installing the Package in Developer Mode
