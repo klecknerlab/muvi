@@ -16,7 +16,9 @@
 
 import numpy as np
 from ..filetypes.vtk import VTKTag, VTKWriter, VTKReader
+from .. import _status_enumerate, _status_range
 import os
+
 
 def vec_names(N, prefix=None):
     if prefix:
@@ -366,7 +368,7 @@ class PointSequence:
     def __contains__(self, key):
         return key in self._d
 
-    def save(self, fn, filetype='vtp', force_floats='f'):
+    def save(self, fn, filetype='vtp', force_floats='f', print_status=False):
         '''Save the points into a file.
 
         Parameters
@@ -401,7 +403,12 @@ class PointSequence:
             scalars = set()
             vectors = set()
 
-            for i, (t, p) in enumerate(sorted(self.items())):
+            if print_status:
+                iterator = _status_enumerate(sorted(self.items()), pre_message='Building data: ')
+            else:
+                iterator = enumerate(sorted(self.items()))
+
+            for i, (t, p) in iterator:
                 for k, d in p.items(force_floats=force_floats, force_length=self._N):
                     if k == 'pos':
                         points.append(VTKTag('DataArray', d, NumberOfComponents=d.shape[1], TimeStep=i))
@@ -414,7 +421,7 @@ class PointSequence:
                     else:
                         raise ValueError("can't save attributes which are not vectors or scalars")
 
-            with VTKWriter(fn, 'PolyData') as f:
+            with VTKWriter(fn, 'PolyData', print_status=print_status) as f:
                 f.write_tag(VTKTag('PolyData', [
                     VTKTag('Piece', [
                         VTKTag('Points', points),

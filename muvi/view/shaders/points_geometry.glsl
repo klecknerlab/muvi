@@ -22,6 +22,9 @@ uniform vec3 disp_X0;
 uniform vec3 disp_X1;
 uniform mat4 viewMatrix = mat4(1.0);
 uniform mat4 perspectiveMatrix = mat4(1.0);
+uniform vec3 camera_pos = vec3(1.0);
+
+//<<INSERT_SHARED_FUNCS>>
 
 layout (points) in;
 layout (triangle_strip, max_vertices=93) out;
@@ -42,7 +45,6 @@ out VertexData {
     vec3 worldNormal;
     float c;
 } vOut;
-
 
 void main()
 {

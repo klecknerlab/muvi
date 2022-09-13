@@ -249,7 +249,7 @@ class Trajectories(PointSequence):
 
         if self.verbose:
             el = time.time() - start
-            print(f'\rParticles sorted in {el:.4f} s.')
+            print(f'\rParticles sorted in {el:.2f} s.')
 
         if self.verbose:
             print('Splitting trajectories...', end='')
@@ -288,7 +288,7 @@ class Trajectories(PointSequence):
 
         if self.verbose:
             el = time.time() - start
-            print(f'\rTrajectories split in {el:.4f} s.')
+            print(f'\rTrajectories split in {el:.2f} s.')
 
         self._N = self.count.max()
         self._dat = {
@@ -318,27 +318,25 @@ class Trajectories(PointSequence):
 
         if self.verbose:
             el = time.time() - start
-            print(f'\rTrajectories resampled in {el:.4f} s.')
+            print(f'\rTrajectories resampled in {el:.2f} s.')
 
         self._d = {i:None for i in range(self.frame0, self.frame1)}
 
     def save(self, *args, **kwargs):
-        if self.verbose:
-            print('Saving...', end='')
-            sys.stdout.flush()
-            start = time.time()
-
-        super().save(*args, **kwargs)
-
-        if self.verbose:
-            el = time.time() - start
-            print(f'\rSaved in {el:.4f} s.')
-
+        # if self.verbose:
+        #     print('Saving...', end='')
+        #     sys.stdout.flush()
+        #     start = time.time()
+        super().save(*args, **kwargs, print_status=self.verbose)
+        #
+        # if self.verbose:
+        #     el = time.time() - start
+        #     print(f'\rSaved in {el:.4f} s.')
 
     def _get(self, i):
         if i not in self._d:
             raise KeyError(f"Invalid timestep: {i}")
 
-        good = np.where(np.isfinite(self._dat['pos'][i, :, 0]))[0]
-        kwargs = {key:dat[i, good] for key, dat in self._dat.items()}
+        good = np.where(np.isfinite(self._dat['pos'][i-self.frame0, :, 0]))[0]
+        kwargs = {key:dat[i-self.frame0, good] for key, dat in self._dat.items()}
         return Points(kwargs.pop('pos'), **kwargs)

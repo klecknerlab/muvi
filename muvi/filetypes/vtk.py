@@ -23,6 +23,7 @@ interfaces defined by various data types.
 
 from xml.sax.saxutils import quoteattr, escape
 from xml.etree import ElementTree
+from .. import _status_enumerate
 import lz4.block
 import concurrent.futures
 import numpy as np
@@ -47,11 +48,12 @@ VTK_DATA_TYPES = {
 }
 
 class VTKWriter:
-    def __init__(self, fn, vtk_type, block_size=2**16, compression=-1):
+    def __init__(self, fn, vtk_type, block_size=2**16, compression=-1, print_status=False):
         self.fn = fn
         self.closed = False
         self.vtk_type = vtk_type
         self.data = {}
+        self.print_status = print_status
 
         self.block_size = block_size
 
@@ -95,7 +97,13 @@ class VTKWriter:
         append_start = self._f.tell()
 
         offsets = {}
-        for offset, data in self.data.items():
+        if self.print_status:
+            iterator = _status_enumerate(list(self.data.items()), pre_message='Writing data:  ')
+        else:
+            iterator = enumerate(self.data.items())
+
+
+        for i, (offset, data) in iterator:
             offsets[offset] = self._f.tell() - append_start
             self._write_data(data)
 

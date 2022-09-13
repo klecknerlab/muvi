@@ -419,21 +419,17 @@ class _status_range:
         self.max_count = (self.stop - self.start + self.step - 1) // self.step
         self.fmt = "\r" + pre_message +  "[%-" + str(length) + "s] " + post_message + "%s"
 
-
     def __iter__(self):
         self.update()
         return self
 
-
     def __len__(self):
         return self.max_count
-
 
     def get_next(self):
         ret = self.val
         self.val += self.step
         return ret
-
 
     def __next__(self):
         if self.count >= self.max_count:
@@ -448,7 +444,6 @@ class _status_range:
             self.update()
             return ret
 
-
     def update(self):
         '''Update the printout.
 
@@ -456,7 +451,10 @@ class _status_range:
         on each loop.'''
 
         cnt = '%d/%d' % (self.count, self.max_count)
-        sys.stdout.write(self.fmt % ('=' * int(min(self.max_count, self.count)/self.max_count*self.length + 0.5), cnt))
+        n = min(self.max_count, self.count) / self.max_count * self.length
+        frac = int((n % 1) * 8)
+        bar = '\u2588' * int(n) + (chr(9616 - frac) if frac else '')
+        sys.stdout.write(self.fmt % (bar, cnt))
         sys.stdout.flush()
 
 
