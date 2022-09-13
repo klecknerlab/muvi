@@ -43,7 +43,6 @@ out VertexData {
     float c;
 } vOut;
 
-//<<INSERT_SHARED_FUNCS>>
 
 void main()
 {

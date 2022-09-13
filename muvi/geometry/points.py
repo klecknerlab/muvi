@@ -1,3 +1,19 @@
+#!/usr/bin/python3
+#
+# Copyright 2022 Dustin Kleckner
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import numpy as np
 from ..filetypes.vtk import VTKTag, VTKWriter, VTKReader
 import os
@@ -305,7 +321,32 @@ class PointSequence:
             self.current_data = self._get(i)
             self.current = i
 
+        if hasattr(self, '_computed'):
+            for key, func in self._computed:
+                self.current_data[key] = func(self.current_data)
+
         return self.current_data
+
+    def add_computed_field(self, field, func):
+        '''Added a field for each time frame which is automatically
+        computed and added to the Points object when it is requested.
+
+        This will also add the computed field to data which is subsequently
+        saved.
+
+        Parameters
+        ----------
+        field : str
+            The name of the field to be created
+        func : function with one argument
+            A function which takes a Points object and returns an array of
+            shape (N, ...)
+        '''
+        if not hasattr(self, '_computed'):
+            self._computed = []
+
+        self._computed.append((field, func))
+
 
     def _get(self, i):
         if i not in self._d:
@@ -335,6 +376,7 @@ class PointSequence:
 
         Keywords
         --------
+
         filetype : string or None
             The type of file to save.  If not specified, determined from the
             extension.  This value can only be 'vtp' (default), but left here
@@ -344,6 +386,11 @@ class PointSequence:
             used to convert to single precision, which is the default.  Set to
             `None` to leave the types as is.
         '''
+
+        # f0 : int or None
+        #     If specified, the first frame to export
+        # f1 : int or None
+        #     If specified, the last frame to export
 
         if filetype is None:
             filetype = os.path.splitext(fn)[1][1:].lower()
@@ -483,7 +530,11 @@ class PointSequenceFromFile(PointSequence):
         data = {key:self.vtk.get_data_from_tag(tag) for key, tag in self._d[i].items()}
         pos = data.pop('pos')
 
-        cutoff = np.max(np.where(np.isfinite(pos).all(1))[0])+1
+        good = np.isfinite(pos).all(1)
+        if good.any():
+            cutoff = np.max(np.where(np.isfinite(pos).all(1))[0])+1
+        else:
+            cutoff = 0
         pos = pos[:cutoff]
         data = {key:data[:cutoff] for key, data in data.items()}
 
