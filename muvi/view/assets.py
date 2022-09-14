@@ -202,7 +202,14 @@ class DisplayAsset:
         return d
 
     def setFrame(self, frame):
-        if frame == self._frame or self.frameRange is None:
+        if self.frameRange is None:
+            # This is for data with no frame information -- we still need to
+            #  build the data set!
+            if self._frame is None:
+                self.validFrame = True
+                self._frame = 0
+                self._set_frame(0)
+        elif frame == self._frame:
             pass
         elif frame < self.frameRange[0] or frame > self.frameRange[1]:
             self.validFrame = False
@@ -435,17 +442,8 @@ class GeometryAsset(DisplayAsset):
 
         self.scalar_options = list(SCALAR_OPTIONS)
         self.vector_options = list(VECTOR_OPTIONS)
-        # self.scalar_min = None
-        # self.scalar_max = None
-
 
         for key, arr in self.current_data.items():
-            # minval, maxval = arr.min(), arr.max()
-            # if self.scalar_min is None or self.scalar_min > minval:
-            #     self.scalar_min = minval
-            # if self.scalar_max is None or self.scalar_min < maxval:
-            #     self.scalar_max = maxval
-
             if arr.ndim == 1:
                 self.scalar_options.append(key)
             elif arr.ndim == 2 and arr.shape[1] == 3:
@@ -514,7 +512,9 @@ class GeometryAsset(DisplayAsset):
         self._N = len(arr)
 
     def _set_frame(self, frame):
-        if frame in self.seq:
+        if self.frameRange is None:
+            self._build_arrays()
+        elif frame in self.seq:
             self.current_data = self.seq[int(frame)]
             self._build_arrays()
         else:

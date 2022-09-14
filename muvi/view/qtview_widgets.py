@@ -240,6 +240,12 @@ class LinearControl(ParamControl):
         self.value = self.spinBox.value
 
     def setRange(self, minVal, maxVal):
+        if minVal == maxVal:
+            if minVal == 0:
+                maxVal = 1
+            else:
+                minVal = 0 
+
         step = (maxVal - minVal) / 10 if self.step is None else self.step
         self.currentStep = step
 
