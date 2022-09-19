@@ -259,9 +259,6 @@ class Trajectories(PointSequence):
         tracks = []
         p = traj['particle'].to_numpy()
 
-        Np = p[-1]
-        if max_tracks is not None:
-            Np = min(max_tracks, Np)
 
         frames = traj['frame']
         self.frame0 = frames.min()
@@ -273,18 +270,21 @@ class Trajectories(PointSequence):
 
         split = np.where(p[1:] != p[:-1])[0] + 1
 
+        Np = 0
         i0 = 0
-        for i in range(Np):
-            i1 = split[i] if (i < Np) else None
-            track = traj[i0:i1]
-            if len(track) >= min_track_len:
+        for i in range(len(split)+1):
+            i1 = split[i] if (i < len(split)) else (len(traj) + 1)
+            if (i1 - i0) >= min_track_len:
+                track = traj[i0:i1]
                 tracks.append(track)
                 frames = track['frame']
                 f0 = frames.min() - self.frame0
                 f1 = frames.max() - self.frame0 + 1
                 self.count[f0:f1] += 1
+                Np += 1
+                if max_tracks and Np >= max_tracks:
+                    break
             i0 = i1
-
 
         if self.verbose:
             el = time.time() - start
