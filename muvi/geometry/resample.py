@@ -422,6 +422,7 @@ def windowed_polynomial_resample(X, Xi, Yi, cutoff=1, order=2, min_points=None, 
     packed = np.concatenate([np.array(i, 'u4') for i in indices])
 
     # Select the window
+    window = window.lower()
     if window not in _WEIGHT_FUNCS:
         raise ValueError(f"'weight' should be one of: {tuple(_WEIGHT_FUNCS.keys())}")
     weight_func = _WEIGHT_FUNCS[window]

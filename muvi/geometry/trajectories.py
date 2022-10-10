@@ -17,7 +17,7 @@
 import numpy as np
 from .points import Points, PointSequence
 import sys, os, time
-from resample import MSGResampler
+from .resample import MSGResampler
 
 
 class Trajectories(PointSequence):
