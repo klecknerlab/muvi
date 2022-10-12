@@ -25,6 +25,7 @@ import concurrent.futures
 from xml.etree import ElementTree as ET
 import time
 from .distortion import get_distortion_model
+import re
 
 class VolumetricMovieError(Exception):
     pass
@@ -94,10 +95,13 @@ class VolumeProperties:
         'flip_y': bool,
         'source_filename': str,
         'setup_filename': str,
+        'axes_reorder': str,
     }
 
     __properties_TYPES = [str, int, float, bool]
     __properties_TYPES_STR = dict((t.__name__, t) for t in __properties_TYPES)
+    __AXES = ('x', 'y', 'z')
+
 
     def __init__(self, *args, **kwargs):
         '''
@@ -178,6 +182,21 @@ class VolumeProperties:
         source_filename : str
             The filename of the source data.  Usually defined only for movies
             derived from 2D streams.
+        axes_reorder : str
+            A comma separated list of directions used to reorder the axes.
+            Should be of the form: "[+-][xyz], [+-][xyz], [+-][xyz]"
+            The first component refers to which of the axes in the original
+            volume will be the x axis in the transformed volume.
+            For example: "+y, -x, z" would swap the y and x axes and invert the
+            *new* y axis.  In other words, the *new* x axis is the old y axis,
+            and the *new* y axis is a flipped version of the old x axis.
+            Notes:
+                1) the indices of the new volume will be in opposite order as
+                    the list, e.g. (iz, iy, ix), as is customarily the case.
+                2) Lx/Ly/Lz, and dx/dy/dz should be specified in the original,
+                    *unreordered* space.  In other words, Lz is always the
+                    length along the scan axis However, after the volume is
+                    loaded these will be swapped and flipped accordingly.
         '''
         self._d = {}
 
@@ -186,6 +205,38 @@ class VolumeProperties:
 
         for k, v in kwargs.items():
             self[k] = v
+
+    def reorder_axes(self):
+        if 'axes_reorder' in self:
+            m = re.match(
+                '\s*([-+]?)\s*([xyz])\s*,\s*([-+]?)\s*([xyz])\s*,\s*([-+]?)\s*([xyz])\s*',
+                self._d.pop('axes_reorder')
+            )
+            if not m:
+                raise ValueError('axes_reorder must be of the form: "[+-][xyz], [+-][xyz], [+-][xyz]"')
+
+            order = [-1 if m.group(2*i+1) == '-' else +1 for i in range(3)]
+            axes = [ord(m.group(2*i+2)) - ord('x') for i in range(3)]
+            if len(np.unique(axes)) != 3:
+                raise ValueError('axes_reorder should specify each of x, y, z exactly once')
+
+            new_values = {}
+            for i, d in enumerate(self.__AXES):
+                od = self.__AXES[axes[i]]
+                for p in ('L', 'N', 'd'):
+                    n = p + od
+                    if n in self:
+                        if p == 'd':
+                            sign = order[i]
+                        else:
+                            sign = 1
+                        new_values[p+d] = sign * self._d.pop(n)
+
+            self._d.update(new_values)
+
+            return axes, order
+        else:
+            return None, None
 
 
     def update(self, input, warn=False, raise_errors=False):
@@ -525,6 +576,21 @@ class VolumetricMovie:
         self.info['Nt'] = len(source)
         self.validate_info()
 
+    def apply_axis_reorder(self):
+        if 'axes_reorder' in self.info:
+            axes, order = self.info.reorder_axes()
+            # (x, y, z) => [iz, iy, ix]
+            axes = tuple(2-a for a in axes[::-1])
+
+            filter = lambda vol: vol[::order[2], ::order[1], ::order[0]].transpose(axes + ((3,) if vol.ndim == 4 else ()))
+            if not hasattr(self, '_filters'):
+                self._filters = [filter]
+            else:
+                self._filters.append(filter)
+
+            # Assume we need to rebuild the distortion model
+            self.distortion = get_distortion_model(self.info)
+
     def validate_info(self):
         '''
         Infer properties of volume from first frame.
@@ -561,37 +627,29 @@ class VolumetricMovie:
 
         self.distortion = get_distortion_model(self.info)
 
-        # self.update_distortion()
-
-    # def update_distortion(self):
-    #     '''Update distortion map.
-    #
-    #     Should only need to be called diectly if volume info has changed
-    #     since initilization (which shouldn't usually happen).
-    #     '''
-    #     self.distortion = distortion.get_distortion_map(self.info)
-
+        self.apply_axis_reorder()
 
     def get_volume(self, index):
-        '''
-        '''
         return self.volumes[index]
-
 
     def __getitem__(self, key):
         if isinstance(key, slice):
-            return [self.get_volume(i) for i in key]
+            return [self.__get_volume(i) for i in key]
         else:
-            return self.get_volume(key)
+            return self.__get_volume(key)
 
+    def __get_volume(self, key):
+        vol = self.get_volume(key)
+        if hasattr(self, '_filters'):
+            for filter in self._filters:
+                vol = filter(vol)
+        return vol
 
     def __len__(self):
         return self.info['Nt']
 
-
     def close(self):
         pass
-
 
     def save(self, fn, start=0, end=None, compression=0, block_size=2**16, print_status=True):
         '''Write volumetric movie to a VTI file.
@@ -748,7 +806,7 @@ _'''.format(**vol_info).encode('UTF-8'))
         if not hasattr(self, '_write_file'):
             raise ValueError("No file open for writing; call start_vti_write first.")
 
-        dat = self[self._write_current].tostring()
+        dat = np.ascontiguousarray(self[self._write_current]).tostring()
         self._write_current += 1
 
         num_blocks = (len(dat) + self._write_block_size - 1) // self._write_block_size
@@ -985,6 +1043,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
 
         self.vol_dtype = self.info['dtype']
 
+        self.apply_axis_reorder()
         # self.update_distortion()
 
     def get_frame(self, i):
@@ -1006,4 +1065,3 @@ class VolumetricMovieFrom2D(VolumetricMovie):
                 vol[z, ::y_step] = self.get_frame(offset + z)
 
         return vol
-        # return vol[128:384, 128:384, 128:384]
