@@ -549,7 +549,6 @@ class View:
         # viewMatrix[3, 1] = -dot(up, cp)
         # viewMatrix[3, 2] = +dot(forward, cp)
 
-        viewMatrix = cameraMatrix(self['camera_pos'], self['look_at'], self['up'])
 
         X0 = self['disp_X0']
         X1 = self['disp_X1']
@@ -558,6 +557,16 @@ class View:
         center[:3] = 0.5 * (X0 + X1)
 
         r = 0.5 * mag(X1 - X0)
+
+        if self['fov'] > 1E-3:
+            viewMatrix = cameraMatrix(self['camera_pos'], self['look_at'], self['up'])
+        else:
+            cp = self['camera_pos']
+            la = self['look_at']
+            N = norm(cp - la)
+            d = dot(center[:3] - la, N) + r
+            cp = la + d * N
+            viewMatrix = cameraMatrix(cp, la, self['up'])
 
         midDepth = -(center * viewMatrix[:, 2]).sum()
         self['near'] = max(midDepth - r, r/1000)

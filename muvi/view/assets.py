@@ -160,8 +160,31 @@ class DisplayAsset:
 
         return info
 
+    def modify_param(self, param, **kw):
+        if not hasattr(self, '_param_mod'):
+            self._param_mod = {}
+        self._param_mod[param] = kw
+
+        if 'default' in kw:
+            self[param] = kw['default']
+
     def paramList(self):
-        return ASSET_PARAMS[self.shader]
+        params = ASSET_PARAMS[self.shader].copy()
+        if hasattr(self, '_param_mod'):
+            param_order = {p.name:i for i, p in enumerate(params) if hasattr(p, 'name')}
+
+            for name, kw in self._param_mod.items():
+                if name not in param_order:
+                    raise ValueError(f'Defaults set for non-existant parameter "{name}"')
+
+                i = param_order[name]
+                p = copy(params[i])
+                for key, val in kw.items():
+                    setattr(p, key, val)
+                params[i] = p
+
+        return params
+
 
     def __setitem__(self, key, val):
         if key in self.globalUniformNames:
@@ -255,7 +278,10 @@ class VolumeAsset(DisplayAsset):
         self.uniforms = dict(
             _vol_L = L,
             _vol_N = np.array(self.volume.info.get_list('Nx', 'Ny', 'Nz'), dtype='f'),
-            distortion_correction_factor = self.volume.distortion.var.get('distortion_correction_factor', np.zeros(3, 'f'))
+        )
+
+        self.modify_param('distortion_correction_factor',
+            default=self.volume.distortion.var.get('distortion_correction_factor', np.zeros(3, 'f'))
         )
 
         self.frameRange = (0, len(self.volume) - 1)

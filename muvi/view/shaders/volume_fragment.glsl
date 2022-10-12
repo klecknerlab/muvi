@@ -112,14 +112,16 @@ void main()
     // Build the start and end of the ray, as well as distances along the ray
     vec3 Xf = camera_pos;
     vec3 Xb = vIn.worldPos;
+
+    vec3 clip0 = max(-0.5*_vol_L, disp_X0);
+    vec3 clip1 = min(0.5*_vol_L, disp_X1);
+
     if (fov < 1E-3)
     {
-        Xf = Xb + camera_pos - look_at;
+        Xf = Xb + normalize(camera_pos - look_at) * length(clip1 - clip0);
     }
 
     vec3 delta = Xb - Xf;
-    vec3 clip0 = max(-0.5*_vol_L, disp_X0);
-    vec3 clip1 = min(0.5*_vol_L, disp_X1);
 
     float d0 = 0;
     float d1 = length(delta);
