@@ -60,6 +60,8 @@ def load_asset(fn, id=0, parent=None):
                 m2 = regex.match(fn)
                 if m2:
                     data[int(m2.group(1))] = os.path.join(dir, fn)
+        else:
+            data = fn
 
         return MeshAsset(data, id, parent)
     else:
@@ -331,6 +333,8 @@ class MeshAsset(DisplayAsset):
     ])
 
     def _load(self, data):
+        if isinstance(data, str):
+            data = load_mesh(data)
 
         if isinstance(data, Mesh):
             self.vertexArray, self.X0, self.X1 = self.mesh_to_vertex_array(data)
@@ -359,10 +363,14 @@ class MeshAsset(DisplayAsset):
             self.frameRange = (min(keys), max(keys))
             self.missingFrames = len(keys) != (self.frameRange[1] - self.frameRange[0] + 1)
 
+        else:
+            raise ValueError('MeshAsset should be specified either with a filename, a single mesh or a dictionary of {frame #: filename}')
+
     def _set_frame(self, frame):
-        self.vertexArray = self.meshSeq.get(frame, None)
-        if self.vertexArray is None:
-            self.validFrame = False
+        if hasattr(self, 'meshSeq'):
+            self.vertexArray = self.meshSeq.get(frame, None)
+            if self.vertexArray is None:
+                self.validFrame = False
 
     def draw(self):
         if self.validFrame:
