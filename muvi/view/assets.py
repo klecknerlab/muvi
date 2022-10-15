@@ -462,6 +462,7 @@ class GeometryAsset(DisplayAsset):
 
             if isinstance(data, geometry.Points):
                 self.current_data = data
+                check_frames = [self.current_data]
 
             else: #PointSequence
                 frames = data.keys()
@@ -470,6 +471,9 @@ class GeometryAsset(DisplayAsset):
                 self.current_data = data[self.frame]
                 self.is_sequence = True
                 self.seq = data
+
+                fl = sorted(list(frames))
+                check_frames = (self.current_data, self.seq[fl[len(fl)//2]], self.seq[fl[-1]])
 
         else:
             raise ValueError('Data type is not displayable by this viewer!')
@@ -484,29 +488,50 @@ class GeometryAsset(DisplayAsset):
                 self.vector_options.append(key)
                 self.scalar_options += [f'{key}.{c}' for c in ('x', 'y', 'z', 'mag')]
 
-
-        if 'pos' not in self.current_data:
-            raise ValueError('Points object lacking "pos" key... this should never happen!')
-        pos = self.current_data['pos']
-        self.X0 = pos.min(0)
-        self.X1 = pos.max(0)
-        self._N = len(pos)
-
-        # Note: we should store the ranges of the scalar values in the file
-        # and just load them... but this isn't implemented yet.
-        # Here we just use the first frame, which is not ideal.
+        # Get limits from the check frames
         self.scalar_range = {}
-        for var in self.scalar_options:
-            vals = self.get_var(var)
-            self.scalar_range[var] = (np.min(vals), np.max(vals))
+        self._N = 0
+
+        for frame in check_frames:
+            if 'pos' not in frame:
+                raise ValueError('Points object lacking "pos" key... this should never happen!')
+
+            pos = frame['pos']
+            minval, maxval = pos.min(0), pos.max(0)
+
+            if hasattr(self, 'X0'):
+                self.X0 = np.min([self.X0, minval], 0)
+                self.X1 = np.max([self.X1, minval], 0)
+            else:
+                self.X0 = minval
+                self.X1 = maxval
+
+            self._N = max(self._N, len(pos))
+
+            # Note: we should store the ranges of the scalar values in the file
+            # and just load them... but this isn't implemented yet.
+            # Here we just check a few frames, which is not ideal.
+            for var in self.scalar_options:
+                vals = self.get_var(var, source=frame)
+                minval, maxval = np.min(vals), np.max(vals)
+
+                if var in self.scalar_range:
+                    old_min, old_max = self.scalar_range[var]
+                    self.scalar_range[var] = (min(minval, old_min), max(maxval, old_max))
+                else:
+                    self.scalar_range[var] = (np.min(vals), np.max(vals))
+
 
         super().__init__(data, id, parent, _loaded_from=source)
         self._loaded = True
 
 
-    def get_var(self, key):
-        if key in self.current_data:
-            return(self.current_data[key])
+    def get_var(self, key, source=None):
+        if source is None:
+            source = self.current_data
+
+        if key in source:
+            return(source[key])
         elif key in CONST_VARS:
             return CONST_VARS[key]
 
@@ -514,8 +539,8 @@ class GeometryAsset(DisplayAsset):
         if m:
             key = m.group(1)
             c = m.group(2)
-            if key in self.current_data:
-                data = self.current_data[key]
+            if key in source:
+                data = source[key]
                 if c == 'x':
                     return data[..., 0]
                 elif c == 'y':
