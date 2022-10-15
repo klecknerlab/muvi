@@ -501,7 +501,7 @@ class GeometryAsset(DisplayAsset):
 
             if hasattr(self, 'X0'):
                 self.X0 = np.min([self.X0, minval], 0)
-                self.X1 = np.max([self.X1, minval], 0)
+                self.X1 = np.max([self.X1, maxval], 0)
             else:
                 self.X0 = minval
                 self.X1 = maxval
@@ -602,9 +602,13 @@ class GeometryAsset(DisplayAsset):
 
         color_mod = dict(options=self.scalar_options, default='pos.mag')
         normal_mod = dict(options=self.vector_options)
-        if 'vel' in self.vector_options:
-            color_mod['default'] = 'vel.mag'
-            normal_mod['default'] = 'vel'
+
+        for f in ('vel', 'T', 'N', 'V', 'U'):
+            if f in self.vector_options:
+                color_mod['default'] = f + '.mag'
+                normal_mod['default'] = f
+                break
+
         self.modify_param('geometry_color', **color_mod)
         self.modify_param('points_normal', **normal_mod)
 
@@ -620,7 +624,6 @@ class GeometryAsset(DisplayAsset):
             max=M, default=m)
         self.modify_param('geometry_c1', min=m,
             max=M, default=M)
-
 
         self.modify_param('geometry_size', options=self.scalar_options)
         L = mag(self.X1 - self.X0)
