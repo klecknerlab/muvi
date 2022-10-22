@@ -276,7 +276,7 @@ class KeyframeEditor(QWidget):
 
         data = {
             "setup": setup,
-            "frames": frames,
+            "frames": list(map(unArray, frames)),
         }
 
         with open(fn, 'wt') as f:

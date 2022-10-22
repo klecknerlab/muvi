@@ -206,7 +206,7 @@ zero = np.zeros(3, dtype='f')
 one = np.ones(3, dtype='f')
 
 PARAM_CATEGORIES['Keyframe'] = [
-    ViewParam("frames", "Output Frames", -1, -1, 100, step=10,
+    ViewParam("_frames", "Output Frames", -1, -1, 100, step=10,
         tooltip='''The number of frames assigned to this keyframe.
     -1 indicates automatic determination:
         - 1 if this is the first frame
@@ -333,7 +333,9 @@ ASSET_PARAMS['points'] = [
     ViewParam('geometry_scale', 'Scale factor', 1.0, 1E-3, 1000, logstep=2,
         tooltip='Scale factor for glyphs'),
     ViewParam('points_glyph', 'Glyph', 1, options=GLYPH_TYPES,
-        tooltip='Type of glyph to display at each point')
+        tooltip='Type of glyph to display at each point'),
+    ViewParam('points_skip', 'Skip', 1, 1, 20, step=1,
+        tooltip='Used to thin points: 1 shows every point, 2 shows every other, and so on'),
 ]
 
 _ASSET = "mesh"

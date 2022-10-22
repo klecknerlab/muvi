@@ -493,10 +493,14 @@ class GeometryAsset(DisplayAsset):
         self._N = 0
 
         for frame in check_frames:
+            if not len(frame):
+                continue
+
             if 'pos' not in frame:
                 raise ValueError('Points object lacking "pos" key... this should never happen!')
 
             pos = frame['pos']
+
             minval, maxval = pos.min(0), pos.max(0)
 
             if hasattr(self, 'X0'):
@@ -558,6 +562,7 @@ class GeometryAsset(DisplayAsset):
             self.vertexArray.delete()
 
         pos = self.current_data['pos']
+
         arr = np.empty(len(pos), self._VERT_TYPE)
         arr['position'] = pos
         for u, var in self.uniform_vars.items():
@@ -570,12 +575,16 @@ class GeometryAsset(DisplayAsset):
         self.vertexArray = VertexArray(arr)
         self._N = len(arr)
 
+
     def _set_frame(self, frame):
         if self.frameRange is None:
             self._build_arrays()
         elif frame in self.seq:
             self.current_data = self.seq[int(frame)]
-            self._build_arrays()
+            if len(self.current_data):
+                self._build_arrays()
+            else:
+                self.validFrame = False
         else:
             self.validFrame = False
 
@@ -618,8 +627,9 @@ class GeometryAsset(DisplayAsset):
         #     max=self.scalar_max, default=c.min())
         # self.modify_param('geometry_c1', min=self.scalar_min,
         #     max=self.scalar_max, default=c.max())
-        c = self.get_var(color_mod['default'])
-        m, M = np.min(c), np.max(c)
+        # c = self.get_var(color_mod['default'])
+
+        m, M = self.scalar_range[color_mod['default']]
         self.modify_param('geometry_c0', min=m,
             max=M, default=m)
         self.modify_param('geometry_c1', min=m,
