@@ -29,7 +29,7 @@ Qt = QtCore.Qt
 from PyQt5.QtWidgets import QWidget, QSpinBox, QVBoxLayout, QHBoxLayout, \
     QDoubleSpinBox, QSlider, QLabel, QTabWidget, QGroupBox, QCheckBox, QFrame, \
     QComboBox, QColorDialog, QPushButton, QLineEdit, QOpenGLWidget, QListWidget, \
-    QListWidgetItem, QAction, QMenu
+    QListWidgetItem, QAction, QMenu, QDialog
 from PyQt5.QtGui import QColor, QSurfaceFormat
 # from OpenGL import GL
 # from .ooopengl import GL_SRGB8_ALPHA8
@@ -244,7 +244,7 @@ class LinearControl(ParamControl):
             if minVal == 0:
                 maxVal = 1
             else:
-                minVal = 0 
+                minVal = 0
 
         step = (maxVal - minVal) / 10 if self.step is None else self.step
         self.currentStep = step
@@ -919,6 +919,21 @@ class AssetList(QListWidget):
         super().addItem(assetItem)
         self.setCurrentRow(self.indexFromItem(assetItem).row())
         assetItem.setCheckState(Qt.Checked)
+
+
+class CheckedDialog(QDialog):
+    def __init__(self, title, mainWindow, buttonTitle='Ok', buttonAction=None):
+        self.mainWindow = mainWindow
+        self.setWindowTitle(title)
+        self.layout = QGridLayout()
+
+        self.cancelButton = QPushButton('Cancel')
+
+        if buttonAction is not None:
+            self.okButton = QPushButton(buttonTitle)
+            self.okButton.pressedd.connect(buttonAction)
+
+        self.setLayout(self.layout)
 
 
 
