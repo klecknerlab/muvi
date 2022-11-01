@@ -304,9 +304,9 @@ class View:
     def __getitem__(self, k):
         return self._params[k]
 
-    def updateRange(self, name, minVal, maxVal):
+    def updateRange(self, name, minVal, maxVal, delta=None):
         for func in self._rangeCallbacks:
-            func(name, minVal, maxVal)
+            func(name, minVal, maxVal, delta)
 
     def mouseMove(self, x, y, dx, dy, buttonsPressed):
         '''Handles mouse move events, rotating the volume accordingly.
@@ -430,6 +430,7 @@ class View:
         X1 = []
         frameRange = []
         frames = 0
+        dt = None
 
         for asset in self.assets.values():
             if asset.visible:
@@ -437,6 +438,8 @@ class View:
                 X1.append(asset.X1)
                 if asset.frameRange is not None:
                     frameRange.append(asset.frameRange)
+                if hasattr(asset, 'dt'):
+                    dt = asset.dt
 
         if not len(X0):
             return
@@ -451,6 +454,7 @@ class View:
             frameRange = None
 
         self.frameRange = frameRange
+        self.dt = dt
 
         # Old version of tick spacing: use maximum axis
         # D = max(X1 - X0) * np.ones(3, 'f')
@@ -480,7 +484,7 @@ class View:
         self.updateRange('camera_pos', -10 * D, 10 * D)
         self.updateRange('look_at', X0r, X1r)
         if frameRange is not None:
-            self.updateRange('frame', frameRange[0], frameRange[1])
+            self.updateRange('frame', frameRange[0], frameRange[1], dt)
 
         if self['_autoupdate_limits']:
             self.update({

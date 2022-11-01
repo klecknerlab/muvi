@@ -592,10 +592,10 @@ class VolumetricViewer(QMainWindow):
             control.setValue(value)
             control.update()
 
-    def rangeCallback(self, param, minVal, maxVal):
+    def rangeCallback(self, param, minVal, maxVal, delta=None):
         control = self.paramControls.get(param, None)
         if control is not None and hasattr(control, 'setRange'):
-            control.setRange(minVal, maxVal)
+            control.setRange(minVal, maxVal, delta)
 
     def addMenuItem(self, menu, title, func=None, shortcut=None, tooltip=None):
         action = QAction(title, self)

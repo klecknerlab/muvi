@@ -110,7 +110,7 @@ class PlaybackControl(ParamControl):
     playingChanged = QtCore.pyqtSignal(bool)
 
     def __init__(self, title="Value:", default=50, minVal=0, maxVal=100,
-            step=1, tooltip=None, param=None):
+            step=1, tooltip=None, param=None, delta=None):
         self.spinBox = QSpinBox()
         self.frameCount = QLabel()
         self.playButton = QPushButton('Play')
@@ -123,7 +123,7 @@ class PlaybackControl(ParamControl):
         self.hbox.insertWidget(0, self.playButton, 0)
         self.hbox.setContentsMargins(10, 10, 10, 10)
 
-        self.setRange(minVal, maxVal)
+        self.setRange(minVal, maxVal, delta)
         self.setValue(default)
 
         if step is None:
@@ -132,8 +132,8 @@ class PlaybackControl(ParamControl):
 
         self.slider.valueChanged.connect(self.spinBox.setValue)
         self.spinBox.valueChanged.connect(self.slider.setValue)
-
         self.spinBox.valueChanged.connect(self._paramChanged)
+        self.spinBox.valueChanged.connect(self.updateTime)
 
     def togglePlay(self):
         self.isPlaying = not self.isPlaying
@@ -143,13 +143,32 @@ class PlaybackControl(ParamControl):
         else:
             self.playButton.setText('Play')
 
-        # print(self.isPlaying)
         self.playingChanged.emit(self.isPlaying)
 
-    def setRange(self, minVal, maxVal):
+    def setRange(self, minVal, maxVal, delta=None):
         self.spinBox.setRange(minVal, maxVal)
         self.slider.setRange(minVal, maxVal)
-        self.frameCount.setText(f'/ {maxVal}')
+        self.maxVal = maxVal
+
+        if delta is not None:
+            self.dt = delta
+            self.frameCount.setFixedWidth(125)
+            digits = 2 - int(np.floor(np.log10(self.dt)))
+            if digits > 0:
+                self.timeSpec = f'%.{digits}f'
+            else:
+                self.timeSpec = '%i'
+        else:
+            self.dt = None
+
+        self.updateTime(self.slider.value())
+
+    def updateTime(self, frame):
+        if self.dt:
+            self.frameCount.setText(f'/ {self.maxVal}   (t = {self.timeSpec%(frame*self.dt)} s)')
+        else:
+            self.frameCount.setText(f'/ {self.maxVal}')
+
 
     def setValue(self, value):
         self.spinBox.setValue(value)
@@ -200,7 +219,7 @@ class IntControl(ParamControl):
 
         self.value = self.spinBox.value
 
-    def setRange(self, minVal, maxVal):
+    def setRange(self, minVal, maxVal, delta=None):
         extend = (maxVal - minVal) * self.extend
         self.spinBox.setRange(minVal - extend, maxVal + extend)
         self.slider.setRange(minVal, maxVal)
@@ -239,7 +258,7 @@ class LinearControl(ParamControl):
 
         self.value = self.spinBox.value
 
-    def setRange(self, minVal, maxVal):
+    def setRange(self, minVal, maxVal, delta=None):
         if minVal == maxVal:
             if minVal == 0:
                 maxVal = 1
@@ -324,7 +343,7 @@ class LogControl(ParamControl):
 
         self.spinBox.valueChanged.connect(self._paramChanged)
 
-    def setRange(self, minVal, maxVal):
+    def setRange(self, minVal, maxVal, delta=None):
         self.logMin = math.log10(minVal)
         self.logMax = math.log10(maxVal)
         self.logStep = math.log10(self.step)
@@ -562,7 +581,7 @@ class VectorControl(QWidget):
         self.setValue(value)
         self.silent = silent
 
-    def setRange(self, minVal, maxVal):
+    def setRange(self, minVal, maxVal, delta=None):
         for control, minv, maxv in zip(self.controls, minVal, maxVal):
             control.setRange(minv, maxv)
 

@@ -286,6 +286,8 @@ class VolumeAsset(DisplayAsset):
         )
 
         self.frameRange = (0, len(self.volume) - 1)
+        if 'dt' in self.volume.info:
+            self.dt = self.volume.info['dt']
 
         vol = self.volume[0]
         if vol.ndim == 3:
