@@ -576,13 +576,15 @@ class VolumetricMovie:
         self.info['Nt'] = len(source)
         self.validate_info()
 
-    def apply_axis_reorder(self):
+    def apply_axes_reorder(self):
         if 'axes_reorder' in self.info:
             axes, order = self.info.reorder_axes()
             # (x, y, z) => [iz, iy, ix]
             axes = tuple(2-a for a in axes[::-1])
+            if self.get_volume(0).shape == 4:
+                axes = axes + (3,)
 
-            filter = lambda vol: vol[::order[2], ::order[1], ::order[0]].transpose(axes + ((3,) if vol.ndim == 4 else ()))
+            filter = lambda vol: vol.transpose(axes)[::order[2], ::order[1], ::order[0]]
             if not hasattr(self, '_filters'):
                 self._filters = [filter]
             else:
@@ -627,7 +629,7 @@ class VolumetricMovie:
 
         self.distortion = get_distortion_model(self.info)
 
-        self.apply_axis_reorder()
+        self.apply_axes_reorder()
 
     def get_volume(self, index):
         return self.volumes[index]
@@ -939,7 +941,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
 
         if setup_xml is not None:
             self.info['setup_filename'] = setup_xml
-            self.info.update(setup_xml)
+            self.info.update_from_file(setup_xml)
         else:
             self.locate_info()
 
@@ -1006,6 +1008,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
                 self.info['Ns'] = Nz * channels
 
                 self.info['offset'] = (int(i[0]) + 1) % (Nz * channels)
+                self.info['dt'] = float((t[i[-1]] - t[i[0]]) / (len(i)-1) / 2**32)
 
         if 'Nz' not in self.info:
             raise ValueError("if deriving volumes from 2D data, 'Nz' must be defined")
@@ -1043,7 +1046,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
 
         self.vol_dtype = self.info['dtype']
 
-        self.apply_axis_reorder()
+        self.apply_axes_reorder()
         # self.update_distortion()
 
     def get_frame(self, i):

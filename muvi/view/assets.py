@@ -187,7 +187,6 @@ class DisplayAsset:
 
         return params
 
-
     def __setitem__(self, key, val):
         if key in self.globalUniformNames:
             if self.visible:
@@ -517,7 +516,7 @@ class GeometryAsset(DisplayAsset):
             # Here we just check a few frames, which is not ideal.
             for var in self.scalar_options:
                 vals = self.get_var(var, source=frame)
-                minval, maxval = np.min(vals), np.max(vals)
+                minval, maxval = np.nanmin(vals), np.nanmax(vals)
 
                 if var in self.scalar_range:
                     old_min, old_max = self.scalar_range[var]
@@ -571,7 +570,6 @@ class GeometryAsset(DisplayAsset):
                 val = self.get_var(val)
             arr[var] = val
 
-        # print(arr[:5])
         self.vertexArray = VertexArray(arr)
         self._N = len(arr)
 
@@ -596,8 +594,10 @@ class GeometryAsset(DisplayAsset):
         if name in self.param_order:
             i = self.param_order[name]
             p = copy(self.params[i])
+
             for key, val in kwargs.items():
                 setattr(p, key, val)
+
             self.params[i] = p
 
             if 'default' in kwargs:
@@ -658,9 +658,6 @@ class GeometryAsset(DisplayAsset):
         if key == 'geometry_color' and self._loaded:
             r = self.scalar_range[val]
             id = f'#{self.id}_'
-            # print(id + 'geometry_c0')
-            # print(self.parent._params.keys())
-            # print(self.parent[id + 'geometry_c0'])
             self.parent.updateRange(id + 'geometry_c0', *r)
             self.parent.updateRange(id + 'geometry_c1', *r)
             self.parent.update({

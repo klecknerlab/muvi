@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='muvi',
-    version='0.5',
+    version='0.6',
     description='Python-based 3D movie viewing software.  Developed by the MUVI center at UC Merced.',
     url='https://github.com/klecknerlab/muvi',
     author='Dustin Kleckner',
@@ -13,9 +13,10 @@ setup(
         # 'numpy',
         # 'PyQt5',
     ],
-    scripts=['bin/muvi_convert'],
+    # scripts=['bin/muvi_convert'],
     entry_points={
-        'gui_scripts': ['muvi=muvi.view.qtview:qt_viewer']
+        'gui_scripts': ['muvi=muvi.view.qtview:qt_viewer'],
+        'console_scripts': ['muvi_convert=muvi.convert:convert']
     },
     zip_safe=False
 )

@@ -75,7 +75,7 @@ class DistortionModel:
     SPACES = CORRECTED_SPACES | RAW_SPACES
 
     def __init__(self, info):
-        self.var = self.VARIABLES.copy()
+        self.var = {k:v.copy() for k, v in self.VARIABLES.items()}
 
         self.var['vol_N'] = np.array(info.get_list('Nx', 'Ny', 'Nz'), dtype='d')
         self.var['vol_L'] = np.array(info.get_list('Lx', 'Ly', 'Lz'), dtype='d')

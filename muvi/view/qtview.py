@@ -558,6 +558,8 @@ class VolumetricViewer(QMainWindow):
         self.addMenuItem(self.viewMenu, 'Match Aspect Ratio to Export', self.matchAspect, "Ctrl+A",
             tooltip="Adjust aspect ratio of main display to match export size; useful for previewing movies!")
 
+        self.paramMenu = menu.addMenu("Parameters")
+
         for i in range(3):
             axis = chr(ord('X') + i)
 
@@ -859,7 +861,11 @@ def view_volume(vol=None, args=None, window_name=None):
     app.setApplicationDisplayName(window_name)
     window = VolumetricViewer(clipboard=app.clipboard(), window_name=window_name)
     if vol is not None:
-        window.openData(vol)
+        if isinstance(vol, (list, tuple)):
+            for item in vol:
+                window.openData(item)
+        else:
+            window.openData(vol)
     app.setWindowIcon(QtGui.QIcon(QtGui.QPixmap(os.path.join(ICON_DIR, 'muvi_logo.png'))))
     return(app.exec())
 
@@ -869,7 +875,7 @@ def qt_viewer(args=None, window_name=None):
         args = sys.argv
 
     if len(args) > 1:
-        vol = args.pop(1)
+        vol = args[1:]
     else:
         vol = None
 

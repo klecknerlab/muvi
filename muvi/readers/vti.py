@@ -268,8 +268,6 @@ class VTIMovie(VolumetricMovie):
         self.info.update(kwargs)
         self.validate_info()
 
-
-
     def get_volume(self, i):
         # Read header for this data block
         self.f.seek(self.frame_offsets[i])
