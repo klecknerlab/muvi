@@ -358,6 +358,8 @@ class LogControl(ParamControl):
         self.slider.setTickInterval(self.subdiv * 2 if self.sliderSteps//self.subdiv > 10 else self.subdiv)
 
     def setValue(self, value, silent=False):
+        if value <= 0:
+            value = 1.0
         self.spinBox.setValue(value)
         self.slider.setValue(int((math.log10(value) - self.logMin) * self.ratio + 0.5))
 

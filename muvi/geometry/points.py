@@ -15,7 +15,7 @@
 # limitations under the License.
 
 import numpy as np
-from ..filetypes.vtk import VTKTag, VTKWriter, VTKReader
+from ..filetypes.vtk import VTKTag, VTKWriter, VTKReader, DataDict
 from .. import _status_enumerate, _status_range
 import os
 
@@ -194,7 +194,7 @@ class Points:
         else:
             return data
 
-    def save(self, fn, filetype=None, force_floats='f'):
+    def save(self, fn, filetype=None, force_floats='f', display=None):
         '''Save the points into a file.
 
         Parameters
@@ -211,6 +211,9 @@ class Points:
             If defined, force all floating point values to this type.  Usually
             used to convert to single precision, which is the default.  Set to
             `None` to leave the types as is.
+        display : dict or None
+            If specified, sets the default display parameters for the muvi
+            viewer (ignored for non-vts data points!)
         '''
 
         if filetype is None:
@@ -252,12 +255,17 @@ class Points:
                 else:
                     raise ValueError("can't save attributes which are not vectors or scalars")
 
+            contents = [
+                VTKTag('Points', pos),
+                VTKTag('PointData', point_data, Scalars=' '.join(scalars), Vectors=' '.join(vectors))
+            ]
+
+            if display is not None:
+                contents.insert(0, DataDict('MuviDisplay', display))
+
             with VTKWriter(fn, 'PolyData') as f:
                 f.write_tag(VTKTag('PolyData', [
-                    VTKTag('Piece', [
-                        VTKTag('Points', pos),
-                        VTKTag('PointData', point_data, Scalars=' '.join(scalars), Vectors=' '.join(vectors))
-                    ], NumberOfPoints = len(self)),
+                    VTKTag('Piece', contents, NumberOfPoints = len(self)),
                 ]))
         else:
             raise ValueError('filetype not recognized!')
@@ -368,7 +376,7 @@ class PointSequence:
     def __contains__(self, key):
         return key in self._d
 
-    def save(self, fn, filetype='vtp', force_floats='f', print_status=False):
+    def save(self, fn, filetype='vtp', force_floats='f', print_status=False, display=None):
         '''Save the points into a file.
 
         Parameters
@@ -387,6 +395,9 @@ class PointSequence:
             If defined, force all floating point values to this type.  Usually
             used to convert to single precision, which is the default.  Set to
             `None` to leave the types as is.
+        display : dict or None
+            If specified, sets the default display parameters for the muvi
+            viewer (ignored for non-vts data points!)
         '''
 
         # f0 : int or None
@@ -421,12 +432,18 @@ class PointSequence:
                     else:
                         raise ValueError("can't save attributes which are not vectors or scalars")
 
+
+            contents = [
+                VTKTag('Points', points),
+                VTKTag('PointData', point_data, Scalars=' '.join(scalars), Vectors=' '.join(vectors))
+            ]
+
+            if display is not None:
+                contents.insert(0, DataDict('MuviDisplay', display))
+
             with VTKWriter(fn, 'PolyData', print_status=print_status) as f:
                 f.write_tag(VTKTag('PolyData', [
-                    VTKTag('Piece', [
-                        VTKTag('Points', points),
-                        VTKTag('PointData', point_data, Scalars=' '.join(scalars), Vectors=' '.join(vectors))
-                    ], NumberOfPoints = self._N)
+                    VTKTag('Piece', contents, NumberOfPoints = self._N)
                 ], TimeValues=' '.join(map(str, sorted(self.keys())))))
         else:
             raise ValueError('filetype not recognized!')
@@ -471,6 +488,11 @@ class PointsFromFile(Points):
                 raise ValueError(f"VTK file '{self.vtk.filename}' has PointData DataArray which is missing the 'Name' field")
             self[tag.attrib['Name']] = self.vtk.get_data_from_tag(tag)
 
+        tags = self.vtk.contents.findall('MuviDisplay')
+        if tags:
+            self.muvi_display = {}
+            for tag in tags:
+                self.muvi_display.update(self.vtk.get_dict(tag))
 
 
 class PointSequenceFromFile(PointSequence):
@@ -529,6 +551,11 @@ class PointSequenceFromFile(PointSequence):
                 for data in self._d.items():
                     data[key] = tag
 
+        tags = self.vtk.contents.findall('MuviDisplay')
+        if tags:
+            self.muvi_display = {}
+            for tag in tags:
+                self.muvi_display.update(self.vtk.get_dict(tag))
 
     def _get(self, i):
         if i not in self._d:

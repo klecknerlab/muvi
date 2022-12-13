@@ -272,9 +272,10 @@ class VolumeProperties:
         </VolumeProperties>
         ```
         '''
+
         if isinstance(input, (VolumeProperties, dict)):
             for k, v in input.items():
-              self[k] = v
+                self[k] = v
             return
 
         if isinstance(input, (str, bytes)):
@@ -853,6 +854,43 @@ _'''.format(**vol_info).encode('UTF-8'))
 
         else:
             return remaining
+
+    def as_grid_data(self, frame=0, dtype='f'):
+        '''
+        Export a frame of the volumetric movie to a geometry.GridData object.
+        The exported data will be in a perspective corrected coordinate system.
+        Warning: the resulting data object will be much larger in memory than
+        the original!
+
+        Keywords
+        --------
+            frame : int (default: 0)
+                The frame to export
+            dtype : str (default: 'f')
+                Should correspond to a numpy data type.  Used to convert the
+                data to a different type.  Note: if data type is floating
+                point (default), gamma correction will be applied.  This will
+                not happen if the data type is integer.
+        '''
+
+        from .geometry.volume import rectilinear_grid, GridData
+
+        dat = self[frame].astype(dtype)
+        if not np.issubdtype(int, np.integer):
+            if hasattr(self.info, 'gamma'):
+                dat **= self.info['gamma']
+
+        X = rectilinear_grid(
+            np.arange(self.info['Nx']) + 0.5,
+            np.arange(self.info['Ny']) + 0.5,
+            np.arange(self.info['Nz']) + 0.5
+        )
+
+        distortion = get_distortion_model(self.info)
+
+        Xc = distortion.convert(X, 'index-xyz', 'physical')
+
+        return GridData(Xc, ImageScalars=dat)
 
 
 def open_3D_movie(fn, file_type=None, **kwargs):
