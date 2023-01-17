@@ -30,6 +30,7 @@ import numpy as np
 import numba
 import re
 import struct
+from ast import literal_eval
 
 OFFSET_DIGITS = 20 #Long enough to store 64 bit numbers
 
@@ -175,7 +176,6 @@ class DataProxy:
 
         return data
 
-
 class VTKTag:
     def __init__(self, tag, contents=None, **attr):
         '''Class to hold a VTK Tag
@@ -208,7 +208,9 @@ class VTKTag:
         self.attr = ' '.join( f'{k}={quoteattr(str(v))}' for k, v in attr.items())
 
     def xml(self, indent=1):
-        s = f"{'  '*indent}<{self.tag} {self.attr}"
+        s = f"{'  '*indent}<{self.tag}"
+        if self.attr:
+            s +=  f" {self.attr}"
         data = {}
 
         if self.appended: # This tag contains appended binary data
@@ -241,6 +243,29 @@ class VTKTag:
             raise TypeError('contents of VTKTag should be data, string, or iterable')
 
         return s, data
+
+
+class DataDict(VTKTag):
+    def __init__(self, tag, contents, **attr):
+        items = []
+        for key, val in contents.items():
+            if isinstance(val, (tuple, list)):
+                val = np.array(val)
+
+            if isinstance(val, np.ndarray):
+                items.append(VTKTag('array',
+                    np.array2string(val, separator=','),
+                    dtype=val.dtype,
+                    name=key
+                ))
+
+            elif isinstance(val, (str, int, float)):
+                items.append(VTKTag(type(val).__name__, str(val), name=key))
+
+            else:
+                raise ValueError('Items in data dict should be strings, ints, floats, or arrays')
+
+        super().__init__(tag, items, **attr)
 
 # A simple homegrown LZ4 decompresser, which uses JIT through numba.
 # It's really fast!  Typically performance is several times that of the LZ4
@@ -412,6 +437,25 @@ class VTKReader:
 
         # Reshape, retype, and return.
         return output.view(dtype)
+
+
+    def get_dict(self, tag):
+        d = {}
+        for item in tag:
+            if 'name' not in item.attrib:
+                continue
+            name = item.attrib['name']
+
+            if item.tag == 'array':
+                d[name] = np.array(literal_eval(item.text), dtype=item.get('dtype', None))
+            elif item.tag == 'str':
+                d[name] = item.text
+            elif item.tag == 'int':
+                d[name] = int(item.text)
+            elif item.tag == 'float':
+                d[name] = float(item.text)
+
+        return d
 
 
     def close(self):
