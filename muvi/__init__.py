@@ -1023,6 +1023,9 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         '''
         Auto-determine the Volume Properties from the first frame of the movie.
         '''
+
+        channels = self.info.get('channels', 1)
+
         if 'offset' not in self.info and hasattr(self.frames, 'get_frame_times'):
             t = self.frames.get_frame_times()
             dt = t[1:] - t[:-1]
@@ -1035,7 +1038,6 @@ class VolumetricMovieFrom2D(VolumetricMovie):
             elif di.min() != di.max():
                 warnings.warn('Auto offset failed: inconsistent volume sizing detected.\n(size of triggered blocks was not consistent, most likely a triggering issue.)')
             else:
-                channels = self.info.get('channels', 1)
                 Nz = int(di[0]) / channels
                 if 'Nz' in self.info and self.info['Nz'] != Nz:
                     warnings.warn(f"Auto offset detection found different volume depth ({Nz}) than specified in setup ({self.info['Nz']})\n(defaulting to auto-detected value)")
@@ -1055,7 +1057,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
             warnings.warn("'Ns' not defined for volumes derived from 2D data\n   Will default to Ns=Nz, but this is probably wrong!")
 
         if self.info['Ns'] < (channels * self.info['Nz']):
-            raise ValueError("Ns must be >= Nz")
+            raise ValueError("Ns must be >= channels*Nz")
 
         dead_frames = self.info['Ns'] - (channels * self.info['Nz'])
         if 'offset' not in self.info:
