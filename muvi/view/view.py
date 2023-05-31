@@ -67,6 +67,7 @@ class View:
             "vol_iso2", "vol_iso3", "gamma2"},
         "mesh": {"surface_shade", "mesh_clip"},
         "points": {"surface_shade", "mesh_clip"},
+        "loop": {"surface_shade", "mesh_clip"},
         "text": {},
         "axis": {},
     }
@@ -167,6 +168,7 @@ class View:
             "volume": set(),
             "mesh": set(),
             "points": set(),
+            "loop": set(),
         }
         self.assets = {}
 
@@ -1012,7 +1014,7 @@ class View:
         GL.glDisable(GL.GL_BLEND)
 
 
-        for shader_type in ('mesh', 'points'):
+        for shader_type in ('mesh', 'points', 'loop'):
             assets = self.visibleAssets[shader_type]
             if not assets:
                 continue

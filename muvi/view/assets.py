@@ -28,6 +28,7 @@ import re
 import numpy as np
 import os
 from copy import copy
+import warnings
 
 #----------------------------------------------------------------------------
 # Utility functions
@@ -139,6 +140,9 @@ class DisplayAsset:
 
         if _loaded_from is None:
             self._load(data)
+
+        if hasattr(self, 'muvi_display'):
+            pass
 
     def _load(self):
         # used by derived classes, here just a placeholder
@@ -443,10 +447,39 @@ class GeometryAsset(DisplayAsset):
         if isinstance(data, str):
             source = data
             data = geometry.load_geometry(data)
+            self.display = {}
 
         if isinstance(data, (geometry.Points, geometry.PointSequence)):
-            self.shader = 'points'
-            self._LABEL = 'Points'
+            if hasattr(data, "display"):
+                self.display = data.display.copy()
+            else:
+                self.display = {}
+
+            render_as = self.display.pop('render_as', '').lower()
+
+            if render_as == 'loop':
+                self.shader = 'loop'
+                self._LABEL = 'Loop'
+
+                self.uniform_vars = {
+                    'geometry_normal': 'normal',
+                    'geometry_size':   'size',
+                    'geometry_color':  'color',
+                    # 'loop_glyph':      'glyphType', # Now a global uniform
+                }
+
+            else:
+                self.shader = 'points'
+                self._LABEL = 'Points'
+
+                self.uniform_vars = {
+                    'geometry_normal': 'normal',
+                    'geometry_size':   'size',
+                    'geometry_color':  'color',
+                    # 'points_glyph':    'glyphType', # Now a global uniform
+                }
+
+
             self._VERT_TYPE = np.dtype([
                 ('position',  '3float32'),
                 ('normal',    '3float32'),
@@ -454,12 +487,6 @@ class GeometryAsset(DisplayAsset):
                 ('color',     'float32'),
                 ('glyphType', 'uint32'),
             ])
-            self.uniform_vars = {
-                'points_normal':  'normal',
-                'geometry_size':  'size',
-                'geometry_color': 'color',
-                'points_glyph':   'glyphType',
-            }
 
             if isinstance(data, geometry.Points):
                 self.current_data = data
@@ -526,6 +553,10 @@ class GeometryAsset(DisplayAsset):
                 else:
                     self.scalar_range[var] = (np.min(vals), np.max(vals))
 
+        if "X0" in self.display:
+            self.X0 = self.display.pop("X0")
+        if "X1" in self.display:
+            self.X1 = self.display.pop("X1")
 
         super().__init__(data, id, parent, _loaded_from=source)
         self._loaded = True
@@ -569,11 +600,18 @@ class GeometryAsset(DisplayAsset):
         for u, var in self.uniform_vars.items():
             val = self.uniforms[u]
             if isinstance(val, str):
+
                 val = self.get_var(val)
             arr[var] = val
 
         self.vertexArray = VertexArray(arr)
         self._N = len(arr)
+
+        if self.shader == 'loop':
+            self.vertexArray.attachElements(
+                np.arange(self._N + 3, dtype='u4') % self._N,
+                mode=GL.GL_LINE_STRIP_ADJACENCY
+            )
 
 
     def _set_frame(self, frame):
@@ -590,20 +628,50 @@ class GeometryAsset(DisplayAsset):
 
     def draw(self):
         if self.validFrame:
-            self.vertexArray.drawArrays(GL.GL_POINTS, 0, self._N)
+            if self.shader == 'points':
+                self.vertexArray.drawArrays(GL.GL_POINTS, 0, self._N)
+            elif self.shader == 'loop':
+                self.vertexArray.draw()
+                # Arrays(GL.GL_LINE_STRIP_ADJACENCY)
 
     def modify_param(self, name, **kwargs):
         if name in self.param_order:
             i = self.param_order[name]
             p = copy(self.params[i])
 
+            if 'default' in kwargs:
+                default = kwargs.pop('default')
+                old_default = p.default
+
+                if isinstance(default, str) and isinstance(getattr(p, 'options'), dict):
+                    entries = {v.lower():k for k, v in p.options.items()}
+                    if default.lower() in entries:
+                        default = entries[default.lower()]
+                    else:
+                        warnings.warn(f"Invalid option '{default}' for parameter '{p.name}'; ignoring.")
+                        default = None
+
+                # if isinstance(default, str):
+                #     if hasattr(p, 'options') and default not in p.options:
+                #             warnings.warn(f"")
+            else:
+                default = None
+
             for key, val in kwargs.items():
                 setattr(p, key, val)
 
             self.params[i] = p
 
-            if 'default' in kwargs:
-                self[name] = kwargs['default']
+            if default is not None:
+                try:
+                    self[name] = default
+                    p.default = default
+                except:
+                    warnings.warn(f"Unable to set display parameter '{p.name}' to '{default}'; invalid value.")
+                    self[name] = old_default
+                    p.default = old_default
+
+
 
     def paramList(self):
         # The parameter list needs to be updated based on the available data
@@ -621,7 +689,7 @@ class GeometryAsset(DisplayAsset):
                 break
 
         self.modify_param('geometry_color', **color_mod)
-        self.modify_param('points_normal', **normal_mod)
+        self.modify_param('geometry_normal', **normal_mod)
 
         # This is now handled separately...
         # c = self.get_var(color_mod['default'])
@@ -639,7 +707,21 @@ class GeometryAsset(DisplayAsset):
 
         self.modify_param('geometry_size', options=self.scalar_options)
         L = mag(self.X1 - self.X0)
-        self.modify_param('geometry_scale', default = L / np.sqrt(self._N))
+        if L >= 0:
+            self.modify_param('geometry_scale', default = L / np.sqrt(self._N))
+
+        for k, v in self.display.items():
+            if k not in self.param_order:
+                gk = 'geometry_' + k
+                sk = self.shader + '_' + k
+                if gk in self.param_order:
+                    k = gk
+                elif sk in self.param_order:
+                    k = sk
+                else:
+                    warnings.warn(f'Unknown display parameter "k"; ignoring.')
+                    continue
+            self.modify_param(k, default=v)
 
         return self.params
 

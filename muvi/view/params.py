@@ -326,7 +326,7 @@ ASSET_PARAMS['points'] = [
         tooltip='Minimum value used in color scaling'),
     ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0, extend=2,
         tooltip='Maximum value used in color scaling'),
-    ViewParam('points_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
+    ViewParam('geometry_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
         tooltip='Orientation vector of the glyphs'),
     ViewParam('geometry_size', 'Size', '1', options=SCALAR_OPTIONS,
         tooltip='Parameter used to size glyphs'),
@@ -336,6 +336,30 @@ ASSET_PARAMS['points'] = [
         tooltip='Type of glyph to display at each point'),
     ViewParam('points_skip', 'Skip', 1, 1, 20, step=1,
         tooltip='Used to thin points: 1 shows every point, 2 shows every other, and so on'),
+]
+
+LINE_TYPES = {0:'Round', 1:'Ribbon', 2:'Thick Ribbon', 3:'Ellipse', 4:'Triangle', 5:'Square'}
+
+_ASSET = "loop"
+ASSET_PARAMS['loop'] = [
+    ViewParam('geometry_color', 'Color', '1', options=SCALAR_OPTIONS,
+        tooltip='Parameter used to color loop'),
+    ViewParam('geometry_colormap', 'Colormap', 'RdBu', options=_colormap_names,
+        tooltip='Select the color map used to color loop'),
+    ViewParam('geometry_c0', 'Min. value', -1.0, -10.0, 10.0, extend=2,
+        tooltip='Minimum value used in color scaling'),
+    ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0, extend=2,
+        tooltip='Maximum value used in color scaling'),
+    ViewParam('geometry_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
+        tooltip='Orientation vector of the loop'),
+    ViewParam('geometry_size', 'Thickness', '1', options=SCALAR_OPTIONS,
+        tooltip='Parameter used to determine thickness of loop'),
+    ViewParam('geometry_scale', 'Scale factor', 1.0, 1E-3, 1000, logstep=2,
+        tooltip='Scale factor for loop thickness'),
+    ViewParam('loop_glyph', 'Glyph', 0, options=LINE_TYPES,
+        tooltip='Type of glyph to display at each point'),
+    ViewParam('loop_angle', 'Rotation', 0.0, 0.0, 360.0, 45.0,
+        tooltip='Rotation of the cross-section of the loop.  By default, ribbons are oriented with the normal, but this can modify that.')
 ]
 
 _ASSET = "mesh"
