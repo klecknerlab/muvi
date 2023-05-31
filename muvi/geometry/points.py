@@ -52,7 +52,7 @@ class PointItems:
 
 
 class Points:
-    def __init__(self, pos, **attr):
+    def __init__(self, pos, display={}, metadata={}, **attr):
         '''A class for holding data on points in space.
 
         For the most part, behaves like a dictionary, with multiple attributes
@@ -67,6 +67,16 @@ class Points:
 
         Any additional keywords are attached as attributes.  Note that the
         length of each *must* match that of `pos`.
+
+        Keywords
+        --------
+        display: Dictionary (default: {})
+            A dictionary of attributes used by the Muvi software for displaying
+            the points.  Can be used to get a default representation when the
+            data is loaded.  This information will be saved in VTK files.
+        metadata: Dictionary (default: {})
+            A dictionary of arbitrary attributes, used for user metadata.
+            This information will be saved in VTK files.
 
         Example
         -------
@@ -94,6 +104,15 @@ class Points:
 
         self._d = {}
         self['pos'] = pos
+
+        if not isinstance(display, dict):
+            raise ValueError('display keyword must be dictionary')
+        self.display = display
+
+        if not isinstance(metadata, dict):
+            raise ValueError('display keyword must be dictionary')
+        self.metadata = metadata
+
         for k, v in attr.items():
             self[k] = v
 
@@ -211,9 +230,6 @@ class Points:
             If defined, force all floating point values to this type.  Usually
             used to convert to single precision, which is the default.  Set to
             `None` to leave the types as is.
-        display : dict or None
-            If specified, sets the default display parameters for the muvi
-            viewer (ignored for non-vts data points!)
         '''
 
         if filetype is None:
@@ -260,10 +276,12 @@ class Points:
                 VTKTag('PointData', point_data, Scalars=' '.join(scalars), Vectors=' '.join(vectors))
             ]
 
-            if display is not None:
-                contents.insert(0, DataDict('MuviDisplay', display))
-
             with VTKWriter(fn, 'PolyData') as f:
+                if self.display:
+                    f.write_tag(DataDict('MuviDisplay', self.display))
+                if self.metadata:
+                    f.write_tag(DataDict('UserData', self.metadata))
+
                 f.write_tag(VTKTag('PolyData', [
                     VTKTag('Piece', contents, NumberOfPoints = len(self)),
                 ]))
@@ -289,7 +307,7 @@ class PointSequenceItems:
 
 
 class PointSequence:
-    def __init__(self, points):
+    def __init__(self, points, display=None, metadata=None):
         '''A parent class for sequences of points.  Behaves like a dictionary
         with *integer* keys containing Points objects.
 
@@ -300,6 +318,17 @@ class PointSequence:
             starting at 0.  Alternatively, if different numbering is required,
             pass a dictionary with *integer* keys and Points objects as the
             values
+
+        Keywords
+        --------
+        display: dictionary or None (default: None)
+            A dictionary of attributes used by the Muvi software for displaying
+            the points.  Can be used to get a default representation when the
+            data is loaded.  If None, taken from the first point in the
+            sequence.  This information will be saved in VTK files.
+        metadata: Dictionary or None (default: None)
+            A dictionary of arbitrary attributes, used for user metadata.
+            This information will be saved in VTK files.
         '''
 
         if isinstance(points, dict):
@@ -312,11 +341,26 @@ class PointSequence:
 
         for i in time_steps:
             dat = points[i]
+
+            if display is None and hasattr(dat, 'display'):
+                display = dat.display
+            if metadata is None and hasattr(dat, 'metadata'):
+                metadata = dat.metadata
+
             self._d[i] = dat
             if len(dat) > self._N:
                 self._N = len(dat)
 
         self.current = None
+
+        if not isinstance(display, dict):
+            raise ValueError('display keyword must be dictionary')
+        self.display = display
+
+        if not isinstance(metadata, dict):
+            raise ValueError('metadata keyword must be dictionary')
+        self.metadata = metadata
+
 
     def __len__(self):
         return len(self._data)
@@ -376,7 +420,7 @@ class PointSequence:
     def __contains__(self, key):
         return key in self._d
 
-    def save(self, fn, filetype='vtp', force_floats='f', print_status=False, display=None):
+    def save(self, fn, filetype='vtp', force_floats='f', print_status=False):
         '''Save the points into a file.
 
         Parameters
@@ -395,9 +439,6 @@ class PointSequence:
             If defined, force all floating point values to this type.  Usually
             used to convert to single precision, which is the default.  Set to
             `None` to leave the types as is.
-        display : dict or None
-            If specified, sets the default display parameters for the muvi
-            viewer (ignored for non-vts data points!)
         '''
 
         # f0 : int or None
@@ -438,10 +479,12 @@ class PointSequence:
                 VTKTag('PointData', point_data, Scalars=' '.join(scalars), Vectors=' '.join(vectors))
             ]
 
-            if display is not None:
-                contents.insert(0, DataDict('MuviDisplay', display))
-
             with VTKWriter(fn, 'PolyData', print_status=print_status) as f:
+                if self.display:
+                    f.write_tag(DataDict('MuviDisplay', self.display))
+                if self.metadata:
+                    f.write_tag(DataDict('UserData', self.metadata))
+
                 f.write_tag(VTKTag('PolyData', [
                     VTKTag('Piece', contents, NumberOfPoints = self._N)
                 ], TimeValues=' '.join(map(str, sorted(self.keys())))))
@@ -488,12 +531,13 @@ class PointsFromFile(Points):
                 raise ValueError(f"VTK file '{self.vtk.filename}' has PointData DataArray which is missing the 'Name' field")
             self[tag.attrib['Name']] = self.vtk.get_data_from_tag(tag)
 
-        tags = self.vtk.contents.findall('MuviDisplay')
-        if tags:
-            self.muvi_display = {}
-            for tag in tags:
-                self.muvi_display.update(self.vtk.get_dict(tag))
+        self.display = {}
+        for tag in self.vtk.root.findall('MuviDisplay'):
+            self.display.update(self.vtk.get_dict(tag))
 
+        self.metadata = {}
+        for tag in self.vtk.root.findall('UserData'):
+            self.metadata.update(self.vtk.get_dict(tag))
 
 class PointSequenceFromFile(PointSequence):
     def __init__(self, f):
@@ -551,11 +595,14 @@ class PointSequenceFromFile(PointSequence):
                 for data in self._d.items():
                     data[key] = tag
 
-        tags = self.vtk.contents.findall('MuviDisplay')
-        if tags:
-            self.muvi_display = {}
-            for tag in tags:
-                self.muvi_display.update(self.vtk.get_dict(tag))
+        self.display = {}
+        for tag in self.vtk.root.findall('MuviDisplay'):
+            self.display.update(self.vtk.get_dict(tag))
+
+        self.metadata = {}
+        for tag in self.vtk.root.findall('UserData'):
+            self.metadata.update(self.vtk.get_dict(tag))
+
 
     def _get(self, i):
         if i not in self._d:

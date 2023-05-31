@@ -45,6 +45,7 @@ VTK_DATA_TYPES = {
     'l': "Int64",
     'q': "Int64",
     'L': "UInt64",
+    'Q': "UInt64",
     'f': "Float32",
     'd': "Float64"
 }
