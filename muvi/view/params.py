@@ -435,13 +435,15 @@ _ASSET = None
 
 THEMES = {
     'Light': dict(
-        background_color=one,
-        axis_color=zero,
-        axis_line_width=1.0,
+        background_color = one,
+        axis_color = zero,
+        axis_label_color = zero,
+        # axis_line_width = 1.5,
     ),
     'Dark': dict(
-        background_color=zero,
-        axis_color=one,
-        axis_line_width=1.0,
+        background_color = zero,
+        axis_color = one,
+        axis_label_color = one,
+        # axis_line_width = 1.0,
     ),
 }

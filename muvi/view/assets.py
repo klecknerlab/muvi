@@ -651,6 +651,9 @@ class GeometryAsset(DisplayAsset):
                         warnings.warn(f"Invalid option '{default}' for parameter '{p.name}'; ignoring.")
                         default = None
 
+                elif isinstance(p.default, np.ndarray):
+                    default = np.array(default, dtype=p.default.dtype)
+
                 # if isinstance(default, str):
                 #     if hasattr(p, 'options') and default not in p.options:
                 #             warnings.warn(f"")

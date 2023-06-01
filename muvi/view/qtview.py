@@ -35,7 +35,7 @@ import traceback
 import glob
 from PIL import Image
 
-from .params import PARAM_CATEGORIES, PARAMS
+from .params import PARAM_CATEGORIES, PARAMS, THEMES
 # from .. import open_3D_movie, VolumetricMovie
 
 ORG_NAME = "MUVI Lab"
@@ -560,21 +560,37 @@ class VolumetricViewer(QMainWindow):
 
         self.paramMenu = menu.addMenu("Parameters")
 
+        self.orientMenu = self.viewMenu.addMenu('Orientation')
+
         for i in range(3):
             axis = chr(ord('X') + i)
 
             def f(event, a=i):
                 self.orient_camera(a)
-            self.addMenuItem(self.viewMenu,
+
+            self.addMenuItem(self.orientMenu,
                 f'Look down {axis}-axis', f, axis.lower())
 
             def f2(event, a=i):
                 self.orient_camera(a+3)
-            self.addMenuItem(self.viewMenu,
+
+            self.addMenuItem(self.orientMenu,
                 f'Look down -{axis}-axis', f2, 'Shift+'+axis.lower())
+
+        self.themeMenu = self.viewMenu.addMenu('Theme')
+
+        for name in THEMES:
+            def f(event, theme=name):
+                self.setTheme(theme)
+
+            self.addMenuItem(self.themeMenu, name, f)
 
         self.setAcceptDrops(True)
         self.show()
+
+    def setTheme(self, theme):
+        if theme in THEMES:
+            self.display.updateParams(THEMES[theme])
 
     def addKeyframe(self):
         self.keyframeEditor.addKeyframe()

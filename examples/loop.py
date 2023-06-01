@@ -42,8 +42,8 @@ for i in range(Nt):
     X[:, 0] = r * np.cos(2*ϕ)
     X[:, 1] = r * np.sin(2*ϕ)
     X[:, 2] = aspect * np.cos(3*ϕ)
-    thickness = 0.05 * (1.2 + np.sin(20*ϕ + 2*θ))
-    color = np.sin(10*ϕ -3*θ)
+    thickness = 0.05 * (1.2 + np.sin(19*ϕ + 2*θ))
+    color = np.sin(9*ϕ -θ)
 
     seq.append(geometry.Points(X, thickness=thickness, color=color))
 
@@ -57,5 +57,6 @@ loop = geometry.PointSequence(
         color = 'color',
         X0 = [-2, -2, -1],
         X1 = [2, 2, 1],
+        colormap = 'twilight',
     )
 ).save('trefoil.vtp')
