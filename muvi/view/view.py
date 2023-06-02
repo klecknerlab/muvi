@@ -97,6 +97,9 @@ class View:
         "axis_label_x":{"axisLabel"},
         "axis_label_y":{"axisLabel"},
         "axis_label_z":{"axisLabel"},
+        "axis_orient_labels":{"axisLabel"},
+        "axis_label_padding":{"axisLabel"},
+        "axis_tick_padding":{"axisLabel"},
         # "frame":{"frame"},
     }
 
@@ -669,6 +672,10 @@ class View:
         X0 = self['disp_X0']
         X1 = self['disp_X1']
         spacing = self['axis_major_tick_spacing']
+        labels = (self['axis_label_x'], self['axis_label_y'], self['axis_label_z'])
+        orient = self['axis_orient_labels']
+        tick_padding = self['axis_tick_padding']
+        label_padding = self['axis_label_padding']
 
         digits = -int(np.floor(np.log10(self['axis_major_tick_spacing'])))
         if digits > 0:
@@ -679,8 +686,7 @@ class View:
 
         label_type = float if (spacing % 1) else int
         # Let's make sure the axes have actually changed...
-        key = (tuple(X0), tuple(X1), spacing, self['axis_label_x'],
-            self['axis_label_y'], self['axis_label_z'])
+        key = (tuple(X0), tuple(X1), spacing, labels, orient, tick_padding, label_padding)
         if getattr(self, '_lastaxisLabel', None) == key:
             return
         else:
@@ -720,12 +726,12 @@ class View:
                 for x in np.arange(i0[axis], i1[axis]+1) * spacing:
                     offset[axis] = x
                     start = self.textRender.write(self.axisLabel, offset,
-                        label_fmt % x, flags=48 + visFlag, padding=0.5,
+                        label_fmt % x, flags=48 + visFlag, padding=tick_padding,
                         start=start, baseline=baseline, up=up)
 
                 offset[axis] = 0.5 * (X0[axis] + X1[axis])
                 start = self.textRender.write(self.axisLabel, offset,
-                    self['axis_label_'+chr(ord("x")+axis)], flags=48 + visFlag, padding=3.5,
+                    labels[axis], flags=(17 if orient else 48) + visFlag, padding=label_padding,
                     start=start, baseline=baseline, up=up)
 
         self.axisLabelChars = start
