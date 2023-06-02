@@ -94,6 +94,9 @@ class View:
         "axis_angle_exclude":{"visibleAxis"},
         "axis_single_label":{"visibleAxis"},
         "axis_label_angle":{"visibleAxis"},
+        "axis_label_x":{"axisLabel"},
+        "axis_label_y":{"axisLabel"},
+        "axis_label_z":{"axisLabel"},
         # "frame":{"frame"},
     }
 
@@ -676,7 +679,8 @@ class View:
 
         label_type = float if (spacing % 1) else int
         # Let's make sure the axes have actually changed...
-        key = (tuple(X0), tuple(X1), spacing)
+        key = (tuple(X0), tuple(X1), spacing, self['axis_label_x'],
+            self['axis_label_y'], self['axis_label_z'])
         if getattr(self, '_lastaxisLabel', None) == key:
             return
         else:
@@ -721,7 +725,7 @@ class View:
 
                 offset[axis] = 0.5 * (X0[axis] + X1[axis])
                 start = self.textRender.write(self.axisLabel, offset,
-                    f'{chr(ord("X")+axis)}', flags=48 + visFlag, padding=3.5,
+                    self['axis_label_'+chr(ord("x")+axis)], flags=48 + visFlag, padding=3.5,
                     start=start, baseline=baseline, up=up)
 
         self.axisLabelChars = start
@@ -970,11 +974,13 @@ class View:
             for item in self._rebuildOrder:
                 if item in self._needsRebuild:
                     getattr(self, 'build_' + item)()
+                    # print(f'built: {item}')
                     self._needsRebuild.remove(item)
 
             # Rebuild unsorted items
             for item in self._needsRebuild:
                 getattr(self, 'build_' + item)()
+                # print(f'built: {item}')
 
             self._needsRebuild = set()
 

@@ -197,6 +197,17 @@ class BoolControl(ParamControl):
         self.checkBox.setChecked(value)
 
 
+class StrControl(ParamControl):
+    def __init__(self, title="Value:", default="X", tooltip=None, param=None):
+        self.lineEdit = QLineEdit()
+        super().__init__(title, param, tooltip, self.lineEdit)
+        self.lineEdit.setText(default)
+        self.lineEdit.editingFinished.connect(lambda: self._paramChanged(self.lineEdit.text()))
+
+    def setValue(self, value):
+        self.lineEdit.setText(value)
+
+
 class IntControl(ParamControl):
     def __init__(self, title="Value:", default=50, minVal=0, maxVal=100,
             step=None, tooltip=None, param=None, extend=0):
@@ -636,7 +647,7 @@ def controlFromParam(param, view=None, prefix="", defaults={}):
         kwargs['default'] = defaults[full_name]
     elif param in defaults:
         kwargs['default'] = defaults[param]
-
+ 
     if param.type == bool:
         return BoolControl(**kwargs)
     elif param.type == int:
@@ -654,6 +665,8 @@ def controlFromParam(param, view=None, prefix="", defaults={}):
         return ColorControl(**kwargs)
     elif param.type == np.ndarray:
         return VectorControl(**kwargs)
+    elif param.type == str:
+        return StrControl(**kwargs)
     else:
         return None
 
