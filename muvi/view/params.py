@@ -205,6 +205,9 @@ PARAM_CATEGORIES['Playback'] = [
 zero = np.zeros(3, dtype='f')
 one = np.ones(3, dtype='f')
 
+zero4 = np.zeros(4, dtype='f')
+one4 = np.ones(4, dtype='f')
+
 PARAM_CATEGORIES['Keyframe'] = [
     ViewParam("_frames", "Output Frames", -1, -1, 100, step=10,
         tooltip='''The number of frames assigned to this keyframe.
@@ -272,10 +275,13 @@ PARAM_CATEGORIES['View'] = [
         tooltip='The normal which defines the up direction of the camera.  Length is ignored.'),
 ]
 
+_BG = 0.1**2.2
 
 PARAM_CATEGORIES['Display'] = [
-    ViewParam('background_color', 'Background', zero, param_type='color',
+    ViewParam('background_color', 'Background', np.array([_BG, _BG, _BG, 0.0], 'f'), param_type='color',
         tooltip='The color of the display background'),
+    ViewParam('axis_background_color', 'Axes Background', np.array([0, 0, 0], 'f'), param_type='color',
+        tooltip='The color of the background behind the axes'),
     ViewParam('surface_shade', 'Surface Shade', 'camera', options=SUBSHADER_NAMES['surface_shade'],
         tooltip='The lighting model used to shade surfaces.'),
 
@@ -447,15 +453,24 @@ _ASSET = None
 
 THEMES = {
     'Light': dict(
-        background_color = one,
+        background_color = np.array([0.9, 0.9, 0.9, 1.0], 'f'),
+        axis_background_color = one,
         axis_color = zero,
         axis_label_color = zero,
         # axis_line_width = 1.5,
     ),
     'Dark': dict(
-        background_color = zero,
+        background_color = np.array([_BG, _BG, _BG, 1.0], 'f'),
+        axis_background_color = zero,
         axis_color = one,
         axis_label_color = one,
         # axis_line_width = 1.0,
+    ),
+    'Dark on Light': dict(
+        background_color = np.array([1.0, 1.0, 1.0], 'f'),
+        axis_background_color = zero,
+        axis_color = one,
+        axis_label_color = zero,
+        # axis_line_width = 1.5,
     ),
 }

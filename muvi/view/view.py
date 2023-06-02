@@ -70,6 +70,7 @@ class View:
         "loop": {"surface_shade", "mesh_clip"},
         "text": {},
         "axis": {},
+        "axis_bg": {},
     }
 
     _rebuildDep = {
@@ -938,6 +939,11 @@ class View:
 
         GL.glActiveTexture(GL.GL_TEXTURE0)
 
+        points = np.empty(len(CUBE_CORNERS), np.dtype([('position', '3float32'),]))
+        points['position'] = CUBE_CORNERS
+        self.cubeVertexArray = VertexArray(points)
+        self.cubeVertexArray.attachElements(CUBE_TRIANGLES)
+
     #--------------------------------------------------------
     # Buffer management
     #--------------------------------------------------------
@@ -1012,6 +1018,13 @@ class View:
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
 
         frame = self['frame']
+
+        # Draw the axes background color
+        GL.glDepthMask(GL.GL_FALSE) # We don't want objects to clip on this!
+        shader = self.useShader('axis_bg')
+        shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
+        self.cubeVertexArray.draw()
+        GL.glDepthMask(GL.GL_TRUE)
 
         # ---- Draw polygon based assets ----
         # if self.visibleAssets['mesh']:
