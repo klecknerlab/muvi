@@ -278,9 +278,9 @@ PARAM_CATEGORIES['View'] = [
 _BG = 0.1**2.2
 
 PARAM_CATEGORIES['Display'] = [
-    ViewParam('background_color', 'Background', np.array([_BG, _BG, _BG, 0.0], 'f'), param_type='color',
+    ViewParam('background_color', 'Background', one*_BG, param_type='color',
         tooltip='The color of the display background'),
-    ViewParam('axis_background_color', 'Axes Background', np.array([0, 0, 0], 'f'), param_type='color',
+    ViewParam('axis_background_color', 'Axes Background', zero, param_type='color',
         tooltip='The color of the background behind the axes'),
     ViewParam('surface_shade', 'Surface Shade', 'camera', options=SUBSHADER_NAMES['surface_shade'],
         tooltip='The lighting model used to shade surfaces.'),
@@ -453,21 +453,21 @@ _ASSET = None
 
 THEMES = {
     'Light': dict(
-        background_color = np.array([0.9, 0.9, 0.9, 1.0], 'f'),
+        background_color = one*0.9,
         axis_background_color = one,
         axis_color = zero,
         axis_label_color = zero,
         # axis_line_width = 1.5,
     ),
     'Dark': dict(
-        background_color = np.array([_BG, _BG, _BG, 1.0], 'f'),
+        background_color = _BG*one,
         axis_background_color = zero,
         axis_color = one,
         axis_label_color = one,
         # axis_line_width = 1.0,
     ),
     'Dark on Light': dict(
-        background_color = np.array([1.0, 1.0, 1.0], 'f'),
+        background_color = one,
         axis_background_color = zero,
         axis_color = one,
         axis_label_color = zero,

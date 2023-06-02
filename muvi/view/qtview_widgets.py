@@ -196,6 +196,9 @@ class BoolControl(ParamControl):
     def setValue(self, value):
         self.checkBox.setChecked(value)
 
+    def value(self):
+        return self.checkBox.isChecked()
+
 
 class StrControl(ParamControl):
     def __init__(self, title="Value:", default="X", tooltip=None, param=None):
@@ -647,7 +650,7 @@ def controlFromParam(param, view=None, prefix="", defaults={}):
         kwargs['default'] = defaults[full_name]
     elif param in defaults:
         kwargs['default'] = defaults[param]
- 
+
     if param.type == bool:
         return BoolControl(**kwargs)
     elif param.type == int:
@@ -762,10 +765,14 @@ class StaticViewWidget(QOpenGLWidget):
             traceback.print_exc()
             self.parent.close()
 
-    def offscreenRender(self, bufferId, scaleHeight=None):
+    def offscreenRender(self, width, height, oversample=1, transparent=False,
+            bgTransparent=False, scaleHeight=None):
         self.makeCurrent()
-        self.view.draw(bufferId, scaleHeight=scaleHeight)
-        img = np.array(self.view.buffers[bufferId].texture)
+        # self.view.draw(bufferId, scaleHeight=scaleHeight)
+        # img = np.array(self.view.buffers[bufferId].texture)
+        img = self.view.offscreenRender(width, height, oversample=oversample,
+            transparent=transparent, bgTransparent=bgTransparent,
+            scaleHeight=scaleHeight)
         self.doneCurrent()
         return img
 

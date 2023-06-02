@@ -948,15 +948,19 @@ class View:
     # Buffer management
     #--------------------------------------------------------
 
-    def addBuffer(self, width, height):
+    def addBuffer(self, width, height, float=False):
         if self.buffers:
             id = max(self.buffers.keys()) + 1
         else:
             id = 0
 
-        self.buffers[id] = FrameBuffer(width, height,
-            internalFormat=GL.GL_SRGB8_ALPHA8, target=GL.GL_TEXTURE_RECTANGLE,
-            depthTexture=True)
+        self.buffers[id] = FrameBuffer(
+            width, height,
+            internalFormat = (GL.GL_RGBA32F if float else GL.GL_SRGB8_ALPHA8),
+            dataType = GL.GL_FLOAT if float else GL.GL_UNSIGNED_BYTE,
+            target = GL.GL_TEXTURE_RECTANGLE,
+            depthTexture = True
+        )
         # self.perspectiveMatrix.append(None)
         self._needsRebuild.add('perspectiveMatrix')
         return id
@@ -969,7 +973,8 @@ class View:
     # Main draw method
     #--------------------------------------------------------
 
-    def draw(self, bufferId=None, blitToDefault=False, scaleHeight=None):
+    def draw(self, bufferId=None, blitToDefault=False, scaleHeight=None,
+        transparent=False, bgTransparent=False):
         if bufferId is None:
             bufferId = self.primaryBuffer
 
@@ -1011,20 +1016,27 @@ class View:
             axisScaling = height / float(scaleHeight)
 
         GL.glViewport(0, 0, width, height)
-        GL.glEnable(GL.GL_FRAMEBUFFER_SRGB)
-        c = self['background_color']
-        GL.glClearColor(c[0], c[1], c[2], 1.0)
+        if not transparent:
+            GL.glEnable(GL.GL_FRAMEBUFFER_SRGB)
+
+        if transparent:
+            GL.glClearColor(0.0, 0.0, 0.0, 0.0)
+        else:
+            c = self['background_color']
+            GL.glClearColor(c[0], c[1], c[2], 1.0)
+
         GL.glDepthMask(GL.GL_TRUE) # Needs to be before the clear!
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
 
         frame = self['frame']
 
         # Draw the axes background color
-        GL.glDepthMask(GL.GL_FALSE) # We don't want objects to clip on this!
-        shader = self.useShader('axis_bg')
-        shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
-        self.cubeVertexArray.draw()
-        GL.glDepthMask(GL.GL_TRUE)
+        if not bgTransparent:
+            GL.glDepthMask(GL.GL_FALSE) # We don't want objects to clip on this!
+            shader = self.useShader('axis_bg')
+            shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
+            self.cubeVertexArray.draw()
+            GL.glDepthMask(GL.GL_TRUE)
 
         # ---- Draw polygon based assets ----
         # if self.visibleAssets['mesh']:
@@ -1133,6 +1145,68 @@ class View:
 
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, defaultFB)
 
+
+    def offscreenRender(self, width, height, oversample=1,
+        transparent=False, bgTransparent=False, scaleHeight=None):
+
+        rw = width * oversample
+        rh = height * oversample
+
+        if transparent:
+            if not hasattr(self, 'offscreenBufferFloat'):
+                self.offscreenBufferFloat = self.addBuffer(rw, rh, True)
+                self.offscreenBufferFloatWidth = rw
+                self.offscreenBufferFloatHeight = rh
+
+            bufId = self.offscreenBufferFloat
+
+            if self.offscreenBufferFloatWidth != rw or self.offscreenBufferFloatHeight != rh:
+                self.resizeBuffer(bufId, rw, rh)
+                self.offscreenBufferFloatWidth = rw
+                self.offscreenBufferFloatHeight = rh
+        else:
+            if not hasattr(self, 'offscreenBuffer'):
+                self.offscreenBuffer = self.addBuffer(rw, rh)
+                self.offscreenBufferWidth = rw
+                self.offscreenBufferHeight = rh
+
+            bufId = self.offscreenBuffer
+
+            if self.offscreenBufferWidth != rw or self.offscreenBufferHeight != rh:
+                self.resizeBuffer(bufId, rw, rh)
+                self.offscreenBufferWidth = rw
+                self.offscreenBufferHeight = rh
+
+        self.draw(bufId, scaleHeight=scaleHeight, transparent=transparent, bgTransparent=bgTransparent)
+        img = np.array(self.buffers[bufId].texture)
+
+        if oversample > 1:
+            img = img.reshape(height, oversample, width, oversample, 4)
+            img = img.astype('f').mean((1, 3)).astype(img.dtype)
+
+        if transparent:
+            # The transparency is encoded with pre-multiplied alpha
+            # So we unmultiply it to make it look correct where partially transparent
+            nt = np.where(img[..., 3] > 0)
+            img[nt][..., :3] /= img[nt][..., 3].reshape(-1, 1)
+
+            # If we have glow on, there will be regions with low alpha but very
+            # high color values.  These won't be preserved when we drop to u1,
+            # so as a compromise we can make these regions less transparent.
+            maxval = img[..., :3].max(-1)
+            b = maxval > 1
+            if b.any():
+                b = np.where(b)
+                img[b][..., :3] /= maxval[b].reshape(-1, 1)
+                img[b][..., 3] *= maxval[b]
+
+            img[..., :3] **= 1/2.2
+            img[..., 3] **= 0.5/2.2
+            img = (np.clip(img, 0, 1) * 255).astype('u1')
+
+            return img[::-1]
+        else:
+            return img[::-1, :, :3] #Flip y axis to give normal image convention!
 
     #--------------------------------------------------------
     # Cleanup

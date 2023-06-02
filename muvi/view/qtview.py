@@ -29,7 +29,8 @@ from PyQt5.QtWidgets import QMainWindow, QApplication, QTabWidget, QHBoxLayout, 
     QSizePolicy, QProgressBar
 from .qt_script import KeyframeEditor
 from .qtview_widgets import paramListToVBox, controlFromParam, ListControl, \
-    IntControl, ViewWidget, AssetList, AssetItem, generateDarkPalette
+    IntControl, ViewWidget, AssetList, AssetItem, generateDarkPalette, \
+    BoolControl, LinearControl
 import time
 import traceback
 import glob
@@ -207,22 +208,39 @@ class ExportWindow(QWidget):
             2048, 2160, 3072, 3240, 3840, 4096]
         self.widthControl = ListControl('Width:', 1920, self.ss_sizes, param='os_width')
         self.heightControl = ListControl('Height:', 1080, self.ss_sizes, param='os_height')
+        self.scaleControl = ListControl('Scale Height:', 1080, self.ss_sizes, param='scaling_height',
+            tooltip='Effective screen height to use for axis scaling.  Used to prevent super thin lines and tiny text for high resolutions!')
         self.oversampleControl = IntControl('Oversample', 1, 1, 3, step=1, param='os_oversample',
             tooltip='If > 1, render at a higher resolution and then downsample.\bThis will make export (much) slower, but is useful for publication-quality images.')
 
-        def print_param(p, v):
-            print(f'{p}: {v}')
-        self.widthControl.paramChanged.connect(self.updateBuffer)
-        self.heightControl.paramChanged.connect(self.updateBuffer)
-        self.oversampleControl.paramChanged.connect(self.updateBuffer)
+        self.printWidthControl = LinearControl('Width (mm):', 80.0, 0.0, 500.0, step=10, decimals=1, param='osp_width')
+        self.printHeightControl = LinearControl('Height (mm):', 80.0, 0.0, 500.0, step=10, decimals=1, param='osp_height')
+        self.dpiControl = IntControl('DPI:', 300, 0, 1200, step=100, param='osp_dpi',
+            tooltip="Dots per inch in output: typically 300-600 for publication.")
+        self.printOversampleControl = IntControl('Oversample', 1, 1, 3, step=1, param='osp_oversample',
+            tooltip='If > 1, render at a higher resolution and then downsample.\bThis will make export (much) slower, but is useful for publication-quality images.')
+        self.printSizeLabel = QLabel()
+        self.printDPILabel = QLabel("(Line/font sizes in pt)")
 
-        self.scaleControl = ListControl('Scale Height:', 1080, self.ss_sizes, param='scaling_height',
-            tooltip='Effective screen height to use for axis scaling.  Used to prevent super thin lines and tiny text for high resolutions!')
-        self.scaleHeight = self.scaleControl.value()
-        self.scaleControl.paramChanged.connect(self.updatescaleHeight)
+        self.printWidthControl.paramChanged.connect(self.updatePrintResolution)
+        self.printHeightControl.paramChanged.connect(self.updatePrintResolution)
+        self.dpiControl.paramChanged.connect(self.updatePrintResolution)
+
+        # def print_param(p, v):
+        #     print(f'{p}: {v}')
+        # self.widthControl.paramChanged.connect(self.updateBuffer)
+        # self.heightControl.paramChanged.connect(self.updateBuffer)
+        # self.oversampleControl.paramChanged.connect(self.updateBuffer)
+
+        # self.scaleHeight = self.scaleControl.value()
+        # self.scaleControl.paramChanged.connect(self.updatescaleHeight)
         self.progress = QProgressBar()
         self.pauseButton = QPushButton()
         self.pauseButton.setEnabled(False)
+
+        self.transparentControl = BoolControl('Transparent export:', False, param='transparent_export')
+        self.bgTransparentControl = BoolControl('Force transparent axis background:', False, param='bg_transparent')
+
 
         # self.exportWorker = ExportWorker(self)
         # self.exportThread = QtCore.QThread()
@@ -248,25 +266,24 @@ class ExportWindow(QWidget):
         self.vbox.addLayout(self.settings)
         self.settings.setColumnStretch(0, 1)
         self.settings.setColumnStretch(5, 1)
-        self.settings.addWidget(self.widthControl,      0, 1, 1, 2)
-        self.settings.addWidget(self.heightControl,     1, 1, 1, 2)
-        self.settings.addWidget(self.scaleControl,      0, 3, 1, 2)
-        self.settings.addWidget(self.oversampleControl, 1, 3, 1, 2)
-        self.settings.addWidget(self.exportButton,      3, 1, 1, 2)
-        self.settings.addWidget(self.previewButton,     3, 3, 1, 2)
-        self.settings.addLayout(self.folderControl,     4, 1, 1, 4)
-        self.settings.addWidget(self.movieButton,       5, 1, 1, 4)
-        self.settings.addWidget(self.fileLabel,         6, 1, 1, 4)
-        self.settings.addWidget(self.progress,          7, 0, 1, 5)
-        self.settings.addWidget(self.pauseButton,       7, 5, 1, 1)
+
+        self.exportTabs = QTabWidget()
+
+        self.imageTabLayout = QGridLayout()
+        self.imageTab = QWidget()
+        self.imageTab.setLayout(self.imageTabLayout)
+        self.exportTabs.addTab(self.imageTab, 'Image')
+
+        self.imageTabLayout.addWidget(self.widthControl,      0, 1, 1, 2)
+        self.imageTabLayout.addWidget(self.heightControl,     0, 3, 1, 2)
+        self.imageTabLayout.addWidget(self.scaleControl,      1, 1, 1, 2)
+        self.imageTabLayout.addWidget(self.oversampleControl, 1, 3, 1, 2)
 
         for i, (label, w, h) in enumerate([
                     ('720p', 1280, 720),
                     ('1080p', 1920, 1080),
                     ('1440p', 2560, 1440),
                     ('2160p (4K)', 3840, 2160),
-                    # ('3240p (6K)', 5760, 3240),
-                    # ('4320p (8K)', 7680, 4320,)
                 ]):
             button = QPushButton(label)
 
@@ -276,23 +293,56 @@ class ExportWindow(QWidget):
 
             button.clicked.connect(cr)
             j = i+1
-            # if j >= 3:
-                # j += 1
-            self.settings.addWidget(button, 2, j)
+            self.imageTabLayout.addWidget(button, 2, j)
 
-    def updatescaleHeight(self, key, val):
-        self.scaleHeight = val
+        self.printTabLayout = QGridLayout()
+        self.printTab = QWidget()
+        self.printTab.setLayout(self.printTabLayout)
+        self.exportTabs.addTab(self.printTab, 'Print')
 
-    def updateBuffer(self, key=None, val=None):
-        width, height = self.widthControl.value(), self.heightControl.value()
-        oversample = self.oversampleControl.value()
+        self.printTabLayout.addWidget(self.printWidthControl,      0, 1, 1, 2)
+        self.printTabLayout.addWidget(self.printHeightControl,     0, 3, 1, 2)
+        self.printTabLayout.addWidget(self.dpiControl,             1, 1, 1, 2)
+        self.printTabLayout.addWidget(self.printOversampleControl, 1, 3, 1, 2)
+        self.printTabLayout.addWidget(self.printSizeLabel,        2, 1, 1, 2)
+        self.printTabLayout.addWidget(self.printDPILabel,       2, 3, 1, 2)
+        self.updatePrintResolution()
 
-        self.parent.display.makeCurrent()
-        if not hasattr(self, 'bufferId'):
-            self.bufferId = self.parent.display.view.addBuffer(width * oversample, height * oversample)
-        else:
-            self.parent.display.view.resizeBuffer(self.bufferId, width * oversample, height * oversample)
-        self.parent.display.doneCurrent()
+        self.settings.addWidget(self.exportTabs, 0, 1, 3, 4)
+
+        # Transparent export disabled -- it does not give good results!
+        # The issue is the way alpha blending is handled post-facto, which
+        #  does not deal with gamma correction properly.
+        # self.settings.addWidget(self.transparentControl, 3, 1, 1, 2)
+        # self.settings.addWidget(self.bgTransparentControl, 3, 3, 1, 2)
+        self.settings.addWidget(self.exportButton,      3, 1, 1, 2)
+        self.settings.addWidget(self.previewButton,     3, 3, 1, 2)
+        self.settings.addLayout(self.folderControl,     4, 1, 1, 4)
+        self.settings.addWidget(self.movieButton,       5, 1, 1, 4)
+        self.settings.addWidget(self.fileLabel,         6, 1, 1, 4)
+        self.settings.addWidget(self.progress,          7, 0, 1, 5)
+        self.settings.addWidget(self.pauseButton,       7, 5, 1, 1)
+
+    # def updatescaleHeight(self, key, val):
+    #     self.scaleHeight = val
+    #
+    # def updateBuffer(self, key=None, val=None):
+    #     width, height = self.widthControl.value(), self.heightControl.value()
+    #     oversample = self.oversampleControl.value()
+    #
+    #     self.parent.display.makeCurrent()
+    #     if not hasattr(self, 'bufferId'):
+    #         self.bufferId = self.parent.display.view.addBuffer(width * oversample, height * oversample)
+    #     else:
+    #         self.parent.display.view.resizeBuffer(self.bufferId, width * oversample, height * oversample)
+    #     self.parent.display.doneCurrent()
+
+    def updatePrintResolution(self, e=None):
+        dpi = self.dpiControl.value()
+        self.printWidth = int(self.printWidthControl.value() / 25.4 * dpi + 0.5)
+        self.printHeight = int(self.printHeightControl.value() / 25.4 * dpi + 0.5)
+        self.printScaleHeight = self.printHeightControl.value() / 25.4 * 72 # Height of output in points
+        self.printSizeLabel.setText(f'Actual Image Size: {self.printWidth}×{self.printHeight}')
 
     def closeEvent(self, e):
         self.parent.toggleExport()
@@ -355,23 +405,43 @@ class ExportWindow(QWidget):
 
         fn, updates = self.queue.pop(0)
 
-        if not hasattr(self, 'bufferId'):
-            self.updateBuffer()
+        # if not hasattr(self, 'bufferId'):
+        #     self.updateBuffer()
 
         if updates:
             self.parent.display.updateParams(updates)
 
         if fn is not False:
-            img = self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
-            img = Image.fromarray(img[::-1])
+            tab = self.exportTabs.currentIndex()
+            if tab == 1: # Print tab
+                width = self.printWidth
+                height = self.printHeight
+                dpi = self.dpiControl.value()
+                scaleHeight = self.printScaleHeight
+                oversample = self.printOversampleControl.value()
+            else: # Image tab
+                width = self.widthControl.value()
+                height = self.heightControl.value()
+                scaleHeight = self.scaleControl.value()
+                oversample = self.oversampleControl.value()
+                dpi = 256
 
-            oversample = self.oversampleControl.value()
-            if oversample > 1:
-                w, h = img.size
-                img = img.resize((w//oversample, h//oversample), Image.LANCZOS)
+            img = Image.fromarray(self.parent.display.offscreenRender(
+                width, height, oversample,
+                transparent = self.transparentControl.value(),
+                bgTransparent = self.bgTransparentControl.value(),
+                scaleHeight=scaleHeight
+            ))
+            # img = self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
+            # img = Image.fromarray(img[::-1])
+
+            # oversample = self.oversampleControl.value()
+            # if oversample > 1:
+            #     w, h = img.size
+            #     img = img.resize((w//oversample, h//oversample), Image.LANCZOS)
 
             if fn is not None:
-                img.save(fn)
+                img.save(fn, dpi=(dpi, dpi))
                 self.fileLabel.setText(f'Saved to: {os.path.split(fn)[1]}')
 
             img = QtGui.QImage(img.tobytes("raw", "RGB"), img.size[0], img.size[1],
@@ -590,7 +660,11 @@ class VolumetricViewer(QMainWindow):
 
     def setTheme(self, theme):
         if theme in THEMES:
-            self.display.updateParams(THEMES[theme])
+            for k, v in THEMES[theme].items():
+                self.valueCallback(k, v)
+
+            # self.display.updateParams(THEMES[theme])
+
 
     def addKeyframe(self):
         self.keyframeEditor.addKeyframe()
