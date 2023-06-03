@@ -35,6 +35,7 @@ import time
 import traceback
 import glob
 from PIL import Image
+from math import ceil
 
 from .params import PARAM_CATEGORIES, PARAMS, THEMES
 # from .. import open_3D_movie, VolumetricMovie
@@ -432,21 +433,18 @@ class ExportWindow(QWidget):
                 bgTransparent = self.bgTransparentControl.value(),
                 scaleHeight=scaleHeight
             ))
-            # img = self.parent.display.offscreenRender(self.bufferId, scaleHeight=self.scaleHeight)
-            # img = Image.fromarray(img[::-1])
-
-            # oversample = self.oversampleControl.value()
-            # if oversample > 1:
-            #     w, h = img.size
-            #     img = img.resize((w//oversample, h//oversample), Image.LANCZOS)
 
             if fn is not None:
                 img.save(fn, dpi=(dpi, dpi))
                 self.fileLabel.setText(f'Saved to: {os.path.split(fn)[1]}')
 
-            img = QtGui.QImage(img.tobytes("raw", "RGB"), img.size[0], img.size[1],
-                QtGui.QImage.Format_RGB888)
-            self.image.setImage(img)
+            raw = img.tobytes("raw", "RGB")
+            # bytesPerLine = len(raw)//img.size[1]
+            # This fixes an alignment issue that happens otherwise!
+            qtImg = QtGui.QImage(raw, img.size[0], img.size[1],
+                len(raw)//img.size[1], QtGui.QImage.Format_RGB888)
+
+            self.image.setImage(qtImg)
 
         if self.queue:
             self.progress.setValue(self.progress.value() + 1)
