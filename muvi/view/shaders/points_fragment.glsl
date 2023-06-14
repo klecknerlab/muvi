@@ -6,6 +6,8 @@ uniform vec3 disp_X0;
 uniform vec3 disp_X1;
 uniform sampler2DRect colormapTextureId;
 uniform float colormapOffset = 0.5;
+uniform float geometry_shade = 0.0;
+uniform vec3 geometry_shade_color = vec3(1.0);
 
 //<<INSERT_SHARED_FUNCS>>
 
@@ -20,6 +22,7 @@ out vec4 fragColor;
 void main()
 {
     vec4 color = vec4(0.0, 0.0, 0.0, 1.0);
-    color.rgb = texture(colormapTextureId, vec2(vIn.c * 255.0 + 0.5, colormapOffset)).rgb;
+    color.rgb = texture(colormapTextureId, vec2(vIn.c * 255.0 + 0.5, colormapOffset)).rgb * (1.0 - geometry_shade)
+        + geometry_shade_color * geometry_shade;
     fragColor = shadeSurface(color, vIn.worldPos, normalize(vIn.worldNormal));
 }

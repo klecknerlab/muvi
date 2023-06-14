@@ -344,6 +344,10 @@ ASSET_PARAMS['points'] = [
         tooltip='Minimum value used in color scaling'),
     ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0, extend=2,
         tooltip='Maximum value used in color scaling'),
+    ViewParam('geometry_shade_color', 'Shade Color', np.array([1.0, 0.1, 0.1]),
+        param_type='color', tooltip='Solid color shading for geometry (use "shade" to enable).'),
+    ViewParam('geometry_shade', 'Shade', 0.0, 0.0, 1.0,
+        tooltip='If 0, use colormap to color the geometry; if 1, use the shade color.'),
     ViewParam('geometry_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
         tooltip='Orientation vector of the glyphs'),
     ViewParam('geometry_size', 'Size', '1', options=SCALAR_OPTIONS,
@@ -360,7 +364,7 @@ LINE_TYPES = {0:'Round', 1:'Ribbon', 2:'Thick Ribbon', 3:'Ellipse', 4:'Triangle'
 
 _ASSET = "loop"
 ASSET_PARAMS['loop'] = [
-    ViewParam('geometry_color', 'Color', '1', options=SCALAR_OPTIONS,
+    ViewParam('geometry_color', 'Color Variable', '1', options=SCALAR_OPTIONS,
         tooltip='Parameter used to color loop'),
     ViewParam('geometry_colormap', 'Colormap', 'RdBu', options=_colormap_names,
         tooltip='Select the color map used to color loop'),
@@ -368,6 +372,10 @@ ASSET_PARAMS['loop'] = [
         tooltip='Minimum value used in color scaling'),
     ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0, extend=2,
         tooltip='Maximum value used in color scaling'),
+    ViewParam('geometry_shade_color', 'Shade Color', np.array([1.0, 0.1, 0.1]),
+        param_type='color', tooltip='Solid color shading for geometry (use "shade" to enable).'),
+    ViewParam('geometry_shade', 'Shade', 0.0, 0.0, 1.0,
+        tooltip='If 0, use colormap to color the geometry; if 1, use the shade color.'),
     ViewParam('geometry_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
         tooltip='Orientation vector of the loop'),
     ViewParam('geometry_size', 'Thickness', '1', options=SCALAR_OPTIONS,
