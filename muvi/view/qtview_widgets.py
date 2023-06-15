@@ -301,8 +301,12 @@ class LinearControl(ParamControl):
 
     def setValue(self, value, silent=False):
         self.spinBox.setValue(value)
-        self.slider.setValue(int((value - self.minVal) * self.ratio + 0.5))
-        # print(self.param, value, silent)
+
+        pos = int((value - self.minVal) * self.ratio + 0.5)
+        if pos < 0: pos = 0
+        if pos >= self.sliderSteps: pos = self.sliderSteps - 1
+        
+        self.slider.setValue(pos)
 
     def setSilent(self, value):
         silent = self.silent
