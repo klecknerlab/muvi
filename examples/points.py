@@ -17,6 +17,7 @@
 from muvi import geometry
 import os
 import numpy as np
+import time
 
 odir = 'geometry_examples'
 if not os.path.exists(odir):
@@ -41,7 +42,17 @@ N = 50
 points = geometry.Points(
     np.random.rand(N, 3),
     vel = np.random.rand(N, 3),
-    mass = np.random.rand(N)
+    mass = np.random.rand(N),
+    display = dict(
+        color = 'mass',
+        glyph = 'tick',
+        X0 = (-1, -1, -1),
+        X1 = (2, 2, 2),
+    ),
+    metadata = dict(
+        creation_time = time.time(),
+        description = "An example file with point data.",
+    )
 )
 
 # Get mass and promote order of array
@@ -63,6 +74,15 @@ points_loaded = geometry.load_geometry('points.vtp')
 print(f'Type of object returned from loading "points.vtp": {type(points_loaded)}')
 print(f"RMS difference between original and saved data: {(points['pos'] - points_loaded['pos']).std():.2e}")
 print('Note: nonzero because of double -> single precision conversion!')
+
+print('Display info saved in points file:')
+for k, v in points_loaded.display.items():
+    print(f'    {k}: {repr(v)}')
+
+print('Metadata saved in points file:')
+for k, v in points_loaded.metadata.items():
+    print(f'    {k}: {repr(v)}')
+
 
 # Save to a VTP file with double precision, and check difference
 points.save('points_dp.vtp', force_floats=False)
@@ -98,11 +118,27 @@ for i in range(10, 50):
     # modify them post-facto it will change the data!
 
 # Turn this into a sequence, and save!
-geometry.PointSequence(seq).save('sequence.vtp')
+geometry.PointSequence(
+    seq,
+    display = dict(color='mass', glyph='arrow'),
+    metadata = dict(
+        creation_time = time.time(),
+        description = "An example file with point sequence data.",
+    )
+).save('sequence.vtp')
 
 # Check that the saved data is the same
 seq2 = geometry.load_geometry('sequence.vtp')
 print(f'Type of object returned from loading "sequence.vtp": {type(seq2)}')
+
+print('Display info saved in point sequence file:')
+for k, v in seq2.display.items():
+    print(f'    {k}: {repr(v)}')
+
+print('Metadata saved in point sequence file:')
+for k, v in seq2.metadata.items():
+    print(f'    {k}: {repr(v)}')
+
 
 frame = 30
 p1 = seq[frame]

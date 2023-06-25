@@ -196,6 +196,20 @@ class BoolControl(ParamControl):
     def setValue(self, value):
         self.checkBox.setChecked(value)
 
+    def value(self):
+        return self.checkBox.isChecked()
+
+
+class StrControl(ParamControl):
+    def __init__(self, title="Value:", default="X", tooltip=None, param=None):
+        self.lineEdit = QLineEdit()
+        super().__init__(title, param, tooltip, self.lineEdit)
+        self.lineEdit.setText(default)
+        self.lineEdit.editingFinished.connect(lambda: self._paramChanged(self.lineEdit.text()))
+
+    def setValue(self, value):
+        self.lineEdit.setText(value)
+
 
 class IntControl(ParamControl):
     def __init__(self, title="Value:", default=50, minVal=0, maxVal=100,
@@ -287,8 +301,12 @@ class LinearControl(ParamControl):
 
     def setValue(self, value, silent=False):
         self.spinBox.setValue(value)
-        self.slider.setValue(int((value - self.minVal) * self.ratio + 0.5))
-        # print(self.param, value, silent)
+
+        pos = int((value - self.minVal) * self.ratio + 0.5)
+        if pos < 0: pos = 0
+        if pos >= self.sliderSteps: pos = self.sliderSteps - 1
+        
+        self.slider.setValue(pos)
 
     def setSilent(self, value):
         silent = self.silent
@@ -654,6 +672,8 @@ def controlFromParam(param, view=None, prefix="", defaults={}):
         return ColorControl(**kwargs)
     elif param.type == np.ndarray:
         return VectorControl(**kwargs)
+    elif param.type == str:
+        return StrControl(**kwargs)
     else:
         return None
 
@@ -749,10 +769,14 @@ class StaticViewWidget(QOpenGLWidget):
             traceback.print_exc()
             self.parent.close()
 
-    def offscreenRender(self, bufferId, scaleHeight=None):
+    def offscreenRender(self, width, height, oversample=1, transparent=False,
+            bgTransparent=False, scaleHeight=None):
         self.makeCurrent()
-        self.view.draw(bufferId, scaleHeight=scaleHeight)
-        img = np.array(self.view.buffers[bufferId].texture)
+        # self.view.draw(bufferId, scaleHeight=scaleHeight)
+        # img = np.array(self.view.buffers[bufferId].texture)
+        img = self.view.offscreenRender(width, height, oversample=oversample,
+            transparent=transparent, bgTransparent=bgTransparent,
+            scaleHeight=scaleHeight)
         self.doneCurrent()
         return img
 

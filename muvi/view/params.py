@@ -205,6 +205,9 @@ PARAM_CATEGORIES['Playback'] = [
 zero = np.zeros(3, dtype='f')
 one = np.ones(3, dtype='f')
 
+zero4 = np.zeros(4, dtype='f')
+one4 = np.ones(4, dtype='f')
+
 PARAM_CATEGORIES['Keyframe'] = [
     ViewParam("_frames", "Output Frames", -1, -1, 100, step=10,
         tooltip='''The number of frames assigned to this keyframe.
@@ -272,12 +275,38 @@ PARAM_CATEGORIES['View'] = [
         tooltip='The normal which defines the up direction of the camera.  Length is ignored.'),
 ]
 
+_BG = 0.1**2.2
 
 PARAM_CATEGORIES['Display'] = [
-    ViewParam('background_color', 'Background', zero, param_type='color',
+    ViewParam('background_color', 'Background', one*_BG, param_type='color',
         tooltip='The color of the display background'),
+    ViewParam('axis_background_color', 'Axes Background', zero, param_type='color',
+        tooltip='The color of the background behind the axes'),
     ViewParam('surface_shade', 'Surface Shade', 'camera', options=SUBSHADER_NAMES['surface_shade'],
         tooltip='The lighting model used to shade surfaces.'),
+
+    'Axis Labels',
+    ViewParam('show_axis_labels', 'Show', True,
+        tooltip='Show the axes labels.'),
+    ViewParam('axis_label_x', 'X Label', 'X',
+        tooltip='The label for the x-axis.'),
+    ViewParam('axis_label_y', 'Y Label', 'Y',
+        tooltip='The label for the x-axis.'),
+    ViewParam('axis_label_z', 'Z Label', 'Z',
+        tooltip='The label for the x-axis.'),
+    ViewParam('axis_label_padding', 'Label Spacing', 3.5, 0.0, 10.0, step=0.5,
+        tooltip='Padding between the axis and the label'),
+    ViewParam('axis_orient_labels', 'Orient w/ Axis', True,
+        tooltip='If true, rotate the axis labels with the axis'),
+    ViewParam('axis_label_color', 'Color', one, param_type='color',
+        tooltip='The color of the axis lines and labels.'),
+    ViewParam('axis_label_size', 'Font Size', 12., 6., 60., step=1.0),
+    ViewParam('axis_single_label', 'One Label per Axis', True,
+        tooltip='If true, one label per axis is drawn at most.'),
+    ViewParam('axis_label_angle', 'Preferred Orientation', 215., 0., 360., step=45,
+        tooltip='Prioritize labels drawn at this angle.\n0 = top, 90 = right, 180 = bottom, 270 = left\n(Only used if there is one label per axis.)'),
+    ViewParam('axis_angle_exclude', 'Angle Exclude', 10., 0., 90., step=5.0,
+        tooltip='Any axis whose angle is less than this with respect to the camera will not have their labels drawn.'),
 
     'Axis Lines and Ticks',
     ViewParam('show_axis', 'Show', True,
@@ -288,25 +317,14 @@ PARAM_CATEGORIES['Display'] = [
     ViewParam('axis_line_width', 'Line Width', 1., 0.5, 10.0, step=1.0),
     ViewParam('axis_major_tick_spacing', 'Major Tick Spacing', 20.0, min=1E-3, max=1E3, logstep=2,
         tooltip='The spacing of major ticks on the axis.'),
+    ViewParam('axis_tick_padding', 'Tick Label Spacing', 0.5, 0.0, 10.0, step=0.5,
+        tooltip='The spacing between the axis and the tick labels'),
     ViewParam('axis_minor_ticks', 'Minor Ticks', 4, min=1, max=20, step=1,
         tooltip='The number of minor divisions per major tick.  1 = no minor ticks.'),
     ViewParam('axis_major_tick_length_ratio', 'Major Tick Length', 0.15, 0.0, 1.0, step=0.05,
         tooltip='The length of the major ticks relative to the distance between them.'),
     ViewParam('axis_minor_tick_length_ratio', 'Minor Tick Length', 0.6, 0.0, 1.0, step=0.05,
         tooltip='The length of the minor ticks relative to the major ticks.'),
-
-    'Axis Labels',
-    ViewParam('show_axis_labels', 'Show', True,
-        tooltip='Show the axes labels.'),
-    ViewParam('axis_label_color', 'Color', one, param_type='color',
-        tooltip='The color of the axis lines and labels.'),
-    ViewParam('axis_label_size', 'Font Size', 12., 6., 60., step=1.0),
-    ViewParam('axis_single_label', 'One Label per Axis', True,
-        tooltip='If true, one label per axis is drawn at most.'),
-    ViewParam('axis_label_angle', 'Preferred Orientation', 215., 0., 360., step=45,
-        tooltip='Prioritize labels drawn at this angle.\n0 = top, 90 = right, 180 = bottom, 270 = left\n(Only used if there is one label per axis.)'),
-    ViewParam('axis_angle_exclude', 'Angle Exclude', 10., 0., 90., step=5.0,
-        tooltip='Any axis whose angle is less than this with respect to the camera will not have their labels drawn.'),
 ]
 
 MAX_CHANNELS = 3
@@ -326,7 +344,11 @@ ASSET_PARAMS['points'] = [
         tooltip='Minimum value used in color scaling'),
     ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0, extend=2,
         tooltip='Maximum value used in color scaling'),
-    ViewParam('points_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
+    ViewParam('geometry_shade_color', 'Shade Color', np.array([1.0, 0.1, 0.1]),
+        param_type='color', tooltip='Solid color shading for geometry (use "shade" to enable).'),
+    ViewParam('geometry_shade', 'Shade', 0.0, 0.0, 1.0,
+        tooltip='If 0, use colormap to color the geometry; if 1, use the shade color.'),
+    ViewParam('geometry_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
         tooltip='Orientation vector of the glyphs'),
     ViewParam('geometry_size', 'Size', '1', options=SCALAR_OPTIONS,
         tooltip='Parameter used to size glyphs'),
@@ -336,6 +358,34 @@ ASSET_PARAMS['points'] = [
         tooltip='Type of glyph to display at each point'),
     ViewParam('points_skip', 'Skip', 1, 1, 20, step=1,
         tooltip='Used to thin points: 1 shows every point, 2 shows every other, and so on'),
+]
+
+LINE_TYPES = {0:'Round', 1:'Ribbon', 2:'Thick Ribbon', 3:'Ellipse', 4:'Triangle', 5:'Square'}
+
+_ASSET = "loop"
+ASSET_PARAMS['loop'] = [
+    ViewParam('geometry_color', 'Color Variable', '1', options=SCALAR_OPTIONS,
+        tooltip='Parameter used to color loop'),
+    ViewParam('geometry_colormap', 'Colormap', 'RdBu', options=_colormap_names,
+        tooltip='Select the color map used to color loop'),
+    ViewParam('geometry_c0', 'Min. value', -1.0, -10.0, 10.0, extend=2,
+        tooltip='Minimum value used in color scaling'),
+    ViewParam('geometry_c1', 'Max. value', +1.0, +10.0, 10.0, extend=2,
+        tooltip='Maximum value used in color scaling'),
+    ViewParam('geometry_shade_color', 'Shade Color', np.array([1.0, 0.1, 0.1]),
+        param_type='color', tooltip='Solid color shading for geometry (use "shade" to enable).'),
+    ViewParam('geometry_shade', 'Shade', 0.0, 0.0, 1.0,
+        tooltip='If 0, use colormap to color the geometry; if 1, use the shade color.'),
+    ViewParam('geometry_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
+        tooltip='Orientation vector of the loop'),
+    ViewParam('geometry_size', 'Thickness', '1', options=SCALAR_OPTIONS,
+        tooltip='Parameter used to determine thickness of loop'),
+    ViewParam('geometry_scale', 'Scale factor', 1.0, 1E-3, 1000, logstep=2,
+        tooltip='Scale factor for loop thickness'),
+    ViewParam('loop_glyph', 'Glyph', 0, options=LINE_TYPES,
+        tooltip='Type of glyph to display at each point'),
+    ViewParam('loop_angle', 'Rotation', 0.0, 0.0, 360.0, 45.0,
+        tooltip='Rotation of the cross-section of the loop.  By default, ribbons are oriented with the normal, but this can modify that.')
 ]
 
 _ASSET = "mesh"
@@ -411,13 +461,24 @@ _ASSET = None
 
 THEMES = {
     'Light': dict(
-        background_color=one,
-        axis_color=zero,
-        axis_line_width=1.0,
+        background_color = one*0.9,
+        axis_background_color = one,
+        axis_color = zero,
+        axis_label_color = zero,
+        # axis_line_width = 1.5,
     ),
     'Dark': dict(
-        background_color=zero,
-        axis_color=one,
-        axis_line_width=1.0,
+        background_color = _BG*one,
+        axis_background_color = zero,
+        axis_color = one,
+        axis_label_color = one,
+        # axis_line_width = 1.0,
+    ),
+    'Dark on Light': dict(
+        background_color = one,
+        axis_background_color = zero,
+        axis_color = one,
+        axis_label_color = zero,
+        # axis_line_width = 1.5,
     ),
 }

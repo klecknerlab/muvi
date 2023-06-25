@@ -67,8 +67,10 @@ class View:
             "vol_iso2", "vol_iso3", "gamma2"},
         "mesh": {"surface_shade", "mesh_clip"},
         "points": {"surface_shade", "mesh_clip"},
+        "loop": {"surface_shade", "mesh_clip"},
         "text": {},
         "axis": {},
+        "axis_bg": {},
     }
 
     _rebuildDep = {
@@ -93,6 +95,12 @@ class View:
         "axis_angle_exclude":{"visibleAxis"},
         "axis_single_label":{"visibleAxis"},
         "axis_label_angle":{"visibleAxis"},
+        "axis_label_x":{"axisLabel"},
+        "axis_label_y":{"axisLabel"},
+        "axis_label_z":{"axisLabel"},
+        "axis_orient_labels":{"axisLabel"},
+        "axis_label_padding":{"axisLabel"},
+        "axis_tick_padding":{"axisLabel"},
         # "frame":{"frame"},
     }
 
@@ -167,6 +175,7 @@ class View:
             "volume": set(),
             "mesh": set(),
             "points": set(),
+            "loop": set(),
         }
         self.assets = {}
 
@@ -664,6 +673,10 @@ class View:
         X0 = self['disp_X0']
         X1 = self['disp_X1']
         spacing = self['axis_major_tick_spacing']
+        labels = (self['axis_label_x'], self['axis_label_y'], self['axis_label_z'])
+        orient = self['axis_orient_labels']
+        tick_padding = self['axis_tick_padding']
+        label_padding = self['axis_label_padding']
 
         digits = -int(np.floor(np.log10(self['axis_major_tick_spacing'])))
         if digits > 0:
@@ -674,7 +687,7 @@ class View:
 
         label_type = float if (spacing % 1) else int
         # Let's make sure the axes have actually changed...
-        key = (tuple(X0), tuple(X1), spacing)
+        key = (tuple(X0), tuple(X1), spacing, labels, orient, tick_padding, label_padding)
         if getattr(self, '_lastaxisLabel', None) == key:
             return
         else:
@@ -714,12 +727,12 @@ class View:
                 for x in np.arange(i0[axis], i1[axis]+1) * spacing:
                     offset[axis] = x
                     start = self.textRender.write(self.axisLabel, offset,
-                        label_fmt % x, flags=48 + visFlag, padding=0.5,
+                        label_fmt % x, flags=48 + visFlag, padding=tick_padding,
                         start=start, baseline=baseline, up=up)
 
                 offset[axis] = 0.5 * (X0[axis] + X1[axis])
                 start = self.textRender.write(self.axisLabel, offset,
-                    f'{chr(ord("X")+axis)}', flags=48 + visFlag, padding=3.5,
+                    labels[axis], flags=(17 if orient else 48) + visFlag, padding=label_padding,
                     start=start, baseline=baseline, up=up)
 
         self.axisLabelChars = start
@@ -926,19 +939,28 @@ class View:
 
         GL.glActiveTexture(GL.GL_TEXTURE0)
 
+        points = np.empty(len(CUBE_CORNERS), np.dtype([('position', '3float32'),]))
+        points['position'] = CUBE_CORNERS
+        self.cubeVertexArray = VertexArray(points)
+        self.cubeVertexArray.attachElements(CUBE_TRIANGLES)
+
     #--------------------------------------------------------
     # Buffer management
     #--------------------------------------------------------
 
-    def addBuffer(self, width, height):
+    def addBuffer(self, width, height, float=False):
         if self.buffers:
             id = max(self.buffers.keys()) + 1
         else:
             id = 0
 
-        self.buffers[id] = FrameBuffer(width, height,
-            internalFormat=GL.GL_SRGB8_ALPHA8, target=GL.GL_TEXTURE_RECTANGLE,
-            depthTexture=True)
+        self.buffers[id] = FrameBuffer(
+            width, height,
+            internalFormat = (GL.GL_RGBA32F if float else GL.GL_SRGB8_ALPHA8),
+            dataType = GL.GL_FLOAT if float else GL.GL_UNSIGNED_BYTE,
+            target = GL.GL_TEXTURE_RECTANGLE,
+            depthTexture = True
+        )
         # self.perspectiveMatrix.append(None)
         self._needsRebuild.add('perspectiveMatrix')
         return id
@@ -951,7 +973,8 @@ class View:
     # Main draw method
     #--------------------------------------------------------
 
-    def draw(self, bufferId=None, blitToDefault=False, scaleHeight=None):
+    def draw(self, bufferId=None, blitToDefault=False, scaleHeight=None,
+        transparent=False, bgTransparent=False):
         if bufferId is None:
             bufferId = self.primaryBuffer
 
@@ -968,11 +991,13 @@ class View:
             for item in self._rebuildOrder:
                 if item in self._needsRebuild:
                     getattr(self, 'build_' + item)()
+                    # print(f'built: {item}')
                     self._needsRebuild.remove(item)
 
             # Rebuild unsorted items
             for item in self._needsRebuild:
                 getattr(self, 'build_' + item)()
+                # print(f'built: {item}')
 
             self._needsRebuild = set()
 
@@ -991,13 +1016,27 @@ class View:
             axisScaling = height / float(scaleHeight)
 
         GL.glViewport(0, 0, width, height)
-        GL.glEnable(GL.GL_FRAMEBUFFER_SRGB)
-        c = self['background_color']
-        GL.glClearColor(c[0], c[1], c[2], 1.0)
+        if not transparent:
+            GL.glEnable(GL.GL_FRAMEBUFFER_SRGB)
+
+        if transparent:
+            GL.glClearColor(0.0, 0.0, 0.0, 0.0)
+        else:
+            c = self['background_color']
+            GL.glClearColor(c[0], c[1], c[2], 1.0)
+
         GL.glDepthMask(GL.GL_TRUE) # Needs to be before the clear!
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
 
         frame = self['frame']
+
+        # Draw the axes background color
+        if not bgTransparent:
+            GL.glDepthMask(GL.GL_FALSE) # We don't want objects to clip on this!
+            shader = self.useShader('axis_bg')
+            shader['perspectiveMatrix'] = self.perspectiveMatrix[bufferId]
+            self.cubeVertexArray.draw()
+            GL.glDepthMask(GL.GL_TRUE)
 
         # ---- Draw polygon based assets ----
         # if self.visibleAssets['mesh']:
@@ -1012,7 +1051,7 @@ class View:
         GL.glDisable(GL.GL_BLEND)
 
 
-        for shader_type in ('mesh', 'points'):
+        for shader_type in ('mesh', 'points', 'loop'):
             assets = self.visibleAssets[shader_type]
             if not assets:
                 continue
@@ -1106,6 +1145,68 @@ class View:
 
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, defaultFB)
 
+
+    def offscreenRender(self, width, height, oversample=1,
+        transparent=False, bgTransparent=False, scaleHeight=None):
+
+        rw = width * oversample
+        rh = height * oversample
+
+        if transparent:
+            if not hasattr(self, 'offscreenBufferFloat'):
+                self.offscreenBufferFloat = self.addBuffer(rw, rh, True)
+                self.offscreenBufferFloatWidth = rw
+                self.offscreenBufferFloatHeight = rh
+
+            bufId = self.offscreenBufferFloat
+
+            if self.offscreenBufferFloatWidth != rw or self.offscreenBufferFloatHeight != rh:
+                self.resizeBuffer(bufId, rw, rh)
+                self.offscreenBufferFloatWidth = rw
+                self.offscreenBufferFloatHeight = rh
+        else:
+            if not hasattr(self, 'offscreenBuffer'):
+                self.offscreenBuffer = self.addBuffer(rw, rh)
+                self.offscreenBufferWidth = rw
+                self.offscreenBufferHeight = rh
+
+            bufId = self.offscreenBuffer
+
+            if self.offscreenBufferWidth != rw or self.offscreenBufferHeight != rh:
+                self.resizeBuffer(bufId, rw, rh)
+                self.offscreenBufferWidth = rw
+                self.offscreenBufferHeight = rh
+
+        self.draw(bufId, scaleHeight=scaleHeight, transparent=transparent, bgTransparent=bgTransparent)
+        img = np.array(self.buffers[bufId].texture)
+
+        if oversample > 1:
+            img = img.reshape(height, oversample, width, oversample, 4)
+            img = img.astype('f').mean((1, 3)).astype(img.dtype)
+
+        if transparent:
+            # The transparency is encoded with pre-multiplied alpha
+            # So we unmultiply it to make it look correct where partially transparent
+            nt = np.where(img[..., 3] > 0)
+            img[nt][..., :3] /= img[nt][..., 3].reshape(-1, 1)
+
+            # If we have glow on, there will be regions with low alpha but very
+            # high color values.  These won't be preserved when we drop to u1,
+            # so as a compromise we can make these regions less transparent.
+            maxval = img[..., :3].max(-1)
+            b = maxval > 1
+            if b.any():
+                b = np.where(b)
+                img[b][..., :3] /= maxval[b].reshape(-1, 1)
+                img[b][..., 3] *= maxval[b]
+
+            img[..., :3] **= 1/2.2
+            img[..., 3] **= 0.5/2.2
+            img = (np.clip(img, 0, 1) * 255).astype('u1')
+
+            return img[::-1]
+        else:
+            return img[::-1, :, :3] #Flip y axis to give normal image convention!
 
     #--------------------------------------------------------
     # Cleanup
