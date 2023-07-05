@@ -242,7 +242,6 @@ class ExportWindow(QWidget):
         self.transparentControl = BoolControl('Transparent export:', False, param='transparent_export')
         self.bgTransparentControl = BoolControl('Force transparent axis background:', False, param='bg_transparent')
 
-
         # self.exportWorker = ExportWorker(self)
         # self.exportThread = QtCore.QThread()
         # self.exportWorker.progressRange.connect(self.progress.setRange)
@@ -305,8 +304,8 @@ class ExportWindow(QWidget):
         self.printTabLayout.addWidget(self.printHeightControl,     0, 3, 1, 2)
         self.printTabLayout.addWidget(self.dpiControl,             1, 1, 1, 2)
         self.printTabLayout.addWidget(self.printOversampleControl, 1, 3, 1, 2)
-        self.printTabLayout.addWidget(self.printSizeLabel,        2, 1, 1, 2)
-        self.printTabLayout.addWidget(self.printDPILabel,       2, 3, 1, 2)
+        self.printTabLayout.addWidget(self.printSizeLabel,        3, 1, 1, 2)
+        self.printTabLayout.addWidget(self.printDPILabel,       3, 3, 1, 2)
         self.updatePrintResolution()
 
         self.settings.addWidget(self.exportTabs, 0, 1, 3, 4)
@@ -314,15 +313,15 @@ class ExportWindow(QWidget):
         # Transparent export disabled -- it does not give good results!
         # The issue is the way alpha blending is handled post-facto, which
         #  does not deal with gamma correction properly.
-        # self.settings.addWidget(self.transparentControl, 3, 1, 1, 2)
-        # self.settings.addWidget(self.bgTransparentControl, 3, 3, 1, 2)
-        self.settings.addWidget(self.exportButton,      3, 1, 1, 2)
-        self.settings.addWidget(self.previewButton,     3, 3, 1, 2)
-        self.settings.addLayout(self.folderControl,     4, 1, 1, 4)
-        self.settings.addWidget(self.movieButton,       5, 1, 1, 4)
-        self.settings.addWidget(self.fileLabel,         6, 1, 1, 4)
-        self.settings.addWidget(self.progress,          7, 0, 1, 5)
-        self.settings.addWidget(self.pauseButton,       7, 5, 1, 1)
+        self.settings.addWidget(self.transparentControl, 3, 1, 1, 2)
+        self.settings.addWidget(self.bgTransparentControl, 3, 3, 1, 2)
+        self.settings.addWidget(self.exportButton,      4, 1, 1, 2)
+        self.settings.addWidget(self.previewButton,     4, 3, 1, 2)
+        self.settings.addLayout(self.folderControl,     5, 1, 1, 4)
+        self.settings.addWidget(self.movieButton,       6, 1, 1, 4)
+        self.settings.addWidget(self.fileLabel,         7, 1, 1, 4)
+        self.settings.addWidget(self.progress,          8, 0, 1, 5)
+        self.settings.addWidget(self.pauseButton,       8, 5, 1, 1)
 
     # def updatescaleHeight(self, key, val):
     #     self.scaleHeight = val
