@@ -353,11 +353,11 @@ class PointSequence:
 
         self.current = None
 
-        if not isinstance(display, dict):
+        if (display is not None) and (not isinstance(display, dict)):
             raise ValueError('display keyword must be dictionary')
         self.display = display
 
-        if not isinstance(metadata, dict):
+        if (metadata is not None) and (not isinstance(metadata, dict)):
             raise ValueError('metadata keyword must be dictionary')
         self.metadata = metadata
 
@@ -480,9 +480,9 @@ class PointSequence:
             ]
 
             with VTKWriter(fn, 'PolyData', print_status=print_status) as f:
-                if self.display:
+                if getattr(self, 'display', None):
                     f.write_tag(DataDict('MuviDisplay', self.display))
-                if self.metadata:
+                if getattr(self, 'metadata', None):
                     f.write_tag(DataDict('UserData', self.metadata))
 
                 f.write_tag(VTKTag('PolyData', [
