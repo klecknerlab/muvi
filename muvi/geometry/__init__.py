@@ -28,7 +28,7 @@ def load_geometry(fn):
     else:
         raise ValueError(f"File '{fn}' does not contain geometry of a recognizable type")
 
-def from_pandas(dat, frame='frame', pos=('xc', 'yc', 'zc'), fields={'voxel_index':('x', 'y', 'z')}):
+def from_pandas(dat, frame='frame', pos=('xc', 'yc', 'zc'), fields={'voxel_index':('x', 'y', 'z')}, display={}, metadata={}):
     '''Convert Pandas data array to a Points or PointSequence
 
     Parameters
@@ -78,7 +78,7 @@ def from_pandas(dat, frame='frame', pos=('xc', 'yc', 'zc'), fields={'voxel_index
             dat_f = dat[dat['frame'] == frame]
             d = {f:dat_f[c].to_numpy() for f, c in f.items()}
             seq[int(frame)] = Points(dat_f[pos].to_numpy(), **d)
-        return PointSequence(seq)
+        return PointSequence(seq, display=display, metadata=metadata)
     else:
         d = {f:dat[c].to_numpy() for f, c in f.items()}
-        return Points(dat[pos].to_numpy(), **d)
+        return Points(dat[pos].to_numpy(), display=display, metadata=metadata, **d)
