@@ -305,7 +305,7 @@ class LinearControl(ParamControl):
         pos = int((value - self.minVal) * self.ratio + 0.5)
         if pos < 0: pos = 0
         if pos >= self.sliderSteps: pos = self.sliderSteps - 1
-        
+
         self.slider.setValue(pos)
 
     def setSilent(self, value):
@@ -441,9 +441,9 @@ def fromQColor(qc, has_alpha):
 
 def toQColor(t):
     if len(t) == 3:
-        return QColor(255*t[0]**(1./GAMMA_CORRECT), 255*t[1]**(1./GAMMA_CORRECT), 255*t[2]**(1./GAMMA_CORRECT),)
+        return QColor(int(255*t[0]**(1./GAMMA_CORRECT)), int(255*t[1]**(1./GAMMA_CORRECT)), int(255*t[2]**(1./GAMMA_CORRECT)), 255)
     elif len(t) == 4:
-        return QColor(255*t[0]**(1./GAMMA_CORRECT), 255*t[1]**(1./GAMMA_CORRECT), 255*t[2]**(1./GAMMA_CORRECT), 255*t[3])
+        return QColor(int(255*t[0]**(1./GAMMA_CORRECT)), int(255*t[1]**(1./GAMMA_CORRECT)), int(255*t[2]**(1./GAMMA_CORRECT)), int(255*t[3]))
     else:
         raise ValueError('input should have 3 or 4 components')
 
