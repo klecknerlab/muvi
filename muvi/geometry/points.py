@@ -107,11 +107,11 @@ class Points:
 
         if not isinstance(display, dict):
             raise ValueError('display keyword must be dictionary')
-        self.display = display
+        self.display = display.copy()
 
         if not isinstance(metadata, dict):
             raise ValueError('display keyword must be dictionary')
-        self.metadata = metadata
+        self.metadata = metadata.copy()
 
         for k, v in attr.items():
             self[k] = v
@@ -343,9 +343,9 @@ class PointSequence:
             dat = points[i]
 
             if display is None and hasattr(dat, 'display'):
-                display = dat.display
+                display = dat.display.copy()
             if metadata is None and hasattr(dat, 'metadata'):
-                metadata = dat.metadata
+                metadata = dat.metadata.copy()
 
             self._d[i] = dat
             if len(dat) > self._N:
@@ -355,11 +355,11 @@ class PointSequence:
 
         if (display is not None) and (not isinstance(display, dict)):
             raise ValueError('display keyword must be dictionary')
-        self.display = display
+        self.display = display.copy()
 
         if (metadata is not None) and (not isinstance(metadata, dict)):
             raise ValueError('metadata keyword must be dictionary')
-        self.metadata = metadata
+        self.metadata = metadata.copy()
 
 
     def __len__(self):
