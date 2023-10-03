@@ -169,10 +169,11 @@ class Mesh(object):
             stl_dat['n'] = self.face_normals()
 
             with open(fn, 'wb') as f:
-                header = '\x00\x00This is an STL file. (http://en.wikipedia.org/wiki/STL_(file_format))'
-                f.write(header + ' ' * (80 - len(header)))
+                header = b'\x00\x00This is an STL file. (http://en.wikipedia.org/wiki/STL_(file_format))'
+                f.write(header + b' ' * (80 - len(header)))
                 f.write(np.array(len(self.triangles), 'u4').tostring())
-
+                f.write(stl_dat.tostring())
+                
         else:
             raise ValueError('file type should be "ply" or "stl"')
 
