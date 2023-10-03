@@ -1,12 +1,10 @@
 # Setup
 
-## Windows Instructions
-
-### Prerequisites
+## Prerequisites
 
 If you don't already have a Python distribution, you will need to download one
-first.  We recommend "Anaconda", as it includes many of the required packages
-already (and is widely used for data analysis in many fields).
+first.  We recommend [Anaconda](https://www.anaconda.com/download), as it 
+includes many of the required packages already.
 
 We also need to install the following Python packages:
   * pyQt5
@@ -14,22 +12,24 @@ We also need to install the following Python packages:
   * lz4
   * numba
 
-We can also do this from a command console.  To do this, open `Anconda
+We can do this from a command console.  To do this in Windows, open `Anconda
 Powershell Prompt` in **administrator mode**.  (Right click on the program
-in the start menu and select `Run as administrator`.)
+in the start menu and select `Run as administrator`.)  To do this on Mac or
+Linux just open a terminal.  In either case, run the following command in
+the shell/terminal.
 ```shell
 conda install numba lz4 pyopengl pyqt
 ```
 
-You can also do this from the `Anaconda Navigator Program`.
+You can also install these packages from the `Anaconda Navigator Program`.
 
-### Downloading and Installing the Python Module.
+## Downloading and Installing the Python Module.
 
 You will also need a method to download the Github repository.  There are
 several ways to do this, but perhaps the easiest is to use the programming
-editor [Atom](https://atom.io/).  Once atom is installed, you can check out
-the repository using the following procedure in Atom:
-  * Open the command palette: `Ctrl`+`Shift`+`p`
+editor [VSCode](https://code.visualstudio.com/).  Once installed, you can 
+check out the repository using the following procedure in VS Code:
+  * Open the command palette: `Ctrl`+`Shift`+`p` (`Cmd`+`Shift`+`p` on Mac)
   * Type `"clone"` + `Enter`, and select `Github: Clone`
   * Enter the following URL into the box: https://github.com/klecknerlab/muvi
   * If you wish, change the target directory and click `Clone`
@@ -40,10 +40,10 @@ is easiest to do from a console window.  If you are using Anaconda, open the
 administrator mode).  Then enter the following commands:
 ```shell
 cd github\muvi
-python setup.py develop
+pip install -e .
 ```
-**Note**: This commands assume you cloned the repository into the `[USER]\github\muvi`
-directory, which is the default for Atom.
+**Note**: This commands assume you cloned the repository into the 
+`[USER]\github\muvi` directory.
 
 This will install the module in *developer mode*, which means that it leaves
 all the files in the original directory, instead of copying them to the Python
@@ -56,54 +56,11 @@ don't delete this directory after installing!
 You can now run the examples below from the powershell prompt.  If you used
 the defaults, your muvi directory is  `~\github\muvi`
 
-## Mac / Linux
+## Updating the Package
 
-**Note:** The software is being actively developed and tested on Mac OS X, but not in Linux.  It should *probably* work, but may have some minor bugs.  If you run into any issues, please reach out!
-
-### Dependencies
-
-In order to run the tools, you will need several Python packages installed, including:
-  * numpy
-  * pyQt5
-  * pyopengl
-  * lz4
-  * numba
-  * pyobjc-framework-cocoa (MacOS only)
-
-This is easiest to do with some sort of package manager; the code is being developed using Anaconda (https://www.anaconda.com/).  Note that the only Python 3.X is supported.
-
-Assuming you have Anaconda installed, you can get the require packages with:
-
-```shell
-$ conda install numba lz4 pyopengl pyqt pyobjc-framework-cocoa
-```
-
-### Installing the Package in Developer Mode
-
-```shell
-$ git clone https://github.com/klecknerlab/muvi
-$ cd muvi
-$ python setup.py develop
-```
-
-### Installing as a Regular Package
-
-*This is not recommended, code is under active development!*
-
-```shell
-$ git clone https://github.com/klecknerlab/muvi
-$ cd muvi
-$ python setup.py install
-```
-
-### Updating the Package
-
-If the package is installed in developer mode, any changes to the code in the package folder will immediately affect the module.
-To update the package, just pull from the master github repository.
-
-In Atom, you can do this by opening the main project directory (if you just opened Atom, select `Add Project Folder` from the `File` menu, and then select the `muvi` base directory (by default on Windows this is `[USER]\github\muvi`).
-The click the `Fetch` button on the lower right of the Atom window.
-If updates are available, this will button will change to `Pull`; click again and you should have the updates.
+If the package is installed in developer mode, any changes to the code in the 
+package folder will immediately affect the module. To update the package, just 
+pull from the master github repository.
 
 # Usage
 
@@ -119,31 +76,48 @@ $ muvi gyroid.vti
 
 ![](gyroid.png)
 
-Alternatively, there is a sample frame from a real experiment in the same directory, it can be viewed with:
+Alternatively, there is a sample frame from a real experiment in the same 
+directory, it can be viewed with:
 
 ```shell
 $ muvi [MUVI DIR]/samples/sample_frame.vti
 ```
 
-Note also that you can drag and drop files into the Muvi Viewer window, which will automatically display them.
+Note also that you can drag and drop files into the Muvi Viewer window, which 
+will automatically display them.
 
 ## Introduction to the viewer.
 
 The viewer has a few main parts:
  * **Rendered data:** the main portion of the window.
- * **Data selector:** top-right of the window.  This allows you to select which data is displayed, and add/remove files.  Right click on a data item to get more options.  Also, if you select an item (left click on it), it's display options will be shown in the panel below.
- * **Display options:** center-right of the window.  This displays all the adjustable options for the rendering of the data.  Note that the first tab is specific to the data item you have selected above.
- * **Playback controls:** bottom of the window.  Note that playback speed is controlled in the "View" tab of the display options.
+ * **Data selector:** top-right of the window.  This allows you to select which
+    data is displayed, and add/remove files.  Right click on a data item to get
+    more options.  Also, if you select an item (left click on it), it's display 
+    options will be shown in the panel below.
+ * **Display options:** center-right of the window.  This displays all the 
+    adjustable options for the rendering of the data.  Note that the first tab 
+    is specific to the data item you have selected above.
+ * **Playback controls:** bottom of the window.  Note that playback speed is 
+    controlled in the "View" tab of the display options.
 
-If you would like to export an image, you can open the export window with `Ctrl+E` (`Cmd+E` on Mac).
+If you would like to export an image, you can open the export window with 
+`Ctrl+E` (`Cmd+E` on Mac).
 
 You can also hide/show the right panel with `Ctrl+/` (`Cmd+/` on Mac).
 
-Most of the display options include "tooltips" -- if you hover the cursor over the controls it will give you more information on what it does.
+Most of the display options include "tooltips" -- if you hover the cursor over
+ the controls it will give you more information on what it does.
 
 ## Converting a 2D Movie to 3D
 
-To convert a Phantom CINE file to compressed VTI volume, you need to first generate a XML file which contains the VolumeProperties info.  This will allow you to define the number of frames per volume and other important properties.  To do this, copy the `samples/muvi_setup.xml` file (copied below) to the same directory as your 2D movie source files.  If you leave the name as is, it will be automatically used by every file conversion in that directory.  Alternatively, if you give it the same name as your source file (apart from the extension), this will be used for that specific file only.
+To convert a Phantom CINE file to compressed VTI volume, you need to first
+ generate a XML file which contains the VolumeProperties info.  This will allow 
+ you to define the number of frames per volume and other important properties.  
+ To do this, copy the `samples/muvi_setup.xml` file (copied below) to the same 
+ directory as your 2D movie source files.  If you leave the name as is, it will 
+ be automatically used by every file conversion in that directory. 
+  Alternatively, if you give it the same name as your source file (apart from 
+  the extension), this will be used for that specific file only.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -186,14 +160,24 @@ To convert a Phantom CINE file to compressed VTI volume, you need to first gener
 </VolumeProperties>
 ```
 
-**Note:** If your 3D frames are trigger only during the active scan region,  you can comment out the `Ns` and `Nz` entries.  The software will automatically determine the volume depth by analyzing the frame timings!
+**Note:** If your 3D frames are trigger only during the active scan region,  
+you can comment out the `Ns` and `Nz` entries.  The software will automatically 
+determine the volume depth by analyzing the frame timings!
 
-Additionally, there are two utilities in the `util` directory which are useful for determining the properties of Cine files:
+Additionally, there are two utilities in the `util` directory which are useful 
+for determining the properties of Cine files:
 
-* `cine_histo.py`: This will sample the input cine file and create a histogram of the brightness levels.  Can be used to determine the appropriate `dark_clip` level.  (Although the default is usually sufficient.)
-* `frame_delta.py`: This will analyze the first 1500 frames to try to find the "turn-around" of the laser scanner.  Can be used to determine the number of frames in a scan (`Ns`) and the offset (`offset`).  (**Note:** this utility is obsolete in practice; if you don't specify `Ns` or `Nz`, this analysis is automatic!)
+* `cine_histo.py`: This will sample the input cine file and create a histogram 
+    of the brightness levels.  Can be used to determine the appropriate `dark_clip` 
+    level.  (Although the default is usually sufficient.)
+* `frame_delta.py`: This will analyze the first 1500 frames to try to find the 
+    "turn-around" of the laser scanner.  Can be used to determine the number of 
+    frames in a scan (`Ns`) and the offset (`offset`).  (**Note:** this utility 
+    is obsolete in practice; if you don't specify `Ns` or `Nz`, this analysis 
+    is automatic!)
 
-To convert your video file, use the installed `muvi_convert` shell command to generate the `.vti` file, and `muvi` to view it:
+To convert your video file, use the installed `muvi_convert` shell command to 
+generate the `.vti` file, and `muvi` to view it:
 
 ```shell
 $ muvi_convert [INPUT FILE] [OUTPUT FILE]
@@ -243,9 +227,9 @@ A number of features are currently planned:
 - [ ] Support for perspective in old "S4D" format  
 - [ ] Perspective correction on volumes in memory (for external processing)
 - [x] Image export (high res)
-- [ ] Movie export
+- [x] Movie export
 - [ ] Asyncronous display code (to avoid hang ups)
-- [ ] Labeled axes
+- [x] Labeled axes
 - [ ] Create Wiki with practical examples
 
 
@@ -254,7 +238,7 @@ A number of features are currently planned:
 
 # License
 
-Copyright 2021 Dustin Kleckner
+Copyright 2023 Dustin Kleckner
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
