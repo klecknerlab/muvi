@@ -379,7 +379,7 @@ class VTKReader:
         if hbo == 'littleendian':
             self.header_byte_order = "<"
         elif hbo == 'bigendian':
-            slef.header_byte_order = ">"
+            self.header_byte_order = ">"
         else:
             raise ValueError(f'Invalid header byte order: "{hbo}"')
 
