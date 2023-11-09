@@ -82,7 +82,7 @@ class ImageDisplay(QWidget):
         if self.image is not None:
             qp = QtGui.QPainter()
             qp.begin(self)
-            qp.drawPixmap(0, 0, self.w * self.scale, self.h * self.scale, self.image, 0, 0, self.w, self.h)
+            qp.drawPixmap(0, 0, int(self.w * self.scale + 0.5), int(self.h * self.scale + 0.5), self.image, 0, 0, self.w, self.h)
             qp.end()
 
     def adjustSize(self, event=None):
