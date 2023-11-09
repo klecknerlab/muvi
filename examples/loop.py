@@ -45,18 +45,25 @@ for i in range(Nt):
     thickness = 0.05 * (1.2 + np.sin(19*ϕ + 2*θ))
     color = np.sin(9*ϕ -θ)
 
-    seq.append(geometry.Points(X, thickness=thickness, color=color))
+    # The geometry.Points object holds the data for a single frame.
+    #   Note that we can append *arbitrarily named* attributes to the points,
+    #   which can be used in the display software later!
+    #   In this case we are adding the fields "t" and "c", but the names are
+    #   completely user defined.  It is also possible to attach vectors, in
+    #   which case you should pass an array which shape (N, 3), where N is the
+    #   number of points.
+    seq.append(geometry.Points(X, t=thickness, c=color))
 
 
 loop = geometry.PointSequence(
     seq,
     display = dict(
-        render_as = 'loop',
-        size = 'thickness',
-        scale = 1,
-        color = 'color',
-        X0 = [-2, -2, -1],
-        X1 = [2, 2, 1],
-        colormap = 'twilight',
+        render_as = 'loop', # Display as a closed loop rather than discrete points
+        size = 't', # The field used to determine diameter of the rendered 3D tube; can vary with position!
+        scale = 1, # Scale factor for the size
+        color = 'c', # The field used to determine the (varying) color of the line
+        X0 = [-2, -2, -1], # The display limits; if not specified these are automatically determined.
+        X1 = [2, 2, 1], # The display limits; if not specified these are automatically determined.
+        colormap = 'twilight', # The colormap used to convert the color value ("c" field) to an actual tube color.
     )
 ).save('trefoil.vtp')
