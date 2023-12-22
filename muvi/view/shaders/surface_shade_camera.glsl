@@ -28,6 +28,7 @@ uniform float specular_brightness = 0.75;
 uniform float specular_power = 100.0;
 uniform vec3 edge_color = vec3(0.1, 0.2, 0.4)*1E-1;
 uniform float edge_power = 50;
+uniform float surface_brightness = 1.0;
 
 vec3 diffuseSpecular(vec4 color, vec3 N, vec3 C, vec3 L, vec3 lightColor)
 {
@@ -59,5 +60,5 @@ vec4 shadeSurface(vec4 color, vec3 pos, vec3 N)
     c += diffuseSpecular(color, N, C, normalize(light_N3), light_C3);
     c += diffuseSpecular(color, N, C, normalize(light_N4), light_C4);
 
-    return vec4(c, color.a);
+    return vec4(c * surface_brightness, color.a);
 }

@@ -295,7 +295,7 @@ class LinearControl(ParamControl):
         self.slider.setTickInterval(self.subdiv * 2 if self.sliderSteps//self.subdiv > 10 else self.subdiv)
 
         if self.decimals is None:
-            self.spinBox.setDecimals(math.ceil(1.5-math.log10(self.currentStep)))
+            self.spinBox.setDecimals(math.ceil(2.5-math.log10(self.currentStep)))
         else:
             self.spinBox.setDecimals(self.decimals)
 
@@ -342,7 +342,7 @@ class LogControl(ParamControl):
             step = (maxVal - minVal) / 10
 
         if decimals is None:
-            decimals = math.ceil(0.5-math.log10(minVal))
+            decimals = math.ceil(1.5-math.log10(minVal))
 
         self.spinBox.setDecimals(decimals)
 

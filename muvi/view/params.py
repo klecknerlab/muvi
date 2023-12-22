@@ -284,6 +284,8 @@ PARAM_CATEGORIES['Display'] = [
         tooltip='The color of the background behind the axes'),
     ViewParam('surface_shade', 'Surface Shade', 'camera', options=SUBSHADER_NAMES['surface_shade'],
         tooltip='The lighting model used to shade surfaces.'),
+    ViewParam('surface_brightness', 'Surface Brightness', 1.0, min=0.5, max=4.0, logstep=2**0.25,
+        tooltip='Overall brigthness adjustment of surface shading.'),
 
     'Axis Labels',
     ViewParam('show_axis_labels', 'Show', True,

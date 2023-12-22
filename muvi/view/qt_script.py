@@ -309,6 +309,8 @@ class KeyframeEditor(QWidget):
                     elif param == '_spin':
                         spin = val
                 elif not arrayEquiv(val, params.get(param, None)):
+                    if isinstance(val, (list, tuple)):
+                        val = np.array(val)
                     updates[param] = val
 
             if num == -1:
