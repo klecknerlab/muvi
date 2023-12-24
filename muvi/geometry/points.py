@@ -492,6 +492,8 @@ class PointSequence:
             raise ValueError('filetype not recognized!')
 
 
+
+
 class PointsFromFile(Points):
     def __init__(self, f):
         '''A class for Points data loaded from a VTP file.
@@ -538,6 +540,7 @@ class PointsFromFile(Points):
         self.metadata = {}
         for tag in self.vtk.root.findall('UserData'):
             self.metadata.update(self.vtk.get_dict(tag))
+
 
 class PointSequenceFromFile(PointSequence):
     def __init__(self, f):
@@ -620,3 +623,33 @@ class PointSequenceFromFile(PointSequence):
         data = {key:data[:cutoff] for key, data in data.items()}
 
         return Points(pos, **data)
+
+
+class PointSequenceFromFunction(PointSequence):
+    def __init__(self, function, valid_frames, display=None, metadata=None):
+        self._function = function
+        self._d = {k:None for k in valid_frames}
+
+        if (display is not None) and (not isinstance(display, dict)):
+            raise ValueError('display keyword must be dictionary')
+        self.display = display.copy()
+
+        if (metadata is not None) and (not isinstance(metadata, dict)):
+            raise ValueError('metadata keyword must be dictionary')
+        self.metadata = metadata.copy()
+
+    def __len__(self):
+        return len(self._d)
+    
+    def _get(self, i):
+        if i in self._d:
+            data = self._function(i)  
+            
+            if type(data) == tuple and len(data) == 2 and type(data[1]) == dict:
+                return Points(data[0], **data[1])
+            else:
+                return Points(data)
+        else:
+            raise KeyError(f"Invalid timestep: {i}")
+
+

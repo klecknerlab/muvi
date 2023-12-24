@@ -14,19 +14,53 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .points import Points, PointSequence, PointsFromFile, PointSequenceFromFile
+from .points import Points, PointSequence, PointsFromFile, PointSequenceFromFile, PointSequenceFromFunction
 from ..filetypes.vtk import VTKReader
 import numpy as np
+import os
+import re
 
 def load_geometry(fn):
-    vtk = VTKReader(fn)
-    if vtk.main.tag == 'PolyData':
-        if 'TimeValues' in vtk.main.attrib:
-            return PointSequenceFromFile(vtk)
+    bfn, ext = os.path.splitext(fn)
+    ext = ext.lower()
+
+    if ext == '.vtp':  
+        vtk = VTKReader(fn)
+        if vtk.main.tag == 'PolyData':
+            if 'TimeValues' in vtk.main.attrib:
+                return PointSequenceFromFile(vtk)
+            else:
+                return PointsFromFile(vtk)
         else:
-            return PointsFromFile(vtk)
+            raise ValueError(f"File '{fn}' does not contain geometry of a recognizable type")
+    elif ext == '.py':
+        with open(fn, 'rt') as f:
+            preamble = f.readline()
+            m = re.match('\s*#\s*MUVI\s+GEOMETRY:(.+)', preamble)
+            if not m:
+                raise RuntimeError(f'Failed to load dynamic geometry from "{fn}"; first line should be "# MUVI GEOMETRY: [geometry type]"')
+            else:
+                geometry_type = m.group(1).strip()
+
+            _globals = {}
+            _locals = {'__file__':os.path.abspath(fn)}
+            exec(f.read(), _globals, _locals)
+
+            display = _locals.get('_display', None)
+            metadata = _locals.get('_metadata', None)
+
+            if geometry_type == 'PointSequence':
+                if '_get' not in _locals:
+                    raise ValueError(f'Dynamic geometry scripts must define a "_get" function, but none found in "{fn}"')
+                if '_valid_frames' not in _locals:
+                    raise ValueError(f'Dynamic geometry scripts must define a "_valid_frames" object, but none found in "{fn}"')
+                
+                return PointSequenceFromFunction(_locals['_get'], valid_frames=_locals['_valid_frames'], display=display, metadata=metadata)
+            else:
+                raise ValueError(f'Unknown geometry type: "{geometry_type}"')
+
     else:
-        raise ValueError(f"File '{fn}' does not contain geometry of a recognizable type")
+        raise ValueError(f'Extension "{ext}" is not supported by the MUVI Geometry module')
 
 def from_pandas(dat, frame='frame', pos=('xc', 'yc', 'zc'), fields={'voxel_index':('x', 'y', 'z')}, display={}, metadata={}):
     '''Convert Pandas data array to a Points or PointSequence

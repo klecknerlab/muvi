@@ -700,7 +700,7 @@ class VolumetricViewer(QMainWindow):
     def openFile(self):
         fn, ext = QFileDialog.getOpenFileName(self,
             'Open Volumetric Movie / Mesh Sequence', os.getcwd(),
-            "Volumetric Movie (*.vti);; Polygon Mesh (*.ply);; MUVI Script (*.muvi_script)")
+            "Volumetric Movie (*.vti);; Polygon Mesh (*.ply);; MUVI Script (*.muvi_script);; Geometry Data (*.vtp);; Geometry Script (*.py)")
         if fn:
             self.openData(fn)
 

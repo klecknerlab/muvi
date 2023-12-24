@@ -49,7 +49,7 @@ def load_asset(fn, id=0, parent=None):
 
     if ext in ('.vti', '.vts', '.cine'):
         return VolumeAsset(fn, id, parent)
-    elif ext in ('.vtp'):
+    elif ext in ('.vtp', '.py'):
         return GeometryAsset(fn, id, parent)
     elif ext in ('.ply'):
         dir, bfn = os.path.split(fn)
@@ -533,9 +533,11 @@ class GeometryAsset(DisplayAsset):
 
             if hasattr(self, 'X0'):
                 self.X0 = np.min([self.X0, minval], 0)
-                self.X1 = np.max([self.X1, maxval], 0)
             else:
                 self.X0 = minval
+            if hasattr(self, 'X1'):
+                self.X1 = np.max([self.X1, maxval], 0)
+            else:
                 self.X1 = maxval
 
             self._N = max(self._N, len(pos))
@@ -554,9 +556,9 @@ class GeometryAsset(DisplayAsset):
                     self.scalar_range[var] = (np.min(vals), np.max(vals))
 
         if "X0" in self.display:
-            self.X0 = self.display.pop("X0")
+            self.X0 = np.asarray(self.display.pop("X0"))
         if "X1" in self.display:
-            self.X1 = self.display.pop("X1")
+            self.X1 = np.asarray(self.display.pop("X1"))
 
         super().__init__(data, id, parent, _loaded_from=source)
         self._loaded = True
