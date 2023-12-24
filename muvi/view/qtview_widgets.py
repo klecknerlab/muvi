@@ -287,8 +287,11 @@ class LinearControl(ParamControl):
         self.minVal = minVal
         self.maxVal = maxVal
         self.ratio = self.sliderSteps / (self.maxVal - self.minVal)
-        extend = (maxVal - minVal) * self.extend
-        self.spinBox.setRange(minVal - extend, maxVal + extend)
+        if self.extend > 0:
+            extend = (maxVal - minVal) * self.extend
+            self.spinBox.setRange(minVal - extend, maxVal + extend)
+        elif self.extend < 0: 
+            self.spinBox.setRange(-1E100, 1E100)
         self.slider.setRange(0, self.sliderSteps)
         self.spinBox.setSingleStep(step)
         self.slider.setSingleStep(self.subdiv)
@@ -316,7 +319,8 @@ class LinearControl(ParamControl):
 
     def spinChanged(self, value):
         self.slider.blockSignals(True)
-        self.slider.setValue(int((value - self.minVal) * self.ratio + 0.5))
+        val = int((value - self.minVal) * self.ratio + 0.5)
+        self.slider.setValue(max(min(val, self.sliderSteps), 0))
         self.slider.blockSignals(False)
 
     def sliderChanged(self, value):

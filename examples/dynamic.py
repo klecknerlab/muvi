@@ -1,4 +1,6 @@
 # MUVI GEOMETRY: PointSequence
+# Note: the first line must be identical to the above so that the MUVI library
+#   recognizes this as a plugin!
 
 # This script is meant to be loaded using muvi.geometry.loadgeometry
 # It dynamicallty generates data using the python script below

@@ -177,11 +177,20 @@ class KeyframeEditor(QWidget):
         # print(bdir, bfn)
         assets = {int(k):os.path.abspath(os.path.join(bdir, v)) for k, v in setup['assets'].items()}
         # assets = {int(k):os.path.join(bdir, v) for k, v in setup['assets'].items()}
-        # print(assets)
+
+        export = self.mainWindow.exportWindow
+
+        for name, control in {
+                    'width': export.widthControl,
+                    'height': export.heightControl,
+                    'oversample': export.oversampleControl,
+                    'scale_height': export.scaleControl
+                }.items():
+            if name in setup:
+                control.setValue(setup[name])
 
         # Parse all the frame data (a list of params) *without* actually
-        #   changing anything.  We will create a list of items but not
-        #   actually
+        #   changing anything. 
         keyframes = []
         unknownParams = set()
 
@@ -208,8 +217,8 @@ class KeyframeEditor(QWidget):
                         unknownParams.add(param)
             keyframes.append(Keyframe(data.copy()))
 
-        if unknownParams:
-            print(unknownParams)
+        # if unknownParams:
+        #     print(unknownParams)
 
         relabel = self.mainWindow.openAssets(assets)
         relabel = {old:new for old, new in relabel.items() if old != new}
@@ -226,18 +235,8 @@ class KeyframeEditor(QWidget):
 
         self.isSaved = True
 
-        # Exceptions handled in main class... no need to do it here!
-        #  (in fact, if you do it screws things up there!)
-        # except Exception as e:
-        #     ec = e.__class__.__name__
-        #     msg = QMessageBox()
-        #     msg.setIcon(QMessageBox.Critical)
-        #     msg.setWindowTitle(str(ec))
-        #     msg.setText(str(ec) + ": " + str(e))
-        #     msg.setDetailedText(traceback.format_exc())
-        #     msg.setStyleSheet("QTextEdit {font-family: Courier; min-width: 600px;}")
-        #     msg.setStandardButtons(QMessageBox.Cancel)
-        #     msg.exec_()
+        # Display the first keyframe
+        self.mainWindow.display.updateParams(keyframes[0].data(Qt.UserRole), callback=True)
 
 
     def saveScript(self, event=None, fn=None):
