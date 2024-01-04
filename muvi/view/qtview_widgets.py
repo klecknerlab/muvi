@@ -304,7 +304,7 @@ class LinearControl(ParamControl):
         else:
             self.spinBox.setDecimals(self.decimals)
 
-        print(self.param, minVal, maxVal)
+        # print(self.param, minVal, maxVal)
 
     def setValue(self, value, silent=False):
         self.spinBox.setValue(value)
