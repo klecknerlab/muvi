@@ -292,6 +292,8 @@ class LinearControl(ParamControl):
             self.spinBox.setRange(minVal - extend, maxVal + extend)
         elif self.extend < 0: 
             self.spinBox.setRange(-1E100, 1E100)
+        else:
+            self.spinBox.setRange(minVal, maxVal)
         self.slider.setRange(0, self.sliderSteps)
         self.spinBox.setSingleStep(step)
         self.slider.setSingleStep(self.subdiv)
@@ -301,6 +303,8 @@ class LinearControl(ParamControl):
             self.spinBox.setDecimals(math.ceil(2.5-math.log10(self.currentStep)))
         else:
             self.spinBox.setDecimals(self.decimals)
+
+        print(self.param, minVal, maxVal)
 
     def setValue(self, value, silent=False):
         self.spinBox.setValue(value)

@@ -266,7 +266,7 @@ PARAM_CATEGORIES['View'] = [
     ViewParam('framerate', 'Playback Rate', 30, 1, 120, 10,
         tooltip='The playback rate in volumes/second.'),
     ViewParam('camera_pos', 'Camera Position', np.array([50, 50, 500], dtype='f'),
-        min=-500*one, max=500*one, range_update='camera_limits',
+        min=-500*one, max=500*one, range_update='camera_limits', extend=-1,
         tooltip='The position of the camera in volume physical units.'),
     ViewParam('look_at', 'Camera Target', 50*one, min=-100*one, max=100*one,
         range_update='data_limits',
