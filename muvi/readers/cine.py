@@ -405,7 +405,9 @@ class Cine:
         Keywords
         --------
         output_bits : int (default: 8)
-            The number of bits in the output array.  Should be 8 or 16
+            The number of bits in the output array.  Should be 8, 16, or 32.
+            8 and 16 will produce 'u1' or 'u2' output, while 32 bit output
+            is single precision float.
         black_level : int (default: 64)
             The level in the decoded cine file which is considered "black";
             this value will be converted to 0 in the output.  This value is
@@ -414,7 +416,7 @@ class Cine:
             The level in the decoded cine file which is considered "white";
             this value will be converted to 2^bits - 1 in the output.  This
             value is standard for Phantom cameras, and should not need to be
-            changed.
+            changed.  (For floating point, it will be converted to 0 - 1)
         gamma : float (default: 1.0)
             The gamma value of the extracted images.  The actual intensity of
             the pixel is proportional to (output value)^(gamma)
@@ -468,17 +470,22 @@ class Cine:
         # Set up tone map and output info
         if output_bits == 8:
             self.output_type = 'u1'
+            output_max = 2**output_bits - 1
         elif output_bits == 16:
             self.output_type = 'u2'
+            output_max = 2**output_bits - 1
+        elif output_bits == 32:
+            self.output_type = 'f'
+            output_max = 1.0
         else:
-            raise ValueError('output_bits shoud be 8 or 16 (found %s)' % output_bits)
-
-        output_max = 2**output_bits - 1
+            raise ValueError('output_bits shoud be 8, 16, or 32 (found %s)' % output_bits)
 
         if remap:
-            rel_map = (LinLUT.astype('d') - black_level) / (white_level - black_level)
+            rel_map = (LinLUT.astype('f') - black_level) / (white_level - black_level)
             rel_map[np.where(rel_map < dark_clip)] = 0
-            self.tone_map = (np.clip(rel_map, 0.0, 1.0)**(1./gamma) * output_max + 0.5).astype(self.output_type)
+            self.tone_map = (np.clip(rel_map, 0.0, 1.0)**(1./gamma) * output_max)
+            if output_bits != 32:
+                self.tone_map = (self.tone_map + 0.5).astype(self.output_type)
         else:
             if output_bits != 16:
                 raise ValueError('Must be in 16 bit output mode if the data is not remapped!')
