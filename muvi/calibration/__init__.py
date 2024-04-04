@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License
 #Developed modules
-from muvi.distortion import get_distortion_model
+from muvi.distortion import get_distortion_model, DistortionModel
 from muvi import VolumeProperties
 from muvi import open_3D_movie
 from muvi.readers.cine import Cine
@@ -33,25 +33,52 @@ import json
 
 class CalibrationProperties:
     _defaults = {
-        # 'start': 0,
-        # 'diameter': 5,
-        # 'separation': 5,
-        # 'mass': 1.3,
-        # 'start': 0,
-        # 'search': 1,
+        #'start': 0,
+        #'diameter': 5,
+        #'separation': 5,
+        #'mass': 1.3,
+        #'start': 0,
+        #'search': 1,
+        #'spacing': 5, (mm)
         #'A1': 0.03, #(mm^-1)
         #'A2': 0.01, #(mm^-1)
         #'p1_n': 0.04,
         #'p2_n': 0.03,
         #'de': 4.5,
+        #'az': (-1, 1), 
+        #'ay': (40, 50),
+        #'ax': (-1, 1),
+        #'xo': (-10, 10),
+        #'yo': (-10, 10),
+        #'zo': (-10, 10),
+        #'mb': (0, 1),
+        #'sb': (1, 2.25),
     }
     _param_types = {
+        'channel': int,
         'start': int,
         'vols': int,
         'diameter': int,
-        'separation': int,
         'mass': int,
+        'separation': int,
         'search': int,
+        'mb': tuple,
+        'sb': tuple,
+        'spacing': int,
+        'tx': float,
+        'tz': float,
+        'xb': tuple,
+        'yb': tuple,
+        'dx': tuple,
+        'dz': tuple,
+        'Lx': tuple,
+        'Lz': tuple,
+        'az': float,
+        'ay': float,
+        'ax': float,
+        'xo': float,
+        'yo': float,
+        'zo': float,
         'p1_n': float,
         'p2_n': float,
         'A1': float,
@@ -59,17 +86,6 @@ class CalibrationProperties:
         'C1': float,
         'C2': float,
         'de': float,
-        'channel': int,
-        'tx': float,
-        'tz': float,
-        'xb': tuple,
-        'yb': tuple,
-        'spacing': float,
-        'dx': tuple,
-        'dz': tuple,
-        'Lx': tuple,
-        'Lz': tuple,
-
     }
     
     def __init__(self, json_data=None, json_file=None):
@@ -98,6 +114,10 @@ class CalibrationProperties:
             Characterisitc minimum mass of tracked particles (see trackpy api reference for more details). Defaults are arbitary, set for our data  needs.
         search : int
             Maximum displacement that a particle can undergo between consevutive frames during tracking process (see trackpy api reference for more details).
+        mb: tuple,
+            Mass bounds used to filter tracks. Defaults are based off our experiments.
+        sb : tuple
+            Size bounds used to filter track. Defaults are based off our experiments.
         p1_n, p2_n : float
             Laser shot noise. Defaults depend on the model of the laser, in our case Explorere One XP 355-2 and Explorere One XP-5.
         A1, A2 : float
@@ -110,6 +130,18 @@ class CalibrationProperties:
             Channel to be analyzed for tracking. Defaults is set to 1 because our light excited particles are excited by the Green laser which defaults to this channel.
         tx, tz:
             Distance from the inner edge of the tank to the center of the volume. See H2C-SVLIF Diego Tapia Silva et al for more details.
+        xb, yb: tuple
+            Bounds to be used to construct a 'subgrid' to be used for recovering the distortion parameters.
+        spacing: float
+            Spacing between the points on the calibration target.
+        Lx, Lz : tuple
+            Bounds to be used for the physical size of the volume. The bounds are used as initial guesses to recover distortion parameters.
+        dx, dz: tuple
+            Bounds to be used for the distance from the laser to the center of the volume and the distance from the camera to the center of the volume, respectively. The bounds are used as initial guesses to recover distortion parameters.
+        ax, ay, az: float
+            Bounds for the euler angles to be used as initial guesses to recover distortion parameters. Calibration target is assumed to be rotated. Defaults are approximately what we expect for our experiemnts.
+        xo, yo, zo: flaot
+            Bounds for the physical displacement of the calibration target from the center of the volume. These bounds will be used as initial guesses to recover distortion parameters. Defaults are approximately what we expect for our experiemnts.
         '''
         if json_data is not None:
             if isinstance(json_data, dict):
@@ -143,7 +175,6 @@ class CalibrationProperties:
         self.parse_json()
 
     def initialize_defaults(self):
-        # Initialize default values for parameters if they are not already set
         for param, param_type in self._param_types.items():
             if not hasattr(self, param):
                 setattr(self, param, param_type())
@@ -164,9 +195,9 @@ class TrackingModel:
     _DEFAULT_CAL = {
     'start': 0,
     'diameter': 5,
-    'separation': 5,
-    'mass': 1.3,
+    'mass': 0,
     'search': 1,
+    'spacing': 5,
     }
     def __init__(self, vti, setup_xml, setup_json):
         #Setting VolumeProperties
@@ -174,7 +205,6 @@ class TrackingModel:
         self.muvi_info.update_from_file(setup_xml)
         #Setting CalibrationProperties
         self.cal_info = CalibrationProperties(json_data=self._DEFAULT_CAL)
-        print(f"start, {self.cal_info['start']}")
         self.cal_info.update_from_file(setup_json)
         #Creating new directory to store tracks
         parent_dir = os.path.dirname(vti)
@@ -187,8 +217,8 @@ class TrackingModel:
 
     def vti_tracks(self,):
         print(f"Analyzing tracks for Channel {self.cal_info['channel']}...")
-        vm = open_3D_movie(self.vti)
         
+        vm = open_3D_movie(self.vti)
         if 'vols' in self.cal_info:
             #Ensuring that the end frame cannot exceed the end frame in the VTI movie
             if self.cal_info['vols'] + self.cal_info['start'] < len(vm):
@@ -203,7 +233,9 @@ class TrackingModel:
         #Grab vti frames and dividing the VTI movie into 'chunks' for memory purposes
         chunk_size = 10
         vol_divisons = int(np.ceil(((end + 1) - self.cal_info['start'])/(chunk_size-1)))
+        
         print(f"Splitting VTI movie into {vol_divisons} divisons...")
+        
         particle_location_df = pd.DataFrame()
         for chunk in range (vol_divisons):
             print(f"Computing tracks for {chunk+1}/{vol_divisons} divisons...")
@@ -223,6 +255,7 @@ class TrackingModel:
            
             for frame in range(self.cal_info['start'] + (chunk*(chunk_size-1)), end_frame):
                 print(f"Frame {frame}")
+                
                 vol = (vm[frame].astype(float)/255)**self.muvi_info['gamma']
                 if self.muvi_info['channels'] == 1:
                     vol_ls.append(vol[:, :, :])
@@ -241,16 +274,21 @@ class TrackingModel:
                 particle_location = particle_location[particle_location['frame'] != first_frame]
                 #print(f"Rows deleted with corresponding frame: {first_frame} to avoid repetition.")
             else:
-                test_frame = vol_ls[0][int(self.muvi_info['Lx']) - 100:int(self.muvi_info['Lx']) + 100, 
-                       int(self.muvi_info['Ly']) - 100:int(self.muvi_info['Ly']) + 100, 
-                       int(self.muvi_info['Lz']) - 100:int(self.muvi_info['Lz']) + 100].sum(-1)
+                test_frame = vol_ls[0][int(self.muvi_info['Nx']) - 100:int(self.muvi_info['Nx']) + 100, 
+                       int(self.muvi_info['Ny']) - 100:int(self.muvi_info['Ny']) + 100, 
+                       int(self.muvi_info['Nz']) - 100:int(self.muvi_info['Nz']) + 100].sum(-1)
                 
-                plt.figure(figsize=(10,10))
-                particles = tp.locate(test_frame, diameter = self.cal_info['diameter'], separation = self.cal_info['separation'])
-                plt.plot(particles['x'],particles['y'], 'r.')
+                 # Load the image 
+                plt.figure(figsize=(10, 10))
+                plt.imshow(test_frame, cmap='gray')  
+                # Locate particles
+                particles = tp.locate(test_frame, diameter=self.cal_info['diameter'], separation=self.cal_info['separation'])
+                # Plot the located particles
+                plt.plot(particles['x'], particles['y'], 'r.')
+                # Save the plot
                 plt.savefig(os.path.join(self.new_path, 'muvi_track.png'))
                 plt.close()
-                print(f"Output tracking plot {os.path.join(self.new_path, 'muvi_track.png')}")
+                print(f"Output tracking plot saved to: {os.path.join(self.new_path, 'muvi_track.png')}")
           
             
             #Concantenating pandas dataframes into a single dataframe
@@ -270,24 +308,41 @@ class TrackingModel:
         print(f"Output tracking plot {os.path.join(self.new_path, 'trackpy_size_mass.png')}")
        
         #Filtering dataframe based on particle mass and size
-        mass_bound = (0, 1)
-        size_bound = (1, 2.25)
-        traj_filtered = traj[
-            (traj['mass'] > mass_bound[0]) &
-            (traj['mass'] < mass_bound[1]) &
-            (traj['size'] > size_bound[0]) &
-            (traj['size'] < size_bound[1])
-        ]
+        if 'mb' in self.cal_info and 'sb' in self.cal_info:
+            traj_filtered = traj[
+                (traj['mass'] > self.cal_info['mb'][0]) &
+                (traj['mass'] < self.cal_info['mb'][1]) &
+                (traj['size'] > self.cal_info['sb'][0]) &
+                (traj['size'] < self.cal_info['sb'][1])
+            ]
+        elif 'mb' in self.cal_info:
+            traj_filtered = traj[
+                (traj['mass'] > self.cal_info['mb'][0]) &
+                (traj['mass'] < self.cal_info['mb'][1]) 
+            ]
+        elif 'sb' in self.cal_info:
+            traj_filtered = traj[
+                (traj['size'] > self.cal_info['sb'][0]) &
+                (traj['size'] < self.cal_info['sb'][1]) 
+            ]
+        else:
+            traj_filtered = traj
+
+        print(f"mass bounds: {self.cal_info['mb']}, size bounds: {self.cal_info['sb']}")
         print('Particle count before filtering:', traj['particle'].nunique())
         print('Particle count after filtering:', traj_filtered['particle'].nunique())
-        
-        #Updating coordinates from pixel coordinates to physical coordinates
-        vm.distortion.update_data_frame(traj_filtered, columns =('x','y','z'), output_columns=('xc','yc','zc')) 
+
+        #Updating coordinates from pixel coordinates to physical coordinates if distortion parameters are present in xml file
+        if all(key in self.muvi_info for key in ('Lx', 'Ly', 'Lz', 'dx', 'dz')):
+            distortion = DistortionModel(self.muvi_info)
+            distortion.update_data_frame(traj_filtered, columns=('x', 'y', 'z'), output_columns=('xc', 'yc', 'zc')) 
+        else:
+            print("Distortion parameters ('Lx', 'Ly', 'Lz', 'dx', 'dz') are missing in the XML file. Skipping coordinate update...")
         
         with open(os.path.join(self.new_path, 'muvi_track.pickle'), "wb") as f:
             pickle.dump(traj_filtered, f)
 
-        print(f"Output file {os.path.join(self.new_path, 'muvi_track.pickle')}")
+        print(f"Output tracks to file {os.path.join(self.new_path, 'muvi_track.pickle')}")
 
 class IntensityModel:
     '''
@@ -334,7 +389,6 @@ class IntensityModel:
         else:
             #Green laser
             self.p_n = self.cal_info['p2_n'] 
-
 
     def plot_cine_data(self,):
         plt.figure()
@@ -606,11 +660,11 @@ class TargetCalibrationModel:
         
         return nearest_points
         
-    def subgrid(self, X, bounds = [(195, 315), (230, 290)]):
+    def subgrid(self, X):
         #Bounding grid along x and y
         center = np.mean(X, axis=0)
-        Xb = X[(X[:, 0] > bounds[0][0]) & (X[:, 0] < bounds[0][1])]
-        Xb = Xb[(Xb[:, 1] > bounds[1][0]) & (Xb[:, 1] < bounds[1][1])]
+        Xb = X[(X[:, 0] > self.cal_info['xb'][0]) & (X[:, 0] < self.cal_info['xb'][1])]
+        Xb = Xb[(Xb[:, 1] > self.cal_info['yb'][0]) & (Xb[:, 1] <  self.cal_info['yb'][1])]
         
         plt.figure()
         
@@ -621,11 +675,11 @@ class TargetCalibrationModel:
         plt.xlabel('Nx')
         plt.ylabel('Ny')
         
-        plt.hlines(bounds[1][0], xmin=X[...,0].min(), xmax=X[...,0].max(), colors='r', linestyles='dashed')
-        plt.hlines(bounds[1][1], xmin=X[...,0].min(), xmax=X[...,0].max(), colors='r', linestyles='dashed')
+        plt.hlines(self.cal_info['yb'][0], xmin=X[...,0].min(), xmax=X[...,0].max(), colors='r', linestyles='dashed')
+        plt.hlines(self.cal_info['yb'][1], xmin=X[...,0].min(), xmax=X[...,0].max(), colors='r', linestyles='dashed')
         
-        plt.vlines(bounds[0][0], ymin=X[...,1].min(), ymax=X[...,1].max(), colors='r', linestyles='dashed')
-        plt.vlines(bounds[0][1], ymin=X[...,1].min(), ymax=X[...,1].max(), colors='r', linestyles='dashed')
+        plt.vlines(self.cal_info['xb'][0], ymin=X[...,1].min(), ymax=X[...,1].max(), colors='r', linestyles='dashed')
+        plt.vlines(self.cal_info['xb'][1], ymin=X[...,1].min(), ymax=X[...,1].max(), colors='r', linestyles='dashed')
         
         plt.savefig('bounded_grid.png')
 
@@ -673,6 +727,7 @@ class TargetCalibrationModel:
             F = 0.1
         else:
             raise ValueError("Set units to either cm or mm")
+        
 
         constraints = [ {'type': 'ineq', 'fun': dzdx}, {'type': 'ineq', 'fun': dzLx}]
 
@@ -685,16 +740,16 @@ class TargetCalibrationModel:
         U=0
         for i in range(0, iterations):
             initial_guess = [
-            np.random.randint(self.cal_info['Lx'][0], self.cal_info['Lx'][1]),
-            np.random.randint(self.cal_info['Lz'][0], self.cal_info['Lz'][1]),
-            np.random.randint(self.cal_info['dx'][0], self.cal_info['dx'][1]),
-            np.random.randint(self.cal_info['dz'][0], self.cal_info['Lx'][1]),
-            np.random.randint(self.cal_info['az'][0], self.cal_info['az'][1]), 
-            np.random.randint(self.cal_info['ay'][0], self.cal_info['az'][1]), 
-            np.random.randint(self.cal_info['ax'][0], self.cal_info['ax'][0]), 
-            np.random.randint(self.cal_info['xo'][0], self.cal_info['xo'][1]),
-            np.random.randint(self.cal_info['yo'][0], self.cal_info['yo'][1]),
-            np.random.randint(self.cal_info['zo'][0], self.cal_info['zo'][1]),
+            np.random.randint(*self.cal_info['Lx']),
+            np.random.randint(*self.cal_info['Lz']),
+            np.random.randint(*self.cal_info['dx']),
+            np.random.randint(*self.cal_info['dz']),
+            np.random.randint(*self.cal_info['az']), 
+            np.random.randint(*self.cal_info['ay']), 
+            np.random.randint(*self.cal_info['ax']), 
+            np.random.randint(*self.cal_info['xo']),
+            np.random.randint(*self.cal_info['yo']),
+            np.random.randint(*self.cal_info['zo']),
             ]
             #print(initial_guess)
             Xs = self.subgrid(self.Up)
@@ -715,4 +770,5 @@ class TargetCalibrationModel:
         self.muvi_info.update(vol_info)
         self.muvi_info.to_file(self.setup_xml)
         
-        print('XML file updated')
+        print("Updated distortion parameters (Lx, Ly, Lz, dx, dz) in XML file.")
+
