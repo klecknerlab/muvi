@@ -25,7 +25,9 @@ import concurrent.futures
 from xml.etree import ElementTree as ET
 import time
 from .distortion import get_distortion_model
+from .distortion import DistortionModel
 import re
+from muvi.readers.cine import Cine
 
 class VolumetricMovieError(Exception):
     pass
@@ -84,7 +86,6 @@ class VolumeProperties:
         'dz': float,
         't0': float,
         'dt': float,
-        'df': float,
         'dtype': str,
         'creation_time': float,
         'units': str,
@@ -159,8 +160,6 @@ class VolumeProperties:
             the camera is located.  Sign depends on the location of the scanner;
             for example if the scanner is in the -y direction, you would
             specify a negative `dy`.
-        df : float
-            Distance from the edge of the tank to the center of the sample
         units : str
             The physical units for all lengths.
         creation_time : float
@@ -172,8 +171,8 @@ class VolumeProperties:
             recorded by the camera is (output_value)^(gamma).
         black_level : int
             The raw pixel value from the camera which corresponds to 0
-            intensity.  Default depends on camera model (for Phantom camera,
-            this is 64 for a 12 bit readout).  This will be mapped to 0 in the
+            intensity.  Default depends on camera model (for Phantom camera V2512,
+            this is 59 for a 12 bit readout).  This will be mapped to 0 in the
             output data.
         white_level : int
             The raw pixel value which is considered maximum intensity.  Will be
