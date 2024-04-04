@@ -16,7 +16,12 @@ setup(
     # scripts=['bin/muvi_convert'],
     entry_points={
         'gui_scripts': ['muvi=muvi.view.qtview:qt_viewer'],
-        'console_scripts': ['muvi_convert=muvi.convert:convert']
+        'console_scripts': ['muvi_convert=muvi.convert:convert', 
+                            'muvi_intensity=muvi.calibration.intensity:main',
+                            'muvi_track=muvi.calibration.track:main',
+                            'muvi_parameters=muvi.calibration.parameters:main'
+                            ],
+
     },
     zip_safe=False
 )
