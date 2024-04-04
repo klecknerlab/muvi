@@ -32,7 +32,26 @@ import json
 
 
 class CalibrationProperties:
+    _defaults = {
+        # 'start': 0,
+        # 'diameter': 5,
+        # 'separation': 5,
+        # 'mass': 1.3,
+        # 'start': 0,
+        # 'search': 1,
+        #'A1': 0.03, #(mm^-1)
+        #'A2': 0.01, #(mm^-1)
+        #'p1_n': 0.04,
+        #'p2_n': 0.03,
+        #'de': 4.5,
+    }
     _param_types = {
+        'start': int,
+        'vols': int,
+        'diameter': int,
+        'separation': int,
+        'mass': int,
+        'search': int,
         'p1_n': float,
         'p2_n': float,
         'A1': float,
@@ -41,17 +60,57 @@ class CalibrationProperties:
         'C2': float,
         'de': float,
         'channel': int,
-        'start': int,
-        'vols': int,
-        'diameter': int,
-        'separation': int,
-        'mass': int,
-        'search': int,
-        'dx_f': float,
-        'dz_f': float
+        'tx': float,
+        'tz': float,
+        'xb': tuple,
+        'yb': tuple,
+        'spacing': float,
+        'dx': tuple,
+        'dz': tuple,
+        'Lx': tuple,
+        'Lz': tuple,
+
     }
     
     def __init__(self, json_data=None, json_file=None):
+        '''
+        Generic class for handling metadata associated with calibration of VTI movies.
+
+        In general, behaves like a dictionary which only takes basic data types
+        (by default: int, float).  Designed to export/import
+        from JSON.
+
+        Initiated with positional and/or keyword arguments.  Positional
+        arguments can be strings (interpreted as JSON input) or
+        dictionaries.
+
+        Known Keywords
+        --------------
+        start : int
+            Starting frame for TrackModel object to use to track particles in a VTI movie. Defaults to the starting frame.
+        vols : int
+            Desired number of video frames to be analyzed by TrackModel object.
+        diameter : int
+            Characteristic diamter of tracked particles (see trackpy api reference for more details). Defaults are arbitary, set for our data  needs.
+        separation : int
+            Characteristic separation between tracked particles (see trackpy api reference for more details). Defaults are arbitary, set for our data  needs.
+        mass : int
+            Characterisitc minimum mass of tracked particles (see trackpy api reference for more details). Defaults are arbitary, set for our data  needs.
+        search : int
+            Maximum displacement that a particle can undergo between consevutive frames during tracking process (see trackpy api reference for more details).
+        p1_n, p2_n : float
+            Laser shot noise. Defaults depend on the model of the laser, in our case Explorere One XP 355-2 and Explorere One XP-5.
+        A1, A2 : float
+            Absorption coefficients of the UV and Green excited dye. Defaults are based off Coumarin 120 and Rhodamine 6G.
+        C1, C2: float
+            Concentrations of dyes for the UV and Green excited dye (measured in micrograms/L).
+        de : float
+            Electrons counts per digital counts. Default was determined for our imaging system.
+        channel : int
+            Channel to be analyzed for tracking. Defaults is set to 1 because our light excited particles are excited by the Green laser which defaults to this channel.
+        tx, tz:
+            Distance from the inner edge of the tank to the center of the volume. See H2C-SVLIF Diego Tapia Silva et al for more details.
+        '''
         if json_data is not None:
             if isinstance(json_data, dict):
                 self.json_data = json.dumps(json_data)
@@ -93,11 +152,11 @@ class CalibrationProperties:
         return getattr(self, key)
     
     def __contains__(self, key):
-        return hasattr(self, key)
+        return hasattr(self, key)   
 
 class TrackingModel:
     '''
-    A class used for tracking of VTI file.
+    A generic class used for tracking particles present in a VTI file. Used to track points on calibration target but can be used for arbitary data.
 
     Methods
     -------
@@ -225,24 +284,18 @@ class TrackingModel:
         #Updating coordinates from pixel coordinates to physical coordinates
         vm.distortion.update_data_frame(traj_filtered, columns =('x','y','z'), output_columns=('xc','yc','zc')) 
         
-       # with open(os.path.join(self.new_path, 'muvi_track.pickle'), "wb") as f:
-       #     pickle.dump(traj_filtered, f)
+        with open(os.path.join(self.new_path, 'muvi_track.pickle'), "wb") as f:
+            pickle.dump(traj_filtered, f)
 
-        #print(f"Output file {os.path.join(self.new_path, 'muvi_track.pickle')}")
-
-
-
+        print(f"Output file {os.path.join(self.new_path, 'muvi_track.pickle')}")
 
 class IntensityModel:
     '''
-    A class used for intensity correction.
+    A class used for intensity correction from a cine file.
 
     Methods
     -------
     '''
-    _DEFAULT_VOL = {
-    'flip_y': True,
-    }
     _DEFAULT_CALIBRATION = {
     'A1': 0.03, #(mm^-1)
     'A2': 0.01, #(mm^-1)
@@ -251,7 +304,7 @@ class IntensityModel:
     'de': 4.5,
     }
 
-    def __init__(self, channel, cine, setup_xml):
+    def __init__(self, channel, cine, setup_xml, setup_json):
         self.cine = cine
         parent_dir = os.path.dirname(self.cine)
         cine_dir = os.path.join(parent_dir, os.path.splitext(self.cine)[0])
@@ -262,10 +315,10 @@ class IntensityModel:
 
         self.channel = channel
         self.video = Cine(filename = cine, output_bits = 16, remap = False)
-        self.vol_info = VolumeProperties(self._DEFAULT_VOL)
-        self.vol_info.update_from_file(setup_xml)
-        self.cal_info = CalibrationProperties()
-        self.cal_info.update_from_file(setup_xml)
+        self.muvi_info = VolumeProperties()
+        self.muvi_info.update_from_file(setup_xml)
+        self.cal_info = CalibrationProperties(self._DEFAULT_CALIBRATION)
+        self.cal_info.update_from_file(setup_json)
 
         if channel == 0:
             self.A = self.cal_info['A1'] 
@@ -295,7 +348,7 @@ class IntensityModel:
 
         plt.figure()
         plt.plot(self.lx.mean(0).mean(0), self.It_avg.mean(0).mean(0), 'b.')
-        plt.xlabel(f"lx {self.vol_info['units']}")
+        plt.xlabel(f"lx {self.muvi_info['units']}")
         plt.ylabel('Intensity (Cts)')
         plt.savefig(os.path.join(self.new_path, f"x_attenuation.png"))
 
@@ -311,7 +364,7 @@ class IntensityModel:
 
         plt.figure()
         plt.plot(self.lz.mean(-1).mean(-1), self.It_avg.mean(-1).mean(-1), 'b.')
-        plt.xlabel(f"lz {self.vol_info['units']}")
+        plt.xlabel(f"lz {self.muvi_info['units']}")
         plt.ylabel('Intensity (Cts)')
         plt.savefig(os.path.join(self.new_path, f"lz_attenuation.png"))
 
@@ -387,8 +440,8 @@ class IntensityModel:
 
         # Prepare list to export errors to text file
         errors_ls = [f"Extinction coefficient dye: {self.opt_params[0]/self.C:.6f} (micrograms*{self.cal_info['units']})^-1 L",
-                     f"Absorption coefficient dye (incident light): {self.opt_params[0]:.6f} ({self.vol_info['units']}^-1)",
-                     f"Slices: {self.len_slices}/{self.vol_info['Nz']}",
+                     f"Absorption coefficient dye (incident light): {self.opt_params[0]:.6f} ({self.muvi_info['units']}^-1)",
+                     f"Slices: {self.len_slices}/{self.muvi_info['Nz']}",
                      f"RMS (Cts): {rms}",
                      f"Temp RMS (Cts): {rms_temporal}",
                      f"Shot noise (Cts): {shot_noise/self.cal_info['de']}",
@@ -405,15 +458,15 @@ class IntensityModel:
 
     #Initialize grid
     def initialize_grid(self,):
-        from .geometry.volume import rectilinear_grid
+        from muvi.geometry.volume import rectilinear_grid
         
         X = rectilinear_grid(
-            np.arange(self.vol_info['Nx']) + 0.5,
-            np.arange(self.vol_info['Ny']) + 0.5,
-            np.arange(self.vol_info['Nz']) + 0.5
+            np.arange(self.muvi_info['Nx']) + 0.5,
+            np.arange(self.muvi_info['Ny']) + 0.5,
+            np.arange(self.muvi_info['Nz']) + 0.5
             )
 
-        distortion = get_distortion_model(self.vol_info)
+        distortion = get_distortion_model(self.muvi_info)
         self.Xc = distortion.convert(X, 'index-xyz', 'physical')
 
         return
@@ -428,12 +481,12 @@ class IntensityModel:
 
         grid = self.initialize_grid()
         self.video = Cine(filename = self.cine, output_bits = 16, remap = False)
-        frames_arr = np.arange(initial_frame, self.vol_info['Nz'] * self.vol_info['channels'] + initial_frame, self.vol_info['channels']) + self.vol_info['offset']
+        frames_arr = np.arange(initial_frame, self.muvi_info['Nz'] * self.muvi_info['channels'] + initial_frame, self.muvi_info['channels']) + self.muvi_info['offset']
         #Initalizing intensity array
-        print(f"Sampling {self.vol_info['vols']} volumes...")
-        I_measured = np.zeros((self.vol_info['vols'],) +  self.Xc.shape[:-1])
-        for j in range(self.vol_info['vols']):
-            for k, frame in enumerate(frames_arr + self.vol_info['Ns'] * j):
+        print(f"Sampling {self.cal_info['vols']} volumes...")
+        I_measured = np.zeros((self.cal_info['vols'],) +  self.Xc.shape[:-1])
+        for j in range(self.cal_info['vols']):
+            for k, frame in enumerate(frames_arr + self.muvi_info['Ns'] * j):
                 I_measured[j, k, ...] = self.video.get_frame(i = frame).astype("f")
 
         self.I_init = I_measured[0, ...]
@@ -441,27 +494,23 @@ class IntensityModel:
         self.It_avg = I_measured.mean(axis = 0)
         
         x, y, z = self.Xc[..., 0], self.Xc[..., 1], self.Xc[..., 2]
-        self.lx = (self.vol_info['df_x']  - x) * np.sqrt(1 + (y**2 + z**2)/(self.vol_info['dx'] + x)**2)
-        self.lz = (self.vol_info['df_z'] - z) * np.sqrt(1 + (y**2 + x**2)/(self.vol_info['dz'] + z)**2)
-        self.gx = (self.vol_info['dx'])/(self.vol_info['dx'] - x)
-        self.sy = y/(self.vol_info['dx'] - x)
-        self.z = z
+        self.lx = (self.cal_info['tx']  - x) * np.sqrt(1 + (y**2 + z**2)/(self.muvi_info['dx'] + x)**2)
+        self.lz = (self.cal_info['tz'] - z) * np.sqrt(1 + (y**2 + x**2)/(self.muvi_info['dz'] + z)**2)
+        self.gx = (self.muvi_info['dx'])/(self.muvi_info['dx'] - x)
+        self.sy = y/(self.muvi_info['dx'] - x)
 
         return
-
 
     def optimize_intensities(self,):
         def objective_function(p):
             #Computing spline functions for intensity variations along y and along z
             self.spline_y = CubicSpline(self.sy_reduced, p[1:(self.spline_points_y+1)])(self.sy[self.sampled_slices, ...])
-            #print(f"p1: {len(p[1:(self.spline_points_y+1)])}")
             self.spline_lz = CubicSpline(self.lz_reduced, p[-self.spline_points_lz:])(self.lz[self.sampled_slices, ...])
-            #print(f"p2: {len(p[-self.spline_points_z:])}")
             #Computing relative intensity
-            self.I_rel = (self.vol_info['black_level'] + np.exp(-p[0] * self.lx[self.sampled_slices, ...]) * self.spline_y * self.spline_lz *
+            self.I_rel = (self.muvi_info['black_level'] + np.exp(-p[0] * self.lx[self.sampled_slices, ...]) * self.spline_y * self.spline_lz *
                           self.gx[self.sampled_slices, ...])               
-            #Computing relative intensity without dye attenuation
-            self.I_0 = self.vol_info['black_level'] + self.spline_y * self.spline_lz * self.gx[self.sampled_slices, ...]
+            #Computing relative intensity without dye attenuation or black_level
+            self.I_0 = self.spline_y * self.spline_lz * self.gx[self.sampled_slices, ...]
 
             return (self.It_avg[self.sampled_slices, ...] - self.I_rel)**2
 
@@ -492,13 +541,13 @@ class IntensityModel:
 
         #Preparing y-spline guess
         self.spline_points_y = spline_points_y
-        self.spline_indices_y = np.linspace(0, self.vol_info['Ny'] - 1, spline_points_y, dtype=int)
+        self.spline_indices_y = np.linspace(0, self.muvi_info['Ny'] - 1, spline_points_y, dtype=int)
         Iy = self.It_avg[0, self.spline_indices_y, 0]
         self.init_guess.extend(Iy)
         self.sy_reduced = self.sy[0, :, 0][self.spline_indices_y]
         #Preparing lz-spline guess
         self.spline_points_lz = spline_points_lz
-        self.spline_indices_lz = np.linspace(0, self.vol_info['Nz'] - 1, spline_points_lz, dtype=int)
+        self.spline_indices_lz = np.linspace(0, self.muvi_info['Nz'] - 1, spline_points_lz, dtype=int)
         #[::-1] ensures that lz is strictly decreasing, in our data lz increases as Nz decreases, check FIG for further details in H2C-SVLIF Diego Tapia Silva et. al
         Iz = self.It_avg[self.spline_indices_lz, 0, 0][::-1]
         self.init_guess.extend(Iz)
@@ -507,34 +556,19 @@ class IntensityModel:
         print(f"{len(self.init_guess)} parameters for initial guess.")
 
         for i, skip_z in enumerate(skip_array):
-            self.sampled_slices = np.arange(0, self.vol_info['Nz'], 1)[::skip_z]
+            self.sampled_slices = np.arange(0, self.muvi_info['Nz'], 1)[::skip_z]
             self.len_slices =  len(self.sampled_slices)
             print(f"Sampled slices: {self.sampled_slices}")
-            print(f"Computing relative intensity and optimized parameters for {self.len_slices}/{self.vol_info['Nz']} thick slices...")
+            print(f"Computing relative intensity and optimized parameters for {self.len_slices}/{self.muvi_info['Nz']} thick slices...")
             self.optimize_intensities()
             self.init_guess = self.opt_params
             self.rms_error(txt_file)
 
         I0_median = 0.5 * (np.max(self.I_0) - np.min(self.I_0))
         I0_normalized = 1/(self.I_0/I0_median)
-
-        if self.vol_info['flip_y'] == True:
-            I0_normalized = I0_normalized[:, ::-1, :]
         
         print(f"Temporary outfile: {os.path.join(self.new_path, 'I0.npy')}")
         np.save(os.path.join(self.new_path, "I0.npy"), I0_normalized)
-
-        #Update parameters in the xml file:
-        #if self.channel == 0:
-        #    self.info['A1'] = round(float(self.opt_params[0]), 6)
-        #else:
-        #    self.info['A2'] = round(float(self.opt_params[0]), 6) 
-        
-        
-        #self.vol_info.update(self.vol_info)
-        #self.vol_info.to_file(self.setup_xml)
-        
-        #print('XML file updated')
 
 class TargetCalibrationModel:
     '''
@@ -543,22 +577,26 @@ class TargetCalibrationModel:
     Methods
     -------
     '''
-    def __init__(self, pickle_file, setup_xml):
+    _DEFAULT_CALIBRATION = {
+    'az': (-1, 1), 
+    'ay': (40, 50),
+    'ax': (-1, 1),
+    'xo': (-10, 10),
+    'yo': (-10, 10),
+    'zo': (-10, 10)
+    }
+    def __init__(self, pickle_file, setup_xml, setup_json):
         df = pd.read_pickle(pickle_file)
         df = df[df.frame == 0]
         self.muvi_info = VolumeProperties()
         self.muvi_info.update_from_file(setup_xml)
 
+        self.cal_info = CalibrationProperties(self._DEFAULT_CALIBRATION)
+        self.cal_info.update_from_file(setup_json)
+
         up, vp, wp = np.array(df['x']), np.array(df['y']), np.array(df['z'])
         self.Up = np.column_stack((up,vp,wp))
         self.setup_xml = setup_xml
-
-        if self.muvi_info['units'] == 'cm':
-            self.F = 0.1
-        elif self.muvi_info['units'] == 'mm':
-            self.F = 1
-        else:
-            raise ValueError("Select either cm or mm for the units.")
     
     def select_nearest_points(self, X, center, num_points=40):
         distances = np.linalg.norm(X - center, axis=1)
@@ -647,21 +685,21 @@ class TargetCalibrationModel:
         U=0
         for i in range(0, iterations):
             initial_guess = [
-            np.random.randint(150, 180)*self.F, #Lx
-            np.random.randint(150, 180)*self.F, #Lz
-            np.random.randint(1100, 1500)*self.F, #dx
-            np.random.randint(1300, 1600)*self.F, #dz
-            np.random.randint(-1, 1)*self.F, #az
-            np.random.randint(40, 50)*self.F, #ay
-            np.random.randint(-10, 10)*self.F, #ax
-            np.random.randint(-20, 20)*self.F, #xo
-            np.random.randint(-20, 20)*self.F, #yo
-            np.random.randint(-20, 20)*self.F, #zo
+            np.random.randint(self.cal_info['Lx'][0], self.cal_info['Lx'][1]),
+            np.random.randint(self.cal_info['Lz'][0], self.cal_info['Lz'][1]),
+            np.random.randint(self.cal_info['dx'][0], self.cal_info['dx'][1]),
+            np.random.randint(self.cal_info['dz'][0], self.cal_info['Lx'][1]),
+            np.random.randint(self.cal_info['az'][0], self.cal_info['az'][1]), 
+            np.random.randint(self.cal_info['ay'][0], self.cal_info['az'][1]), 
+            np.random.randint(self.cal_info['ax'][0], self.cal_info['ax'][0]), 
+            np.random.randint(self.cal_info['xo'][0], self.cal_info['xo'][1]),
+            np.random.randint(self.cal_info['yo'][0], self.cal_info['yo'][1]),
+            np.random.randint(self.cal_info['zo'][0], self.cal_info['zo'][1]),
             ]
             #print(initial_guess)
             Xs = self.subgrid(self.Up)
             #Optimize distortion parameters
-            self.optimize_distortion_parameters(Xs, initial_guess, spacing = 5*self.F)
+            self.optimize_distortion_parameters(Xs, initial_guess, spacing = self.cal_info['spacing'])
             params += self.opt_params
         
         print(f"Oprimized parameters: {params/(i+1)}")
