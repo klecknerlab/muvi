@@ -25,9 +25,7 @@ import concurrent.futures
 from xml.etree import ElementTree as ET
 import time
 from .distortion import get_distortion_model
-from .distortion import DistortionModel
 import re
-from muvi.readers.cine import Cine
 
 class VolumetricMovieError(Exception):
     pass
