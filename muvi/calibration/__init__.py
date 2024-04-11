@@ -83,9 +83,9 @@ class CalibrationProperties:
         'p2_n': float,
         'A1': float,
         'A2': float,
-        'C1': float,
-        'C2': float,
-        'de': float,
+        'M1': float,
+        'M2': float,
+        'de': float
     }
     
     def __init__(self, json_data=None, json_file=None):
@@ -93,8 +93,7 @@ class CalibrationProperties:
         Generic class for handling metadata associated with calibration of VTI movies.
 
         In general, behaves like a dictionary which only takes basic data types
-        (by default: int, float).  Designed to export/import
-        from JSON.
+        (by default: int, float).  Designed to import from JSON.
 
         Initiated with positional and/or keyword arguments.  Positional
         arguments can be strings (interpreted as JSON input) or
@@ -122,8 +121,8 @@ class CalibrationProperties:
             Laser shot noise. Defaults depend on the model of the laser, in our case Explorere One XP 355-2 and Explorere One XP-5.
         A1, A2 : float
             Absorption coefficients of the UV and Green excited dye. Defaults are based off Coumarin 120 and Rhodamine 6G.
-        C1, C2: float
-            Concentrations of dyes for the UV and Green excited dye (measured in micrograms/L).
+        M1, M2: float
+            Molarity of dyes for the UV and Green excited dye (measured in micro*M).
         de : float
             Electrons counts per digital counts. Default was determined for our imaging system.
         channel : int
@@ -131,7 +130,7 @@ class CalibrationProperties:
         tx, tz:
             Distance from the inner edge of the tank to the center of the volume. See H2C-SVLIF Diego Tapia Silva et al for more details.
         xb, yb: tuple
-            Bounds to be used to construct a 'subgrid' to be used for recovering the distortion parameters.
+            Bounds to be used to construct a 'subgrid' that is used to recover distortion parameters.
         spacing: float
             Spacing between the points on the calibration target.
         Lx, Lz : tuple
@@ -142,52 +141,72 @@ class CalibrationProperties:
             Bounds for the euler angles to be used as initial guesses to recover distortion parameters. Calibration target is assumed to be rotated. Defaults are approximately what we expect for our experiemnts.
         xo, yo, zo: flaot
             Bounds for the physical displacement of the calibration target from the center of the volume. These bounds will be used as initial guesses to recover distortion parameters. Defaults are approximately what we expect for our experiemnts.
-        '''
-        if json_data is not None:
-            if isinstance(json_data, dict):
-                self.json_data = json.dumps(json_data)
+        ''' 
+        self.json_data = {}
+        if json_data is not None and json_file is not None:
+            if isinstance(json_data, (dict)): #Check if json_data is of the type dict
+                self.json_data.update(json_data)
             else:
-                self.json_data = json_data
+                self.json_data.update(json.loads(json_data))  # Parse string into dict
+            
+            with open(json_file, 'r') as file:
+                data = json.load(file)
+                if "CalibrationProperties" in data:
+                    self.json_data.update(data['CalibrationProperties'])  # Load JSON from file into a dict
+                else:
+                    raise ValueError("CalibrationProperties not found in json file.")
+        
+        elif json_data is not None:
+            if isinstance(json_data, (dict)): #Check if json_data is of the type dict
+                self.json_data.update(json_data)
+            else:
+                self.json_data.update(json.loads(json_data))  # Parse string into dict
+        
         elif json_file is not None:
             with open(json_file, 'r') as file:
-                self.json_data = file.read()
+                data = json.load(file)
+                if "CalibrationProperties" in data:
+                    self.json_data.update(data['CalibrationProperties'])  # Load JSON from file into a dict
+                else:
+                    raise ValueError("CalibrationProperties not found in json file.")
         else:
-            self.json_data = json.dumps({})  # Empty JSON string
-
-        self.parse_json()
-        self.initialize_defaults()
-
-    def parse_json(self):
-        data = json.loads(self.json_data)
-        properties = data.get("CalibrationProperties", {})
+            raise ValueError("Please input a dictionary, json data or a json file.")
         
+        self.parse_json()    
+            
+    def parse_json(self):
+        data = self.json_data
         # Check if each parameter is valid according to _param_types
-        for param, value in properties.items():
+        for param, value in data.items():
             if param not in self._param_types:
                 raise ValueError(f"{param} is not a valid parameter.")
-            
-            # Enforce data types
-            setattr(self, param, self._param_types[param](value))
+            # Handle tuples
+            if isinstance(value, tuple):
+                # If the parameter is expected to be a single value, take the first element of the tuple
+                if len(value) == 1:
+                    setattr(self, param, self._param_types[param](value[0]))
+                # If the parameter is expected to be a tuple, assign the tuple directly
+                elif len(value) == 2:
+                    setattr(self, param, tuple(self._param_types[param](v) for v in value))
+                else:
+                    raise ValueError(f"Invalid tuple length for parameter {param}. Expected length 1 or 2.")
+            else:
+                # Enforce data types for single values
+                setattr(self, param, self._param_types[param](value))
 
-    def update_from_file(self, json_file):
-        with open(json_file, 'r') as file:
-            self.json_data = file.read()
-        self.parse_json()
-
-    def initialize_defaults(self):
-        for param, param_type in self._param_types.items():
-            if not hasattr(self, param):
-                setattr(self, param, param_type())
 
     def __getitem__(self, key):
         return getattr(self, key)
     
     def __contains__(self, key):
-        return hasattr(self, key)   
+        return hasattr(self, key)  
+    
+    def keys(self):
+        return self.json_data.keys() 
 
 class TrackingModel:
     '''
-    A generic class used for tracking particles present in a VTI file. Used to track points on calibration target but can be used for arbitary data.
+    A generic class used for tracking particles present in a VTI file. Used to track points on calibration target but can be used on arbitary data.
 
     Methods
     -------
@@ -198,14 +217,14 @@ class TrackingModel:
     'mass': 0,
     'search': 1,
     'spacing': 5,
+    'separation': 3,
     }
     def __init__(self, vti, setup_xml, setup_json):
         #Setting VolumeProperties
         self.muvi_info = VolumeProperties()
         self.muvi_info.update_from_file(setup_xml)
         #Setting CalibrationProperties
-        self.cal_info = CalibrationProperties(json_data=self._DEFAULT_CAL)
-        self.cal_info.update_from_file(setup_json)
+        self.cal_info = CalibrationProperties(json_data=self._DEFAULT_CAL, json_file=setup_json)
         #Creating new directory to store tracks
         parent_dir = os.path.dirname(vti)
         vti_dir = os.path.join(parent_dir, os.path.splitext(vti)[0])
@@ -215,9 +234,20 @@ class TrackingModel:
         
         self.vti = vti
 
+        #Defining requirements to initalize signal calibration for XML file
+        required_keys_muvi = ['gamma', 'Ny', 'Nx', 'Nz']
+        for key in required_keys_muvi:
+            if key not in self.muvi_info:
+                raise ValueError(f"The key '{key}' is not defined in muvi_info. Please provide a value for '{required_keys_muvi}' in the XML file.")
+        #Defining requirements to initalize signal calibration for JSON file
+        required_keys_cal = ['tx', 'tz']
+        for key in required_keys_cal:
+            if key not in self.cal_info:
+                raise ValueError(f"The key '{key}' is not defined in cal_info. Please provide a value for '{required_keys_cal}' in the JSON file.")
+
     def vti_tracks(self,):
         print(f"Analyzing tracks for Channel {self.cal_info['channel']}...")
-        
+        print(f"{'mb' in self.cal_info}, {'sb' in self.cal_info}")
         vm = open_3D_movie(self.vti)
         if 'vols' in self.cal_info:
             #Ensuring that the end frame cannot exceed the end frame in the VTI movie
@@ -274,6 +304,7 @@ class TrackingModel:
                 particle_location = particle_location[particle_location['frame'] != first_frame]
                 #print(f"Rows deleted with corresponding frame: {first_frame} to avoid repetition.")
             else:
+                #Grab a subframe to plot, 100 is arbitary this can be changed
                 test_frame = vol_ls[0][int(self.muvi_info['Nx']) - 100:int(self.muvi_info['Nx']) + 100, 
                        int(self.muvi_info['Ny']) - 100:int(self.muvi_info['Ny']) + 100, 
                        int(self.muvi_info['Nz']) - 100:int(self.muvi_info['Nz']) + 100].sum(-1)
@@ -327,10 +358,9 @@ class TrackingModel:
             ]
         else:
             traj_filtered = traj
-
-        print(f"mass bounds: {self.cal_info['mb']}, size bounds: {self.cal_info['sb']}")
-        print('Particle count before filtering:', traj['particle'].nunique())
-        print('Particle count after filtering:', traj_filtered['particle'].nunique())
+    
+        print('Particle count before mass/size filtering:', traj['particle'].nunique())
+        print('Particle count after mass/size filtering:', traj_filtered['particle'].nunique())
 
         #Updating coordinates from pixel coordinates to physical coordinates if distortion parameters are present in xml file
         if all(key in self.muvi_info for key in ('Lx', 'Ly', 'Lz', 'dx', 'dz')):
@@ -351,7 +381,7 @@ class IntensityModel:
     Methods
     -------
     '''
-    _DEFAULT_CALIBRATION = {
+    _DEFAULT_CAL = {
     'A1': 0.03, #(mm^-1)
     'A2': 0.01, #(mm^-1)
     'p1_n': 0.04,
@@ -372,15 +402,14 @@ class IntensityModel:
         self.video = Cine(filename = cine, output_bits = 16, remap = False)
         self.muvi_info = VolumeProperties()
         self.muvi_info.update_from_file(setup_xml)
-        self.cal_info = CalibrationProperties(self._DEFAULT_CALIBRATION)
-        self.cal_info.update_from_file(setup_json)
+        self.cal_info = CalibrationProperties(json_data=self._DEFAULT_CAL, json_file=setup_json)
 
         if channel == 0:
             self.A = self.cal_info['A1'] 
-            self.C = self.cal_info['C1'] 
+            self.M = self.cal_info['M1'] 
         else:
             self.A = self.cal_info['A2'] 
-            self.C = self.cal_info['C2']
+            self.M = self.cal_info['M2']
 
         #Laser pulse noise depends on the specific laser
         if self.channel == 0:
@@ -388,20 +417,31 @@ class IntensityModel:
             self.p_n = self.cal_info['p1_n']
         else:
             #Green laser
-            self.p_n = self.cal_info['p2_n'] 
+            self.p_n = self.cal_info['p2_n']
+
+        #Defining requirements to initalize signal calibration for XML file
+        required_keys_muvi = ['units', 'black_level', 'dx', 'dz', 'Nz', 'Ny', 'Nx', 'Ns']
+        for key in required_keys_muvi:
+            if key not in self.muvi_info:
+                raise ValueError(f"The key '{key}' is not defined in muvi_info. Please provide a value for '{required_keys_muvi}' in the XML file.")
+        #Defining requirements to initalize signal calibration for JSON file
+        required_keys_cal = ['tx', 'tz', 'vols']
+        for key in required_keys_cal:
+            if key not in self.cal_info:
+                raise ValueError(f"The key '{key}' is not defined in cal_info. Please provide a value for '{required_keys_cal}' in the JSON file.")
 
     def plot_cine_data(self,):
         plt.figure()
-        plt.imshow(self.It_avg.mean(axis = 0))
+        plt.imshow(self.cb.mean(axis = 0))
         plt.xlabel('Nx')
         plt.ylabel('Ny')
         plt.colorbar()
-        plt.savefig(os.path.join(self.new_path, f"It_avg.png"))
+        plt.savefig(os.path.join(self.new_path, f"cb.png"))
 
         plt.close()
 
         plt.figure()
-        plt.plot(self.lx.mean(0).mean(0), self.It_avg.mean(0).mean(0), 'b.')
+        plt.plot(self.lx.mean(0).mean(0), self.cb.mean(0).mean(0), 'b.')
         plt.xlabel(f"lx {self.muvi_info['units']}")
         plt.ylabel('Intensity (Cts)')
         plt.savefig(os.path.join(self.new_path, f"x_attenuation.png"))
@@ -410,14 +450,14 @@ class IntensityModel:
 
 
         plt.figure()
-        plt.plot(self.sy.mean(axis = 0).mean(axis = 1), self.It_avg.mean(0).mean(1), 'b.')
+        plt.plot(self.sy.mean(axis = 0).mean(axis = 1), self.cb.mean(0).mean(1), 'b.')
         plt.xlabel('sy (radians)')
         plt.ylabel('Intensity (Cts)')
         plt.savefig(os.path.join(self.new_path, f"y_spline.png"))
 
 
         plt.figure()
-        plt.plot(self.lz.mean(-1).mean(-1), self.It_avg.mean(-1).mean(-1), 'b.')
+        plt.plot(self.lz.mean(-1).mean(-1), self.cb.mean(-1).mean(-1), 'b.')
         plt.xlabel(f"lz {self.muvi_info['units']}")
         plt.ylabel('Intensity (Cts)')
         plt.savefig(os.path.join(self.new_path, f"lz_attenuation.png"))
@@ -438,8 +478,8 @@ class IntensityModel:
 
     def plot_fit(self,):
         plt.figure()
-        plt.plot(self.lx.mean(0).mean(0), self.It_avg.mean(0).mean(0), 'b.')
-        plt.plot(self.lx.mean(0).mean(0), self.I_rel.mean(0).mean(0), color = 'red')
+        plt.plot(self.lx.mean(0).mean(0), self.cb.mean(0).mean(0), 'b.')
+        plt.plot(self.lx.mean(0).mean(0), self.cr.mean(0).mean(0), color = 'red')
         plt.xlabel(f"lx {self.muvi_info['units']}")
         plt.ylabel('Intensity (Cts)')
         plt.savefig(os.path.join(self.new_path, f"x_attenuation.png"))
@@ -447,8 +487,8 @@ class IntensityModel:
         plt.close()
 
         plt.figure()
-        plt.plot(self.lz.mean(axis = -1).mean(axis = -1), self.It_avg.mean(axis = -1).mean(axis = -1), 'b.')
-        plt.plot(self.lz[self.sampled_slices, ...].mean(axis = -1).mean(axis = -1), self.I_rel.mean(axis = -1).mean(axis = -1), color='red', label = 'Line fit')
+        plt.plot(self.lz.mean(axis = -1).mean(axis = -1), self.cb.mean(axis = -1).mean(axis = -1), 'b.')
+        plt.plot(self.lz[self.sampled_slices, ...].mean(axis = -1).mean(axis = -1), self.cr.mean(axis = -1).mean(axis = -1), color='red', label = 'Line fit')
         plt.title(f"Attenuation profile. Channel: {self.channel}")
         plt.xlabel(f"lz {self.muvi_info['units']}")
         plt.ylabel("Intensity (Cts)")
@@ -458,8 +498,8 @@ class IntensityModel:
         plt.close()
 
         plt.figure()
-        plt.plot(self.sy.mean(axis = 0).mean(axis = 1), self.It_avg.mean(0).mean(1), 'b.')
-        plt.plot(self.sy.mean(axis = 0).mean(axis = 1), self.I_rel.mean(axis = 0).mean(axis = 1), color = 'red')
+        plt.plot(self.sy.mean(axis = 0).mean(axis = 1), self.cb.mean(0).mean(1), 'b.')
+        plt.plot(self.sy.mean(axis = 0).mean(axis = 1), self.cr.mean(axis = 0).mean(axis = 1), color = 'red')
         plt.xlabel('sy (radians)')
         plt.ylabel('Intensity (Cts)')
         plt.savefig(os.path.join(self.new_path, f"y_spline.png"))
@@ -478,29 +518,32 @@ class IntensityModel:
 
 
     def rms_error(self, txt_file):
-        #Computing RMS
-        squared_diff = (self.I_init[self.sampled_slices, ...] - self.I_rel) ** 2
-        mean_squared_diff = np.mean(squared_diff)
-        rms = np.sqrt(mean_squared_diff)
-
-        #Compute temporal RMS
-        squared_diff_t = (self.It_avg[self.sampled_slices, ...] - self.I_rel) ** 2
-        mean_squared_diff_t = np.mean(squared_diff_t)
-        rms_temporal = np.sqrt(mean_squared_diff_t)
-
-        signal_amplitude = np.max(self.I_init) - np.min(self.I_init)
-        n_e = signal_amplitude * (self.cal_info['de'])
-        shot_noise = np.sqrt(n_e)
-
-        # Prepare list to export errors to text file
-        errors_ls = [f"Extinction coefficient dye: {self.opt_params[0]/self.C:.6f} (micrograms*{self.cal_info['units']})^-1 L",
-                     f"Absorption coefficient dye (incident light): {self.opt_params[0]:.6f} ({self.muvi_info['units']}^-1)",
-                     f"Slices: {self.len_slices}/{self.muvi_info['Nz']}",
-                     f"RMS (Cts): {rms}",
-                     f"Temp RMS (Cts): {rms_temporal}",
-                     f"Shot noise (Cts): {shot_noise/self.cal_info['de']}",
-                     f"Laser shot-to-shot noise (Cts): {signal_amplitude * self.p_n}"
-                    ]
+        #Repeats self.cr along the first axis 'n' times and exclude repetition along the remaining 3 axis
+        cr_reshaped = np.tile(self.cr, (self.cu.shape[0],1,1,1))
+        #Time averaged squared difference
+        squared_dff_r = (self.cu[:, self.sampled_slices, ...] - cr_reshaped)**2/(self.cu.shape[0] * self.muvi_info['dt'])
+        #Spatially averaged squared difference
+        sigma_u = np.sqrt(np.mean(squared_dff_r))
+        #Squared difference
+        squared_dff_u = (self.cb[self.sampled_slices, ...] - self.cr)**2
+        #Spatially averaged squared difference
+        sigma_r = np.sqrt(np.mean(squared_dff_u))
+        #Compute average signal amplitude from cb to obtain the avg SNR in decibal units --> np.log10
+        A_b = np.max(self.cb[self.sampled_slices, ...]) - np.min(self.cb[self.sampled_slices, ...]) 
+        print(f" min A {np.min(self.cb[self.sampled_slices, ...])}, max A {np.max(self.cb[self.sampled_slices, ...])}")
+        squared_dff_b = (self.cb[self.sampled_slices, ...] - A_b)**2
+        sigma_b = np.sqrt(np.mean(squared_dff_b))
+        SNR = 20*np.log10(A_b/sigma_b)
+        #Prepare list to export errors to text file)
+        errors_ls = [
+            f"Slices: {self.len_slices}/{self.muvi_info['Nz']}",
+            f"Extinction coefficient dye: {self.opt_params[0]/self.M:.6f} (microM*{self.muvi_info['units']})^-1 L",
+            f"Absorption coefficient dye (incident light): {self.opt_params[0]:.6f} ({self.muvi_info['units']}^-1)",
+            f"simga_u (Cts): {sigma_u}",
+            f"sigma_r (Cts): {sigma_r}",
+            f"mu_b (Cts): {A_b}",
+            f"SNR (dB): {SNR}",
+            ]
 
         with open(txt_file, 'a') as f:
             #Write each line from the data list to the file
@@ -508,9 +551,6 @@ class IntensityModel:
                 f.write(line + '\n')
             f.write('\n')
 
-        return
-
-    #Initialize grid
     def initialize_grid(self,):
         from muvi.geometry.volume import rectilinear_grid
         
@@ -532,20 +572,25 @@ class IntensityModel:
         else:
             #Green channel default, green channel corresponds to frame 1
             initial_frame = 1
-
-        grid = self.initialize_grid()
+        
+        #Initalizing grid to obtain physical coordinates Xc
+        self.initialize_grid()
+        #Preparing to load cine data
         self.video = Cine(filename = self.cine, output_bits = 16, remap = False)
-        frames_arr = np.arange(initial_frame, self.muvi_info['Nz'] * self.muvi_info['channels'] + initial_frame, self.muvi_info['channels']) + self.muvi_info['offset']
+        if 'offset' in self.muvi_info:
+            frames_arr = np.arange(initial_frame, self.muvi_info['Nz'] * self.muvi_info['channels'] + initial_frame, self.muvi_info['channels']) + self.muvi_info['offset']
+        else:
+            frames_arr = np.arange(initial_frame, self.muvi_info['Nz'] * self.muvi_info['channels'] + initial_frame, self.muvi_info['channels'])
         #Initalizing intensity array
         print(f"Sampling {self.cal_info['vols']} volumes...")
-        I_measured = np.zeros((self.cal_info['vols'],) +  self.Xc.shape[:-1])
+        cu = np.zeros((self.cal_info['vols'],) +  self.Xc.shape[:-1])
         for j in range(self.cal_info['vols']):
             for k, frame in enumerate(frames_arr + self.muvi_info['Ns'] * j):
-                I_measured[j, k, ...] = self.video.get_frame(i = frame).astype("f")
+                cu[j, k, ...] = self.video.get_frame(i = frame).astype("f")
 
-        self.I_init = I_measured[0, ...]
         #Temporally averaged intensities
-        self.It_avg = I_measured.mean(axis = 0)
+        self.cu = cu
+        self.cb = cu.mean(axis = 0)
         
         x, y, z = self.Xc[..., 0], self.Xc[..., 1], self.Xc[..., 2]
         self.lx = (self.cal_info['tx']  - x) * np.sqrt(1 + (y**2 + z**2)/(self.muvi_info['dx'] + x)**2)
@@ -560,13 +605,13 @@ class IntensityModel:
             #Computing spline functions for intensity variations along y and along z
             self.spline_y = CubicSpline(self.sy_reduced, p[1:(self.spline_points_y+1)])(self.sy[self.sampled_slices, ...])
             self.spline_lz = CubicSpline(self.lz_reduced, p[-self.spline_points_lz:])(self.lz[self.sampled_slices, ...])
-            #Computing relative intensity
-            self.I_rel = (self.muvi_info['black_level'] + np.exp(-p[0] * self.lx[self.sampled_slices, ...]) * self.spline_y * self.spline_lz *
+            #Computing reference signal
+            self.cr = (self.muvi_info['black_level'] + np.exp(-p[0] * self.lx[self.sampled_slices, ...]) * self.spline_y * self.spline_lz *
                           self.gx[self.sampled_slices, ...])               
-            #Computing relative intensity without dye attenuation or black_level
-            self.I_0 = self.spline_y * self.spline_lz * self.gx[self.sampled_slices, ...]
+            #Computing corrected signal without dye attenuation or black level
+            self.cp = self.spline_y * self.spline_lz * self.gx[self.sampled_slices, ...]
 
-            return (self.It_avg[self.sampled_slices, ...] - self.I_rel)**2
+            return (self.cb[self.sampled_slices, ...] - self.cr)**2
 
         def U(p):
             return np.sum(objective_function(p))
@@ -578,7 +623,7 @@ class IntensityModel:
         return
 
 
-    def corrected_intensity(self,  skip_array = [264, 64, 32, 1], spline_points_y = 20, spline_points_lz = 5):
+    def corrected_intensity(self,  skip_array = [264, 64, 1], spline_points_y = 20, spline_points_lz = 5):
         #Prepare to create a text file for the computed rms errors
         print(f"Computing intenisty correction for Channel {self.channel}")
         txt_file = os.path.join(self.new_path, f"rms_errors.txt")
@@ -587,42 +632,54 @@ class IntensityModel:
             f.write("\n")
 
         self.load_cine_data()
+        #Initializing intial guess for digital signal correction 
         self.init_guess = [self.A]
-        self.I_rel = 0
-        self.I_0 = 0
-
         self.plot_cine_data()
 
         #Preparing y-spline guess
         self.spline_points_y = spline_points_y
         self.spline_indices_y = np.linspace(0, self.muvi_info['Ny'] - 1, spline_points_y, dtype=int)
-        Iy = self.It_avg[0, self.spline_indices_y, 0]
-        self.init_guess.extend(Iy)
+        cb_y = self.cb[0, self.spline_indices_y, 0]
+        self.init_guess.extend(cb_y)
         self.sy_reduced = self.sy[0, :, 0][self.spline_indices_y]
         #Preparing lz-spline guess
         self.spline_points_lz = spline_points_lz
         self.spline_indices_lz = np.linspace(0, self.muvi_info['Nz'] - 1, spline_points_lz, dtype=int)
         #[::-1] ensures that lz is strictly decreasing, in our data lz increases as Nz decreases, check FIG for further details in H2C-SVLIF Diego Tapia Silva et. al
-        Iz = self.It_avg[self.spline_indices_lz, 0, 0][::-1]
-        self.init_guess.extend(Iz)
+        cb_z = self.cb[self.spline_indices_lz, 0, 0][::-1]
+        self.init_guess.extend(cb_z)
         self.lz_reduced = self.lz[:, 0, 0][::-1][self.spline_indices_lz]
         #Print total parameters that will be used for optimizer
         print(f"{len(self.init_guess)} parameters for initial guess.")
 
         for i, skip_z in enumerate(skip_array):
             self.sampled_slices = np.arange(0, self.muvi_info['Nz'], 1)[::skip_z]
+            #Initializing self.cr and self.cp (reference digital signal and corrected respectively) for sampled slices.
+            #self.cr = np.zeros_like(self.Xc[self.sampled_slices, ...])
+            #self.cp = np.zeros_like(self.Xc[self.sampled_slices, ...])
+            self.cr = 0
+            self.cp = 0
             self.len_slices =  len(self.sampled_slices)
             print(f"Sampled slices: {self.sampled_slices}")
             print(f"Computing relative intensity and optimized parameters for {self.len_slices}/{self.muvi_info['Nz']} thick slices...")
             self.optimize_intensities()
             self.init_guess = self.opt_params
+            
+            #saving rms error to a text file
             self.rms_error(txt_file)
 
-        I0_median = 0.5 * (np.max(self.I_0) - np.min(self.I_0))
-        I0_normalized = 1/(self.I_0/I0_median)
-        
-        print(f"Temporary outfile: {os.path.join(self.new_path, 'I0.npy')}")
-        np.save(os.path.join(self.new_path, "I0.npy"), I0_normalized)
+        #Finding the average median signal along each axis
+        cb_xmedian = 0.5 * (np.max(self.cb[...,0]) - np.min(self.cb[...,0]))
+        cb_ymedian = 0.5 * (np.max(self.cb[...,1]) - np.min(self.cb[...,1]))
+        cb_zmedian = 0.5 * (np.max(self.cb[...,2]) - np.min(self.cb[...,2]))
+        #Making a list of the medians
+        cb_median = [cb_xmedian, cb_ymedian, cb_zmedian]
+        #Normalizing by the average median signal of each axis along each axis
+        cp_normalized = np.copy(self.cp)
+        for i, median in enumerate(cb_median):
+            cp_normalized[...,i] = 1 / cp_normalized[...,i] / median
+        print(f"Temporary outfile: {os.path.join(self.new_path, 'cp_normalized.npy')}")
+        np.save(os.path.join(self.new_path, "cp_normalized.npy"), cp_normalized)
 
 class TargetCalibrationModel:
     '''
@@ -631,7 +688,7 @@ class TargetCalibrationModel:
     Methods
     -------
     '''
-    _DEFAULT_CALIBRATION = {
+    _DEFAULT_CAL = {
     'az': (-1, 1), 
     'ay': (40, 50),
     'ax': (-1, 1),
@@ -644,13 +701,22 @@ class TargetCalibrationModel:
         df = df[df.frame == 0]
         self.muvi_info = VolumeProperties()
         self.muvi_info.update_from_file(setup_xml)
-
-        self.cal_info = CalibrationProperties(self._DEFAULT_CALIBRATION)
-        self.cal_info.update_from_file(setup_json)
+        self.cal_info = CalibrationProperties(json_data=self._DEFAULT_CAL, json_file=setup_json)
 
         up, vp, wp = np.array(df['x']), np.array(df['y']), np.array(df['z'])
         self.Up = np.column_stack((up,vp,wp))
         self.setup_xml = setup_xml
+
+        #Defining requirements to initalize signal calibration for XML file
+        required_keys_muvi = ['units', 'Nz', 'Ny', 'Nx']
+        for key in required_keys_muvi:
+            if key not in self.muvi_info:
+                raise ValueError(f"The key '{key}' is not defined in muvi_info. Please provide a value for '{required_keys_muvi}' in the XML file.")
+        #Defining requirements to initalize signal calibration for JSON file
+        required_keys_cal = ['Lx', 'Lz', 'dx', 'dz']
+        for key in required_keys_cal:
+            if key not in self.cal_info:
+                raise ValueError(f"The key '{key}' is not defined in cal_info. Please provide a value for '{required_keys_cal}' in the JSON file. Note '{required_keys_cal}' are tuples in this case since we are defining bounds for our initial guesses.")
     
     def select_nearest_points(self, X, center, num_points=40):
         distances = np.linalg.norm(X - center, axis=1)
@@ -710,7 +776,7 @@ class TargetCalibrationModel:
             Xr = distortion.convert(Up, 'index-xyz', 'physical')
             X = rot.from_euler('zyx', [p[4], p[5], p[6]], degrees = True).inv().apply(Xr) + [p[7], p[8], p[9]]
 
-            return -(np.cos((np.pi*X[:,0])/spacing)*np.cos((np.pi*X[:,1])/spacing))**2 + ((np.pi*X[:,2])/spacing)**2 
+            return -(np.cos((np.pi*X[:,0])/spacing)*np.cos((np.pi*X[:,1])/spacing))**2 + ((np.pi*X[:,2])/spacing)**2
         
         def U(p):
             return np.sum(objective_function(p))
@@ -731,14 +797,17 @@ class TargetCalibrationModel:
 
         constraints = [ {'type': 'ineq', 'fun': dzdx}, {'type': 'ineq', 'fun': dzLx}]
 
-        self.opt_params = optimize.minimize(U, x0=initial_guess, method='L-BFGS-B', constraints=constraints).x
-        print(U(self.opt_params)/Up.shape[0])
+        self.opt_params = optimize.minimize(U, x0=initial_guess, method='SLSQP', constraints=constraints).x
+        self.result = U(self.opt_params) / Up.shape[0]
+        expected_result = -1
+        print(f"Iteration: {self.i}. Objective function result: {self.result}, Expected minimum: {expected_result}")
 
     def parameters(self,):
-        iterations = 100
-        params = np.zeros(10)
-        U=0
+        iterations = 20
+        opt_params_ls = []
+        result_ls = []
         for i in range(0, iterations):
+            self.i = i
             initial_guess = [
             np.random.randint(*self.cal_info['Lx']),
             np.random.randint(*self.cal_info['Lz']),
@@ -752,13 +821,42 @@ class TargetCalibrationModel:
             np.random.randint(*self.cal_info['zo']),
             ]
             #print(initial_guess)
-            Xs = self.subgrid(self.Up)
+            Xs = np.copy(self.subgrid(self.Up))
             #Optimize distortion parameters
             self.optimize_distortion_parameters(Xs, initial_guess, spacing = self.cal_info['spacing'])
-            params += self.opt_params
-        
-        print(f"Oprimized parameters: {params/(i+1)}")
+            opt_params_ls.append(np.copy(self.opt_params))
+            result_ls.append(self.result)
 
+        #selecting the optimized parameters with the minimum result from the objective function
+        index_min = np.argmin(result_ls)
+        opt_params_bar = opt_params_ls[index_min]
+        
+        opt_params_ls = []
+        result_ls = []
+        for i in range(0, iterations):
+            self.i = i
+            initial_guess = [
+            opt_params_bar[0],
+            opt_params_bar[1],
+            np.random.randint(*self.cal_info['dx']),
+            np.random.randint(*self.cal_info['dz']),
+            np.random.randint(*self.cal_info['az']), 
+            np.random.randint(*self.cal_info['ay']), 
+            np.random.randint(*self.cal_info['ax']), 
+            np.random.randint(*self.cal_info['xo']),
+            np.random.randint(*self.cal_info['yo']),
+            np.random.randint(*self.cal_info['zo']),
+            ]
+            #print(initial_guess)
+            Xs = np.copy(self.subgrid(self.Up))
+            #Optimize distortion parameters
+            self.optimize_distortion_parameters(self.Up, initial_guess, spacing = self.cal_info['spacing'])
+            opt_params_ls.append(np.copy(self.opt_params))
+            result_ls.append(self.result)
+
+        #selecting the optimized parameters with the minimum result from the objective function
+        index_min = np.argmin(result_ls)
+        params = opt_params_ls[index_min]
         #Updating XML file
         vol_info = VolumeProperties(
             Lx=round(float(params[0]),2),
@@ -767,8 +865,7 @@ class TargetCalibrationModel:
             dx=round(float(params[2]),2),
             dz=round(float(params[3]),2),
         )
-        self.muvi_info.update(vol_info)
-        self.muvi_info.to_file(self.setup_xml)
         
-        print("Updated distortion parameters (Lx, Ly, Lz, dx, dz) in XML file.")
+        print(f"Euler angles parameters: az = {params[4]} , ay = {params[5]}, ax = {params[6]}")
+        print(f"Distortion parameters: Lx = {params[0]} , Ly = {params[0]}, Lz = {params[1]}, dx = {params[2]}, dz = {params[3]})")
 
