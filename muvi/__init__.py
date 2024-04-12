@@ -920,7 +920,6 @@ _'''.format(**vol_info).encode('UTF-8'))
 
         return GridData(Xc, ImageScalars=dat)
 
-
 def open_3D_movie(fn, file_type=None, **kwargs):
     '''Open a 3D movie from a file on disk.
 
@@ -1053,6 +1052,13 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         else:
             self.needs_tone_map = True
             self.frames = reader(filename)
+            black_level = self.info.get('black_level', 0)
+            white_level = self.info.get('white_level', 255)
+            dark_clip = self.info.get('dark_clip', 0)
+            rel_map = (np.arange(256) - black_level) / (white_level - black_level)
+            rel_map[np.where(rel_map < dark_clip)] = 0
+            self.tone_map = (np.clip(rel_map, 0.0, 1.0)**(1./gamma) * output_max)
+            self.tone_map = (self.tone_map + 0.5).astype(self.info['dtype'])
 
         self.validate_2D()
 
@@ -1154,6 +1160,9 @@ class VolumetricMovieFrom2D(VolumetricMovie):
 
     def get_frame(self, i, correction=None, correction_offset=False, correction_clip=None):
         frame = self.frames[i]
+        if self.needs_tone_map:
+            frame = self.tone_map(frame)
+            
         if correction is not None:
             frame *= correction
             if correction_offset:
