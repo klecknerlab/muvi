@@ -530,7 +530,6 @@ class IntensityModel:
         sigma_r = np.sqrt(np.mean(squared_dff_u))
         #Compute average signal amplitude from cb to obtain the avg SNR in decibal units --> np.log10
         A_b = np.max(self.cb[self.sampled_slices, ...]) - np.min(self.cb[self.sampled_slices, ...]) 
-        print(f" min A {np.min(self.cb[self.sampled_slices, ...])}, max A {np.max(self.cb[self.sampled_slices, ...])}")
         squared_dff_b = (self.cb[self.sampled_slices, ...] - A_b)**2
         sigma_b = np.sqrt(np.mean(squared_dff_b))
         SNR = 20*np.log10(A_b/sigma_b)
@@ -623,7 +622,7 @@ class IntensityModel:
         return
 
 
-    def corrected_intensity(self,  skip_array = [264, 64, 1], spline_points_y = 20, spline_points_lz = 5):
+    def corrected_intensity(self,  ofn, skip_array = [264, 64, 1], spline_points_y = 20, spline_points_lz = 5):
         #Prepare to create a text file for the computed rms errors
         print(f"Computing intenisty correction for Channel {self.channel}")
         txt_file = os.path.join(self.new_path, f"rms_errors.txt")
@@ -678,8 +677,8 @@ class IntensityModel:
         cp_normalized = np.copy(self.cp)
         for i, median in enumerate(cb_median):
             cp_normalized[...,i] = 1 / cp_normalized[...,i] / median
-        print(f"Temporary outfile: {os.path.join(self.new_path, 'cp_normalized.npy')}")
-        np.save(os.path.join(self.new_path, "cp_normalized.npy"), cp_normalized)
+        print(f"Outfile: {os.path.join(self.new_path, ofn)}")
+        np.save(os.path.join(self.new_path, ofn), cp_normalized)
 
 class TargetCalibrationModel:
     '''
