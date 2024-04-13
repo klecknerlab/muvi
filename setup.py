@@ -13,12 +13,11 @@ setup(
         # 'numpy',
         # 'PyQt5',
     ],
-    # scripts=['bin/muvi_convert', 'bin/muvi_track', 'bin/muvi_parameters'],
+    # scripts=['bin/muvi_convert', 'bin/muvi_track'],
     entry_points={
         'gui_scripts': ['muvi=muvi.view.qtview:qt_viewer'],
         'console_scripts': ['muvi_convert=muvi.convert:convert', 
                             'muvi_track=muvi.calibration.track:main',
-                            'muvi_parameters=muvi.calibration.parameters:main'
                             ],
 
     },
