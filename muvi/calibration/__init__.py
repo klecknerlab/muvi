@@ -249,6 +249,7 @@ class TrackingModel:
         print(f"Analyzing tracks for Channel {self.cal_info['channel']}...")
         print(f"{'mb' in self.cal_info}, {'sb' in self.cal_info}")
         vm = open_3D_movie(self.vti)
+
         if 'vols' in self.cal_info:
             #Ensuring that the end frame cannot exceed the end frame in the VTI movie
             if self.cal_info['vols'] + self.cal_info['start'] < len(vm):
@@ -519,20 +520,18 @@ class IntensityModel:
 
     def rms_error(self, txt_file):
         #Repeats self.cr along the first axis 'n' times and exclude repetition along the remaining 3 axis
-        cr_reshaped = np.tile(self.cr, (self.cu.shape[0],1,1,1))
+        cb_reshaped = np.tile(self.cb[self.sampled_slices,...], (self.cu.shape[0],1,1,1))
         #Time averaged squared difference
-        squared_dff_r = (self.cu[:, self.sampled_slices, ...] - cr_reshaped)**2/(self.cu.shape[0] * self.muvi_info['dt'])
-        #Spatially averaged squared difference
-        sigma_u = np.sqrt(np.mean(squared_dff_r))
+        squared_dff_u = ((cb_reshaped - self.cu[:, self.sampled_slices, ...])**2).mean(axis=0)
+        #Spatially averaged root
+        sigma_u = np.sqrt(np.mean(squared_dff_u))
         #Squared difference
-        squared_dff_u = (self.cb[self.sampled_slices, ...] - self.cr)**2
-        #Spatially averaged squared difference
-        sigma_r = np.sqrt(np.mean(squared_dff_u))
+        squared_dff_r = (self.cb[self.sampled_slices, ...] - self.cr)**2
+        #Spatially averaged root
+        sigma_r = np.sqrt(np.mean(squared_dff_r))
         #Compute average signal amplitude from cb to obtain the avg SNR in decibal units --> np.log10
-        A_b = np.max(self.cb[self.sampled_slices, ...]) - np.min(self.cb[self.sampled_slices, ...]) 
-        squared_dff_b = (self.cb[self.sampled_slices, ...] - A_b)**2
-        sigma_b = np.sqrt(np.mean(squared_dff_b))
-        SNR = 20*np.log10(A_b/sigma_b)
+        A_b = (np.max(self.cb[self.sampled_slices, ...]) - np.min(self.cb[self.sampled_slices, ...])).mean()
+        SNR = 20*np.log10(A_b/sigma_u)
         #Prepare list to export errors to text file)
         errors_ls = [
             f"Slices: {self.len_slices}/{self.muvi_info['Nz']}",
