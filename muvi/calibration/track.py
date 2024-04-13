@@ -13,9 +13,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import muvi
+from muvi.calibration import TrackingModel
 import time
-import os
 import numpy as np
 import argparse
 
@@ -30,8 +29,7 @@ def track(startTime):
     parser.add_argument('calibration_setup', type=str, help='JSON file to use for distortion and intensity correction')
 
     args = parser.parse_args()
-    ofn = 'tracks.pickle'
-    tracks = muvi.calibration.TrackingModel(vti=args.vti_file, setup_xml=args.muvi_setup, setup_json=args.calibration_setup)
+    tracks = TrackingModel(vti=args.vti_file, setup_xml=args.muvi_setup, setup_json=args.calibration_setup)
     tracks.vti_tracks()
     
     executionTime = (time.time() - startTime)
