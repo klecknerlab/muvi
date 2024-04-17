@@ -13,24 +13,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import muvi
+""" An example to recover distortion parameters {Lx, Ly, Lz, dx, dz}.
+"""
+from muvi.calibration import TargetCalibrationModel
 import time
-import os
-import numpy as np
-import argparse
+
+pickle = ".\sphere\channel1\muvi_track.pickle"
+cal_json = "calibration_setup.json"
+muvi_xml = "muvi_setup.xml"
 
 def main():
     startTime = time.time()
     distortion_parameters(startTime)
 
 def distortion_parameters(startTime):
-    parser = argparse.ArgumentParser(description='Recover distortion parameters using a pickle file')
-    parser.add_argument('infile', type=str, help='Pickle file', nargs=1)
-    parser.add_argument('--muvi_setup', type=str, help='XML file to use for muvi conversion parameters', default='muvi_setup.xml',  nargs='?')
-
-    args = parser.parse_args()
-    print(args.infile[0])
-    calibration = muvi.calibration.TargetCalibrationModel(pickle_file = args.infile[0], setup_xml = args.muvi_setup)
+    calibration = TargetCalibrationModel(pickle_file = pickle, setup_xml = muvi_xml, setup_json= cal_json)
     calibration.parameters()
     
     executionTime = (time.time() - startTime)
