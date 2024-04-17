@@ -19,6 +19,7 @@ from muvi import VolumeProperties
 from muvi import open_3D_movie
 from muvi.readers.cine import Cine
 #Imported modules
+from numba import njit
 from scipy import optimize
 from scipy.spatial.transform import Rotation as rot
 from scipy.interpolate import CubicSpline
@@ -29,7 +30,7 @@ import trackpy as tp
 import pickle
 import numpy as np
 import json
-
+import warnings
 
 class CalibrationProperties:
     _defaults = {
@@ -245,10 +246,13 @@ class TrackingModel:
             if key not in self.cal_info:
                 raise ValueError(f"The key '{key}' is not defined in cal_info. Please provide a value for '{required_keys_cal}' in the JSON file.")
 
-    def vti_tracks(self,):
+    def vti_tracks(self, chunk_size = 10):
         print(f"Analyzing tracks for Channel {self.cal_info['channel']}...")
         print(f"{'mb' in self.cal_info}, {'sb' in self.cal_info}")
         vm = open_3D_movie(self.vti)
+
+        if self.cal_info['start'] > len(vm)-1:
+            raise ValueError(f"'start' cannot exceed the length of {os.path.dirname(self.vti)}. Ensure 'start' < len(vm)-1 in JSON.")
 
         if 'vols' in self.cal_info:
             #Ensuring that the end frame cannot exceed the end frame in the VTI movie
@@ -256,19 +260,19 @@ class TrackingModel:
                 end = self.cal_info['vols'] + self.cal_info['start'] - 1 
             else: 
                 end = len(vm) - 1
+                warnings.warn(f"'vols' exceeds the length of {os.path.dirname(self.vti)}. Defaulting to 'vols': {len(vm)}.", UserWarning)
         else:
             end = len(vm) - 1
         
         print(f"Start Frame: {self.cal_info['start']}, End Frame: {end}")
         
         #Grab vti frames and dividing the VTI movie into 'chunks' for memory purposes
-        chunk_size = 10
         vol_divisons = int(np.ceil(((end + 1) - self.cal_info['start'])/(chunk_size-1)))
         
-        print(f"Splitting VTI movie into {vol_divisons} divisons...")
+        print(f"Splitted VTI movie into {vol_divisons} divisons.")
         
         particle_location_df = pd.DataFrame()
-        for chunk in range (vol_divisons):
+        for chunk in range(vol_divisons):
             print(f"Computing tracks for {chunk+1}/{vol_divisons} divisons...")
             vol_ls = []        
             #Setting the end frame of the final chunk
@@ -303,21 +307,20 @@ class TrackingModel:
             if chunk != 0:
                 first_frame = particle_location['frame'].iloc[0]
                 particle_location = particle_location[particle_location['frame'] != first_frame]
-                #print(f"Rows deleted with corresponding frame: {first_frame} to avoid repetition.")
             else:
                 #Grab a subframe to plot, 100 is arbitary this can be changed
                 test_frame = vol_ls[0][int(self.muvi_info['Nx']) - 100:int(self.muvi_info['Nx']) + 100, 
                        int(self.muvi_info['Ny']) - 100:int(self.muvi_info['Ny']) + 100, 
                        int(self.muvi_info['Nz']) - 100:int(self.muvi_info['Nz']) + 100].sum(-1)
                 
-                 # Load the image 
+                #Load the image 
                 plt.figure(figsize=(10, 10))
                 plt.imshow(test_frame, cmap='gray')  
-                # Locate particles
+                #Locate particles
                 particles = tp.locate(test_frame, diameter=self.cal_info['diameter'], separation=self.cal_info['separation'])
                 # Plot the located particles
                 plt.plot(particles['x'], particles['y'], 'r.')
-                # Save the plot
+                #Save the plot
                 plt.savefig(os.path.join(self.new_path, 'muvi_track.png'))
                 plt.close()
                 print(f"Output tracking plot saved to: {os.path.join(self.new_path, 'muvi_track.png')}")
@@ -530,7 +533,7 @@ class IntensityModel:
         #Spatially averaged root
         sigma_r = np.sqrt(np.mean(squared_dff_r))
         #Compute average signal amplitude from cb to obtain the avg SNR in decibal units --> np.log10
-        A_b = (np.max(self.cb[self.sampled_slices, ...]) - np.min(self.cb[self.sampled_slices, ...])).mean()
+        A_b = (self.cb[self.sampled_slices, ...] - self.muvi_info['black_level']).mean()
         SNR = 20*np.log10(A_b/sigma_u)
         #Prepare list to export errors to text file)
         errors_ls = [
@@ -544,9 +547,7 @@ class IntensityModel:
             ]
 
         with open(txt_file, 'a') as f:
-            #Write each line from the data list to the file
-            for line in errors_ls:
-                f.write(line + '\n')
+            [f.write(line + '\n') for line in errors_ls]
             f.write('\n')
 
     def initialize_grid(self,):
@@ -562,7 +563,7 @@ class IntensityModel:
         self.Xc = distortion.convert(X, 'index-xyz', 'physical')
 
         return
-
+   
     def load_cine_data(self,):
         if self.channel == 0:
             #UV default in current setup, uv channel corresponds to frame 0
@@ -580,7 +581,7 @@ class IntensityModel:
         else:
             frames_arr = np.arange(initial_frame, self.muvi_info['Nz'] * self.muvi_info['channels'] + initial_frame, self.muvi_info['channels'])
         #Initalizing intensity array
-        print(f"Sampling {self.cal_info['vols']} volumes...")
+        print(f"Loading cine data  from {os.path.basename(self.cine)} for {self.cal_info['vols']} volumes...")
         cu = np.zeros((self.cal_info['vols'],) +  self.Xc.shape[:-1])
         for j in range(self.cal_info['vols']):
             for k, frame in enumerate(frames_arr + self.muvi_info['Ns'] * j):
@@ -597,7 +598,7 @@ class IntensityModel:
         self.sy = y/(self.muvi_info['dx'] - x)
 
         return
-
+   
     def optimize_intensities(self,):
         def objective_function(p):
             #Computing spline functions for intensity variations along y and along z
@@ -620,8 +621,7 @@ class IntensityModel:
 
         return
 
-
-    def corrected_intensity(self,  ofn, skip_array = [264, 64, 1], spline_points_y = 20, spline_points_lz = 5):
+    def corrected_intensity(self,  ofn, skip_array = [264, 128, 64, 1], spline_points_y = 20, spline_points_lz = 5):
         #Prepare to create a text file for the computed rms errors
         print(f"Computing intenisty correction for Channel {self.channel}")
         txt_file = os.path.join(self.new_path, f"rms_errors.txt")
@@ -650,11 +650,9 @@ class IntensityModel:
         #Print total parameters that will be used for optimizer
         print(f"{len(self.init_guess)} parameters for initial guess.")
 
-        for i, skip_z in enumerate(skip_array):
+        for skip_z in skip_array:
             self.sampled_slices = np.arange(0, self.muvi_info['Nz'], 1)[::skip_z]
             #Initializing self.cr and self.cp (reference digital signal and corrected respectively) for sampled slices.
-            #self.cr = np.zeros_like(self.Xc[self.sampled_slices, ...])
-            #self.cp = np.zeros_like(self.Xc[self.sampled_slices, ...])
             self.cr = 0
             self.cp = 0
             self.len_slices =  len(self.sampled_slices)
@@ -666,16 +664,8 @@ class IntensityModel:
             #saving rms error to a text file
             self.rms_error(txt_file)
 
-        #Finding the average median signal along each axis
-        cb_xmedian = 0.5 * (np.max(self.cb[...,0]) - np.min(self.cb[...,0]))
-        cb_ymedian = 0.5 * (np.max(self.cb[...,1]) - np.min(self.cb[...,1]))
-        cb_zmedian = 0.5 * (np.max(self.cb[...,2]) - np.min(self.cb[...,2]))
-        #Making a list of the medians
-        cb_median = [cb_xmedian, cb_ymedian, cb_zmedian]
-        #Normalizing by the average median signal of each axis along each axis
-        cp_normalized = np.copy(self.cp)
-        for i, median in enumerate(cb_median):
-            cp_normalized[...,i] = 1 / cp_normalized[...,i] / median
+        #Normalizing by the average median signal 
+        cp_normalized = 1 /self.cb / self.cb.mean()
         print(f"Outfile: {os.path.join(self.new_path, ofn)}")
         np.save(os.path.join(self.new_path, ofn), cp_normalized)
 
@@ -804,7 +794,7 @@ class TargetCalibrationModel:
         iterations = 20
         opt_params_ls = []
         result_ls = []
-        for i in range(0, iterations):
+        for i in range(iterations):
             self.i = i
             initial_guess = [
             np.random.randint(*self.cal_info['Lx']),
@@ -831,7 +821,7 @@ class TargetCalibrationModel:
         
         opt_params_ls = []
         result_ls = []
-        for i in range(0, iterations):
+        for i in range(iterations):
             self.i = i
             initial_guess = [
             opt_params_bar[0],
