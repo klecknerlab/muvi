@@ -287,17 +287,24 @@ class LinearControl(ParamControl):
         self.minVal = minVal
         self.maxVal = maxVal
         self.ratio = self.sliderSteps / (self.maxVal - self.minVal)
-        extend = (maxVal - minVal) * self.extend
-        self.spinBox.setRange(minVal - extend, maxVal + extend)
+        if self.extend > 0:
+            extend = (maxVal - minVal) * self.extend
+            self.spinBox.setRange(minVal - extend, maxVal + extend)
+        elif self.extend < 0: 
+            self.spinBox.setRange(-1E100, 1E100)
+        else:
+            self.spinBox.setRange(minVal, maxVal)
         self.slider.setRange(0, self.sliderSteps)
         self.spinBox.setSingleStep(step)
         self.slider.setSingleStep(self.subdiv)
         self.slider.setTickInterval(self.subdiv * 2 if self.sliderSteps//self.subdiv > 10 else self.subdiv)
 
         if self.decimals is None:
-            self.spinBox.setDecimals(math.ceil(1.5-math.log10(self.currentStep)))
+            self.spinBox.setDecimals(math.ceil(2.5-math.log10(self.currentStep)))
         else:
             self.spinBox.setDecimals(self.decimals)
+
+        # print(self.param, minVal, maxVal)
 
     def setValue(self, value, silent=False):
         self.spinBox.setValue(value)
@@ -305,7 +312,7 @@ class LinearControl(ParamControl):
         pos = int((value - self.minVal) * self.ratio + 0.5)
         if pos < 0: pos = 0
         if pos >= self.sliderSteps: pos = self.sliderSteps - 1
-        
+
         self.slider.setValue(pos)
 
     def setSilent(self, value):
@@ -316,7 +323,8 @@ class LinearControl(ParamControl):
 
     def spinChanged(self, value):
         self.slider.blockSignals(True)
-        self.slider.setValue(int((value - self.minVal) * self.ratio + 0.5))
+        val = int((value - self.minVal) * self.ratio + 0.5)
+        self.slider.setValue(max(min(val, self.sliderSteps), 0))
         self.slider.blockSignals(False)
 
     def sliderChanged(self, value):
@@ -342,7 +350,7 @@ class LogControl(ParamControl):
             step = (maxVal - minVal) / 10
 
         if decimals is None:
-            decimals = math.ceil(0.5-math.log10(minVal))
+            decimals = math.ceil(1.5-math.log10(minVal))
 
         self.spinBox.setDecimals(decimals)
 
@@ -441,9 +449,9 @@ def fromQColor(qc, has_alpha):
 
 def toQColor(t):
     if len(t) == 3:
-        return QColor(255*t[0]**(1./GAMMA_CORRECT), 255*t[1]**(1./GAMMA_CORRECT), 255*t[2]**(1./GAMMA_CORRECT),)
+        return QColor(int(255*t[0]**(1./GAMMA_CORRECT)), int(255*t[1]**(1./GAMMA_CORRECT)), int(255*t[2]**(1./GAMMA_CORRECT)), 255)
     elif len(t) == 4:
-        return QColor(255*t[0]**(1./GAMMA_CORRECT), 255*t[1]**(1./GAMMA_CORRECT), 255*t[2]**(1./GAMMA_CORRECT), 255*t[3])
+        return QColor(int(255*t[0]**(1./GAMMA_CORRECT)), int(255*t[1]**(1./GAMMA_CORRECT)), int(255*t[2]**(1./GAMMA_CORRECT)), int(255*t[3]))
     else:
         raise ValueError('input should have 3 or 4 components')
 

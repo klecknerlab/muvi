@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VolumeProperties>
+  <float name="Lx">159.27</float>
+  <float name="Ly">159.27</float>
+  <float name="Lz">168.49</float>
+  <int name="Ns">1204</int>
+  <int name="Nx">512</int>
+  <int name="Ny">512</int>
+  <int name="Nz">512</int>
+  <int name="channels">2</int>
+  <float name="dark_clip">0.005</float>
+  <float name="black_level">59</float>
+  <float name="dx">1291.5</float>
+  <float name="dz">1445.48</float>
+  <bool name="flip_y">True</bool>
+  <float name="gamma">2.0</float>
+  <str name="intensity_correction">muvi_intensity_correction2.npy</str>
+  <int name="offset">1125</int>
+  <str name="units">mm</str>
+  <float name ="dt">0.01605</float>
+</VolumeProperties>

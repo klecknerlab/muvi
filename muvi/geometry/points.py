@@ -107,11 +107,11 @@ class Points:
 
         if not isinstance(display, dict):
             raise ValueError('display keyword must be dictionary')
-        self.display = display
+        self.display = display.copy()
 
         if not isinstance(metadata, dict):
             raise ValueError('display keyword must be dictionary')
-        self.metadata = metadata
+        self.metadata = metadata.copy()
 
         for k, v in attr.items():
             self[k] = v
@@ -343,9 +343,9 @@ class PointSequence:
             dat = points[i]
 
             if display is None and hasattr(dat, 'display'):
-                display = dat.display
+                display = dat.display.copy()
             if metadata is None and hasattr(dat, 'metadata'):
-                metadata = dat.metadata
+                metadata = dat.metadata.copy()
 
             self._d[i] = dat
             if len(dat) > self._N:
@@ -353,13 +353,13 @@ class PointSequence:
 
         self.current = None
 
-        if not isinstance(display, dict):
+        if (display is not None) and (not isinstance(display, dict)):
             raise ValueError('display keyword must be dictionary')
-        self.display = display
+        self.display = display.copy()
 
-        if not isinstance(metadata, dict):
+        if (metadata is not None) and (not isinstance(metadata, dict)):
             raise ValueError('metadata keyword must be dictionary')
-        self.metadata = metadata
+        self.metadata = metadata.copy()
 
 
     def __len__(self):
@@ -480,9 +480,9 @@ class PointSequence:
             ]
 
             with VTKWriter(fn, 'PolyData', print_status=print_status) as f:
-                if self.display:
+                if getattr(self, 'display', None):
                     f.write_tag(DataDict('MuviDisplay', self.display))
-                if self.metadata:
+                if getattr(self, 'metadata', None):
                     f.write_tag(DataDict('UserData', self.metadata))
 
                 f.write_tag(VTKTag('PolyData', [
@@ -490,6 +490,8 @@ class PointSequence:
                 ], TimeValues=' '.join(map(str, sorted(self.keys())))))
         else:
             raise ValueError('filetype not recognized!')
+
+
 
 
 class PointsFromFile(Points):
@@ -538,6 +540,7 @@ class PointsFromFile(Points):
         self.metadata = {}
         for tag in self.vtk.root.findall('UserData'):
             self.metadata.update(self.vtk.get_dict(tag))
+
 
 class PointSequenceFromFile(PointSequence):
     def __init__(self, f):
@@ -620,3 +623,33 @@ class PointSequenceFromFile(PointSequence):
         data = {key:data[:cutoff] for key, data in data.items()}
 
         return Points(pos, **data)
+
+
+class PointSequenceFromFunction(PointSequence):
+    def __init__(self, function, valid_frames, display=None, metadata=None):
+        self._function = function
+        self._d = {k:None for k in valid_frames}
+
+        if (display is not None) and (not isinstance(display, dict)):
+            raise ValueError('display keyword must be dictionary')
+        self.display = display.copy()
+
+        if (metadata is not None) and (not isinstance(metadata, dict)):
+            raise ValueError('metadata keyword must be dictionary')
+        self.metadata = metadata.copy()
+
+    def __len__(self):
+        return len(self._d)
+    
+    def _get(self, i):
+        if i in self._d:
+            data = self._function(i)  
+            
+            if type(data) == tuple and len(data) == 2 and type(data[1]) == dict:
+                return Points(data[0], **data[1])
+            else:
+                return Points(data)
+        else:
+            raise KeyError(f"Invalid timestep: {i}")
+
+

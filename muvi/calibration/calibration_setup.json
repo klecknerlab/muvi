@@ -1,0 +1,21 @@
+{
+  "CalibrationProperties": {
+    "channel": 1,
+    "tx": 94.0,
+    "tz": 180.0,
+    "mass": 0,
+    "diameter": 7,
+    "separation": 3,
+    "xb": [195, 315],
+    "yb": [230, 290],
+    "spacing": 5,
+    "Lx": [150, 180],
+    "Lz": [150, 180],
+    "dx": [1100, 1500],
+    "dz": [1300, 1600],
+    "vols": 19,
+    "start": 0,
+    "M1": 0.03,
+    "M2": 0.03
+  }
+}

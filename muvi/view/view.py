@@ -1193,15 +1193,15 @@ class View:
             # If we have glow on, there will be regions with low alpha but very
             # high color values.  These won't be preserved when we drop to u1,
             # so as a compromise we can make these regions less transparent.
-            maxval = img[..., :3].max(-1)
-            b = maxval > 1
-            if b.any():
-                b = np.where(b)
-                img[b][..., :3] /= maxval[b].reshape(-1, 1)
-                img[b][..., 3] *= maxval[b]
+            # maxval = img[..., :3].max(-1)
+            # b = maxval > 1
+            # if b.any():
+            #     b = np.where(b)
+            #     img[b][..., :3] /= maxval[b].reshape(-1, 1)
+            #     img[b][..., 3] *= maxval[b]
 
             img[..., :3] **= 1/2.2
-            img[..., 3] **= 0.5/2.2
+            # img[..., 3] **= 0.5/2.2
             img = (np.clip(img, 0, 1) * 255).astype('u1')
 
             return img[::-1]

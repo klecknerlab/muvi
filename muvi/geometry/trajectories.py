@@ -23,7 +23,7 @@ from .resample import MSGResampler
 class Trajectories(PointSequence):
     def __init__(self, traj, dt=1, N=15, P=2, min_track_len=5, min_valid=None,
             window=None, pos=('xc', 'yc', 'zc'), vectors={}, scalars={},
-            dtype='f', verbose=None, max_tracks=None):
+            dtype='f', verbose=None, max_tracks=None, display=None, metadata=None):
         '''Create a PointSequence corresponding to the trajectories obtained
         from TrackPy or similar.  The actual positions and velocities are
         computed by running the data through a modified Savitzky Golay resampler
@@ -73,6 +73,14 @@ class Trajectories(PointSequence):
             Maximum number of particle tracks to evaluate -- can be used to
             test data without completing full tracks.  By default, all tracks
             are included
+        display: dictionary or None (default: None)
+            A dictionary of attributes used by the Muvi software for displaying
+            the points.  Can be used to get a default representation when the
+            data is loaded.  If None, taken from the first point in the
+            sequence.  This information will be saved in VTK files.
+        metadata: Dictionary or None (default: None)
+            A dictionary of arbitrary attributes, used for user metadata.
+            This information will be saved in VTK files.
         '''
 
         if verbose is None:
@@ -160,6 +168,14 @@ class Trajectories(PointSequence):
             print(f'\rTrajectories resampled in {el:.2f} s.')
 
         self._d = {i:None for i in range(self.frame0, self.frame1)}
+
+        if (display is not None) and (not isinstance(display, dict)):
+            raise ValueError('display keyword must be dictionary')
+        self.display = display
+
+        if (metadata is not None) and (not isinstance(metadata, dict)):
+            raise ValueError('metadata keyword must be dictionary')
+        self.metadata = metadata
 
     def save(self, *args, **kwargs):
         # if self.verbose:

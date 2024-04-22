@@ -47,7 +47,7 @@ def _xml_indent(elem, level=0):
     else:
         if level and (not elem.tail or not elem.tail.strip()):
             elem.tail = i
-
+    
 
 class VolumeProperties:
     _defaults = {
@@ -96,9 +96,13 @@ class VolumeProperties:
         'source_filename': str,
         'setup_filename': str,
         'axes_reorder': str,
+        'intensity_correction': str,
+        # 'spline_correction_my': list,
+        # 'spline_correction_mx': list,
+        # 'spline_correction_A': list,
     }
 
-    __properties_TYPES = [str, int, float, bool]
+    __properties_TYPES = [str, int, float, bool, list]
     __properties_TYPES_STR = dict((t.__name__, t) for t in __properties_TYPES)
     __AXES = ('x', 'y', 'z')
 
@@ -165,8 +169,8 @@ class VolumeProperties:
             recorded by the camera is (output_value)^(gamma).
         black_level : int
             The raw pixel value from the camera which corresponds to 0
-            intensity.  Default depends on camera model (for Phantom camera,
-            this is 64 for a 12 bit readout).  This will be mapped to 0 in the
+            intensity.  Default depends on camera model (for Phantom camera V2512,
+            this is 59 for a 12 bit readout).  This will be mapped to 0 in the
             output data.
         white_level : int
             The raw pixel value which is considered maximum intensity.  Will be
@@ -182,22 +186,32 @@ class VolumeProperties:
         source_filename : str
             The filename of the source data.  Usually defined only for movies
             derived from 2D streams.
-        axes_reorder : str
-            A comma separated list of directions used to reorder the axes.
-            Should be of the form: "[+-][xyz], [+-][xyz], [+-][xyz]"
-            The first component refers to which of the axes in the original
-            volume will be the x axis in the transformed volume.
-            For example: "+y, -x, z" would swap the y and x axes and invert the
-            *new* y axis.  In other words, the *new* x axis is the old y axis,
-            and the *new* y axis is a flipped version of the old x axis.
-            Notes:
-                1) the indices of the new volume will be in opposite order as
-                    the list, e.g. (iz, iy, ix), as is customarily the case.
-                2) Lx/Ly/Lz, and dx/dy/dz should be specified in the original,
-                    *unreordered* space.  In other words, Lz is always the
-                    length along the scan axis However, after the volume is
-                    loaded these will be swapped and flipped accordingly.
+        intensity_correction : str
+            If specified, specifies a 3D image to be used for intensity
+            correction.  The output volumes will be multiplied by the stored
+            intensity in a linear space.  (It is recommended to use a 
+            single precision floating point array, but this is not enforced.)
+            Note that this correction is only applied when loading from a 
+            2D movie directly; it is assumed to have already been applied
+            after the volumes are converted to VTI format.  (In this case 
+            this field gives the name of the file used in the conversion.)
         '''
+        # axes_reorder : str
+        #     A comma separated list of directions used to reorder the axes.
+        #     Should be of the form: "[+-][xyz], [+-][xyz], [+-][xyz]"
+        #     The first component refers to which of the axes in the original
+        #     volume will be the x axis in the transformed volume.
+        #     For example: "+y, -x, z" would swap the y and x axes and invert the
+        #     *new* y axis.  In other words, the *new* x axis is the old y axis,
+        #     and the *new* y axis is a flipped version of the old x axis.
+        #     Notes:
+        #         1) the indices of the new volume will be in opposite order as
+        #             the list, e.g. (iz, iy, ix), as is customarily the case.
+        #         2) Lx/Ly/Lz, and dx/dy/dz should be specified in the original,
+        #             *unreordered* space.  In other words, Lz is always the
+        #             length along the scan axis However, after the volume is
+        #             loaded these will be swapped and flipped accordingly.
+
         self._d = {}
 
         for arg in args:
@@ -206,37 +220,38 @@ class VolumeProperties:
         for k, v in kwargs.items():
             self[k] = v
 
-    def reorder_axes(self):
-        if 'axes_reorder' in self:
-            m = re.match(
-                '\s*([-+]?)\s*([xyz])\s*,\s*([-+]?)\s*([xyz])\s*,\s*([-+]?)\s*([xyz])\s*',
-                self._d.pop('axes_reorder')
-            )
-            if not m:
-                raise ValueError('axes_reorder must be of the form: "[+-][xyz], [+-][xyz], [+-][xyz]"')
+    # This caused bugs; this feature is temporarily removed.
+    # def reorder_axes(self):
+    #     if 'axes_reorder' in self:
+    #         m = re.match(
+    #             '\s*([-+]?)\s*([xyz])\s*,\s*([-+]?)\s*([xyz])\s*,\s*([-+]?)\s*([xyz])\s*',
+    #             self._d.pop('axes_reorder')
+    #         )
+    #         if not m:
+    #             raise ValueError('axes_reorder must be of the form: "[+-][xyz], [+-][xyz], [+-][xyz]"')
 
-            order = [-1 if m.group(2*i+1) == '-' else +1 for i in range(3)]
-            axes = [ord(m.group(2*i+2)) - ord('x') for i in range(3)]
-            if len(np.unique(axes)) != 3:
-                raise ValueError('axes_reorder should specify each of x, y, z exactly once')
+    #         order = [-1 if m.group(2*i+1) == '-' else +1 for i in range(3)]
+    #         axes = [ord(m.group(2*i+2)) - ord('x') for i in range(3)]
+    #         if len(np.unique(axes)) != 3:
+    #             raise ValueError('axes_reorder should specify each of x, y, z exactly once')
 
-            new_values = {}
-            for i, d in enumerate(self.__AXES):
-                od = self.__AXES[axes[i]]
-                for p in ('L', 'N', 'd'):
-                    n = p + od
-                    if n in self:
-                        if p == 'd':
-                            sign = order[i]
-                        else:
-                            sign = 1
-                        new_values[p+d] = sign * self._d.pop(n)
+    #         new_values = {}
+    #         for i, d in enumerate(self.__AXES):
+    #             od = self.__AXES[axes[i]]
+    #             for p in ('L', 'N', 'd'):
+    #                 n = p + od
+    #                 if n in self:
+    #                     if p == 'd':
+    #                         sign = order[i]
+    #                     else:
+    #                         sign = 1
+    #                     new_values[p+d] = sign * self._d.pop(n)
 
-            self._d.update(new_values)
+    #         self._d.update(new_values)
 
-            return axes, order
-        else:
-            return None, None
+    #         return axes, order
+    #     else:
+    #         return None, None
 
 
     def update(self, input, warn=False, raise_errors=False):
@@ -298,12 +313,22 @@ class VolumeProperties:
                         raise ValueError("Input tag '%s' has no name" % item.tag)
                     continue
 
-                self._d[item.get('name')] = t(item.text)
+                name = item.get('name')
+                if t == list:
+                    self._d[name] = [float(n) for n in item.text.split(',')]
+                else:
+                    self._d[name] = t(item.text)
 
         else:
             raise TypeError('Could not interperet input: %s' % repr(input))
 
     def __setitem__(self, key, val):
+        if (not isinstance(val, str)) and hasattr(val, '__getitem__'): #Convert iterables to lists
+            for i, vv in enumerate(val):
+                if not isinstance(vv, (int, float, np.number)):
+                    raise ValueError(f'Lists/arrays of numbers in VolumeProperties must be 1D and contain only numeric types\n(Found {vv} in {key}[{i}])')
+            val = list(val)
+
         if type(val) not in self.__properties_TYPES:
             raise ValueError('Values for VolumeProperties should be one of: [%s]' % (', '.join(self.__properties_TYPES_STR.keys())))
         elif key not in self._param_types:
@@ -365,7 +390,10 @@ class VolumeProperties:
         for k, v in sorted(self._d.items()):
             item = ET.SubElement(base, type(v).__name__)
             item.set('name', k)
-            item.text = str(v)
+            if isinstance(v, list):
+                item.text = ', '.join(str(vv) for vv in v)
+            else:
+                item.text = str(v)
 
         if indent is not None:
             if not isinstance(indent, int):
@@ -552,7 +580,7 @@ class VolumetricMovie:
         Writes a single frame, and returns the number of frames remaining.
         Write must be started with `start_vti_write` first.
 
-    If you would like to suppport a new data type, it is suggest you inheret
+    If you would like to support a new data type, it is suggest you inherit
     from this class.  To make a new class which is supported by the viewer,
     you must meet the following requirements:
         1. Define a new `__init__` and `get_volume` method.
@@ -667,7 +695,7 @@ class VolumetricMovie:
         start : int (default: 0)
             The first frame to write.
         end : int
-            The last frame to write; if not specificed, the last frame in the
+            The last frame to write; if not specified, the last frame in the
             movie.
         compression : int (default: 0, ranges from -10 -- 12)
             The level of compression.  If > 0 corresponds to the "fast" mode
@@ -892,7 +920,6 @@ _'''.format(**vol_info).encode('UTF-8'))
 
         return GridData(Xc, ImageScalars=dat)
 
-
 def open_3D_movie(fn, file_type=None, **kwargs):
     '''Open a 3D movie from a file on disk.
 
@@ -941,7 +968,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
     get_frame(index)
         Retrieve a single frame from the 2D movie.
 
-    In general, it should not be nessesary to create descendents from this
+    In general, it should not be necessary to create descendants from this
     class.  If you would like to implement a reader for a new type of 2D movie,
     the class can be passed to the `reader` method of initialization.  All
     other functions should be handled automatically.
@@ -985,9 +1012,38 @@ class VolumetricMovieFrom2D(VolumetricMovie):
 
         self.info.update(kwargs)
 
+        fn = self.info.get('intensity_correction', None)
+        if fn:
+            bfn, ext = os.path.splitext(fn)
+            ext = ext.lower()
+
+            if not os.path.isabs(fn):
+                fn = os.path.join(os.path.split(filename)[0], fn)
+                self.info['intensity_correction'] = fn
+
+            if ext == '.vti':
+                self.intensity_correction = open_3D_movie(fn)[0].astype('f')
+            elif ext == '.npy':
+                self.intensity_correction = np.load(fn).astype('f')
+            else:
+                raise ValueError(f'Intensity correction file should be .npy or .vti filetype\n(specified file was: "{fn}")')
+            
+            if 'gamma' in self.info:
+                self.intensity_correction **= (1./self.info['gamma'])
+
         if getattr(reader, "_MUVI_SUPPORTS_TONE_MAP", False):
             self.needs_tone_map = False
             tone_map = {k:v for k, v in self.info.items() if k in self._TONE_MAP_KEYS}
+            if hasattr(self, 'intensity_correction'):
+                tone_map['output_bits'] = 32
+
+                dtype = self.info['dtype']
+                if np.issubdtype(dtype, np.integer):
+                    maxval = np.iinfo(dtype).max
+                    self.intensity_correction *= maxval
+                    self.intensity_correction_offset = 0.5
+                    self.intensity_correction_clip = maxval
+
             self.frames = reader(filename, **tone_map)
             for key in self._TONE_MAP_KEYS:
                 val = getattr(self.frames, key, None)
@@ -996,6 +1052,13 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         else:
             self.needs_tone_map = True
             self.frames = reader(filename)
+            black_level = self.info.get('black_level', 0)
+            white_level = self.info.get('white_level', 255)
+            dark_clip = self.info.get('dark_clip', 0)
+            rel_map = (np.arange(256) - black_level) / (white_level - black_level)
+            rel_map[np.where(rel_map < dark_clip)] = 0
+            self.tone_map = (np.clip(rel_map, 0.0, 1.0)**(1./gamma) * output_max)
+            self.tone_map = (self.tone_map + 0.5).astype(self.info['dtype'])
 
         self.validate_2D()
 
@@ -1056,6 +1119,8 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         if 'Ns' not in self.info:
             warnings.warn("'Ns' not defined for volumes derived from 2D data\n   Will default to Ns=Nz, but this is probably wrong!")
 
+
+
         if self.info['Ns'] < (channels * self.info['Nz']):
             raise ValueError("Ns must be >= channels*Nz")
 
@@ -1084,13 +1149,28 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         else:
             self.vol_shape = (self.info['Nz'], self.info['Ny'], self.info['Nx'])
 
+        if hasattr(self, 'intensity_correction'):
+            if self.intensity_correction.shape != self.vol_shape:
+                raise ValueError(f'Shape of intensity correction, {self.intensity_correction.shape}, does not match the volume shape, {self.vol_shape}')
+
         self.vol_dtype = self.info['dtype']
 
         self.apply_axes_reorder()
         # self.update_distortion()
 
-    def get_frame(self, i):
-        return self.frames[i]
+    def get_frame(self, i, correction=None, correction_offset=False, correction_clip=None):
+        frame = self.frames[i]
+        if self.needs_tone_map:
+            frame = self.tone_map(frame)
+            
+        if correction is not None:
+            frame *= correction
+            if correction_offset:
+                frame += correction_offset
+            if correction_clip:
+                frame = np.clip(frame, 0, correction_clip)
+            frame = frame.astype(self.vol_dtype)
+        return frame
 
     def get_volume(self, i):
         vol = np.empty(self.vol_shape, dtype=self.vol_dtype)
@@ -1098,13 +1178,22 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         y_step = -1 if self.info.get('flip_y', False) else 1
 
         offset = self.info.get('offset', 0) + i * self.info['Ns']
+        
+        has_correction = hasattr(self, 'intensity_correction')
+        correction_offset = getattr(self, 'intensity_correction_offset', False)
+        correction_clip = getattr(self, 'intensity_correction_clip', None) 
+        correction = None
 
         if len(self.vol_shape) == 4:
             channels = self.vol_shape[3]
             for i in range(self.vol_shape[0] * channels):
-                vol[i//channels, ::y_step, :, i % channels] = self.get_frame(offset + i)
+                if has_correction:
+                    correction = self.intensity_correction[i//channels, ::y_step, :, i % channels]
+                vol[i//channels, ::y_step, :, i % channels] = self.get_frame(offset + i, correction=correction, correction_offset=correction_offset, correction_clip=correction_clip)
         else:
             for z in range(self.vol_shape[0]):
-                vol[z, ::y_step] = self.get_frame(offset + z)
+                if has_correction:
+                    correction = self.intensity_correction[z, ::y_step]
+                vol[z, ::y_step] = self.get_frame(offset + z, correction=correction, correction_offset=correction_offset, correction_clip=correction_clip)
 
         return vol
