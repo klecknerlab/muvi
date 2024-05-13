@@ -86,7 +86,10 @@ class CalibrationProperties:
         'A2': float,
         'M1': float,
         'M2': float,
-        'de': float
+        'de': float,
+        'crop': float,
+        'method': str,
+        'flip_y': bool,
     }
     
     def __init__(self, json_data=None, json_file=None):
@@ -128,6 +131,12 @@ class CalibrationProperties:
             Electrons counts per digital counts. Default was determined for our imaging system.
         channel : int
             Channel to be analyzed for tracking. Defaults is set to 1 because our light excited particles are excited by the Green laser which defaults to this channel.
+        crop : float
+            Crops volume evenly along each axis, e.g., crop = 0.1 will crop the volume by 10%. This is used in LIF calibration. 
+        flip_y :
+            Flips the digital signal along y. Default is set to true because the data in Cine files follow the opposite convention along this axis.
+        method:
+            Scipy optimize minimize method.
         tx, tz:
             Distance from the inner edge of the tank to the center of the volume. See H2C-SVLIF Diego Tapia Silva et al for more details.
         xb, yb: tuple
@@ -391,6 +400,7 @@ class IntensityModel:
     'p1_n': 0.04,
     'p2_n': 0.03,
     'de': 4.5,
+    'flip_y': True,
     }
 
     def __init__(self, channel, cine, setup_xml, setup_json):
@@ -511,7 +521,7 @@ class IntensityModel:
         plt.close()
 
         plt.figure()
-        plt.imshow(self.spline_y.mean(axis = 0))
+        plt.imshow(self.spline_sy.mean(axis = 0))
         plt.title("spline averaged along z-axis")
         plt.xlabel("Nx")
         plt.ylabel("Ny")
@@ -581,7 +591,7 @@ class IntensityModel:
         else:
             frames_arr = np.arange(initial_frame, self.muvi_info['Nz'] * self.muvi_info['channels'] + initial_frame, self.muvi_info['channels'])
         #Initalizing intensity array
-        print(f"Loading cine data  from {os.path.basename(self.cine)} for {self.cal_info['vols']} volumes...")
+        print(f"Loading cine data from {os.path.basename(self.cine)} for {self.cal_info['vols']} volumes...")
         cu = np.zeros((self.cal_info['vols'],) +  self.Xc.shape[:-1])
         for j in range(self.cal_info['vols']):
             for k, frame in enumerate(frames_arr + self.muvi_info['Ns'] * j):
@@ -591,7 +601,20 @@ class IntensityModel:
         self.cu = cu
         self.cb = cu.mean(axis = 0)
         
-        x, y, z = self.Xc[..., 0], self.Xc[..., 1], self.Xc[..., 2]
+        if 'crop' in self.cal_info and self.cal_info['crop'] <= 1:
+            cut_x, cut_y, cut_z = np.int64(self.muvi_info['Nx'] * self.cal_info['crop'] // 2), np.int64(self.muvi_info['Ny'] * self.cal_info['crop'] // 2), np.int64(self.muvi_info['Nz'] * self.cal_info['crop'] // 2)
+            x, y, z = self.Xc[cut_z:-cut_z, cut_y:-cut_y, cut_x:-cut_x, 0], self.Xc[cut_z:-cut_z, cut_y:-cut_y, cut_x:-cut_x, 1], self.Xc[cut_z:-cut_z, cut_y:-cut_y, cut_x:-cut_x, 2]
+            self.cut_z = cut_z
+            self.cu = self.cu[:, cut_z:-cut_z, cut_y:-cut_y, cut_x:-cut_x]
+            self.cb = self.cb[cut_z:-cut_z, cut_y:-cut_y, cut_x:-cut_x]
+            print(f"Volume cropped to ~ {(1-self.cal_info['crop'])*100}%.")
+            
+        else:
+            print('No cropping applied to volume.')
+            x, y, z = self.Xc[..., 0], self.Xc[..., 1], self.Xc[..., 2]
+            self.cut_z = 0 
+
+
         self.lx = (self.cal_info['tx']  - x) * np.sqrt(1 + (y**2 + z**2)/(self.muvi_info['dx'] + x)**2)
         self.lz = (self.cal_info['tz'] - z) * np.sqrt(1 + (y**2 + x**2)/(self.muvi_info['dz'] + z)**2)
         self.gx = (self.muvi_info['dx'])/(self.muvi_info['dx'] - x)
@@ -601,27 +624,48 @@ class IntensityModel:
    
     def optimize_intensities(self,):
         def objective_function(p):
-            #Computing spline functions for intensity variations along y and along z
-            self.spline_y = CubicSpline(self.sy_reduced, p[1:(self.spline_points_y+1)])(self.sy[self.sampled_slices, ...])
-            self.spline_lz = CubicSpline(self.lz_reduced, p[-self.spline_points_lz:])(self.lz[self.sampled_slices, ...])
+            #Computing spline functions
+            self.cs_sy = CubicSpline(self.sy_reduced, p[1:(self.spline_points_sy+1)])
+            self.spline_sy = self.cs_sy(self.sy[self.sampled_slices, ...])
             #Computing reference signal
-            self.cr = (self.muvi_info['black_level'] + np.exp(-p[0] * self.lx[self.sampled_slices, ...]) * self.spline_y * self.spline_lz *
-                          self.gx[self.sampled_slices, ...])               
-            #Computing corrected signal without dye attenuation or black level
-            self.cp = self.spline_y * self.spline_lz * self.gx[self.sampled_slices, ...]
-
+            self.cs_lz = CubicSpline(self.lz_reduced, p[-self.spline_points_lz:])
+            self.spline_lz = self.cs_lz(self.lz[self.sampled_slices, ...])
+            self.cr = (self.muvi_info['black_level'] + np.exp(-p[0] * self.lx[self.sampled_slices, ...]) * self.spline_sy * self.spline_lz *
+                        self.gx[self.sampled_slices, ...])
+            self.cp = self.spline_sy * self.spline_lz * self.gx[self.sampled_slices, ...]
+            
             return (self.cb[self.sampled_slices, ...] - self.cr)**2
 
         def U(p):
             return np.sum(objective_function(p))
+        
+        if 'method' in self.cal_info:
+            method  = self.cal_info['method']
+        else:
+            method = 'Powell'
 
-        self.opt_params = optimize.minimize(U, x0 = self.init_guess, method='Powell').x
+        self.opt_params = optimize.minimize(U, x0 = self.init_guess, method = method).x
+
+        if 'crop' in self.cal_info and self.skip_z == self.skip_array[-1]:
+            print(f"Computing interpolation for entire volume...")
+            #Recompute parameters for the entire volume
+            x, y, z = self.Xc[..., 0], self.Xc[..., 1], self.Xc[..., 2]
+            lz = (self.cal_info['tz'] - z) * np.sqrt(1 + (y**2 + x**2)/(self.muvi_info['dz'] + z)**2)
+            gx = (self.muvi_info['dx'])/(self.muvi_info['dx'] - x)
+            sy = y/(self.muvi_info['dx'] - x)
+
+            #Interpolate over entire volume
+            spline_sy = self.cs_sy(sy)
+            spline_lz = self.cs_lz(lz)
+            self.cp = spline_sy * spline_lz * gx
+        else:
+            self.cp = self.cp
 
         self.plot_fit()
 
         return
 
-    def corrected_intensity(self,  ofn, skip_array = [264, 128, 64, 1], spline_points_y = 20, spline_points_lz = 5):
+    def corrected_intensity(self,  ofn, skip_array = [264, 128, 64, 1], spline_points_sy = 30, spline_points_lz = 5):
         #Prepare to create a text file for the computed rms errors
         print(f"Computing intenisty correction for Channel {self.channel}")
         txt_file = os.path.join(self.new_path, f"rms_errors.txt")
@@ -634,24 +678,21 @@ class IntensityModel:
         self.init_guess = [self.A]
         self.plot_cine_data()
 
-        #Preparing y-spline guess
-        self.spline_points_y = spline_points_y
-        self.spline_indices_y = np.linspace(0, self.muvi_info['Ny'] - 1, spline_points_y, dtype=int)
-        cb_y = self.cb[0, self.spline_indices_y, 0]
+        #Preparing sy-spline guess
+        self.spline_points_sy = spline_points_sy
+        cb_y = np.full(self.spline_points_sy, np.mean(self.sy))
         self.init_guess.extend(cb_y)
-        self.sy_reduced = self.sy[0, :, 0][self.spline_indices_y]
-        #Preparing lz-spline guess
+        self.sy_reduced = np.linspace(np.min(self.sy), np.max(self.sy), self.spline_points_sy)
+        
+        #Preparing lz spline guesses
         self.spline_points_lz = spline_points_lz
-        self.spline_indices_lz = np.linspace(0, self.muvi_info['Nz'] - 1, spline_points_lz, dtype=int)
-        #[::-1] ensures that lz is strictly decreasing, in our data lz increases as Nz decreases, check FIG for further details in H2C-SVLIF Diego Tapia Silva et. al
-        cb_z = self.cb[self.spline_indices_lz, 0, 0][::-1]
+        cb_z = np.full(self.spline_points_lz, np.mean(self.lz))
         self.init_guess.extend(cb_z)
-        self.lz_reduced = self.lz[:, 0, 0][::-1][self.spline_indices_lz]
-        #Print total parameters that will be used for optimizer
-        print(f"{len(self.init_guess)} parameters for initial guess.")
-
-        for skip_z in skip_array:
-            self.sampled_slices = np.arange(0, self.muvi_info['Nz'], 1)[::skip_z]
+        self.lz_reduced = np.linspace(np.min(self.lz), np.max(self.lz), self.spline_points_lz)
+        
+        self.skip_array = skip_array
+        for self.skip_z in self.skip_array:
+            self.sampled_slices = np.arange(0, np.int64(self.muvi_info['Nz'] - self.cut_z*2), 1)[::self.skip_z]
             #Initializing self.cr and self.cp (reference digital signal and corrected respectively) for sampled slices.
             self.cr = 0
             self.cp = 0
@@ -659,13 +700,14 @@ class IntensityModel:
             print(f"Sampled slices: {self.sampled_slices}")
             print(f"Computing relative intensity and optimized parameters for {self.len_slices}/{self.muvi_info['Nz']} thick slices...")
             self.optimize_intensities()
-            self.init_guess = self.opt_params
-            
+            self.init_guess = self.opt_params                
             #saving rms error to a text file
             self.rms_error(txt_file)
-
+            
         #Normalizing by the average median signal 
-        cp_normalized = 1 /self.cb / self.cb.mean()
+        cp_normalized = 1 / (self.cp / self.cp.mean())
+        if self.cal_info['flip_y'] == True:
+            cp_normalized = cp_normalized[:, ::-1, :]
         print(f"Outfile: {os.path.join(self.new_path, ofn)}")
         np.save(os.path.join(self.new_path, ofn), cp_normalized)
 
