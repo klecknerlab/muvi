@@ -24,11 +24,11 @@ import numpy as np
 from multiprocessing import Pool 
 from muvi.calibration import IntensityModel
 
-cines = ["gr24dot08ugL_uv4dot41mgL.cine","gr366ugL_uv0mgL.cine"]
+cines = ["gr24dot08ugL_uv4dot41mgL.cine", "gr366ugL_uv0mgL.cine"]
 channels = [0, 1]
 muvi_xml = "muvi_setup.xml"
 cal_json = "calibration_setup.json"
-Parallelize = True
+Parallelize = False
 
 def main():
     startTime = time.time()
@@ -75,7 +75,7 @@ def main():
 def intensity_correction(args):
     channel, cine, tfn = args
     intensity = IntensityModel(channel = channel, cine = cine, setup_xml = muvi_xml, setup_json= cal_json)
-    intensity.corrected_intensity(ofn = tfn, skip_array=[256, 128, 1], spline_points_y=20, spline_points_lz=5)
+    intensity.corrected_intensity(ofn = tfn, skip_array = [256, 128, 64, 32, 1], spline_points_sy = 36, spline_points_lz = 5)
 
 
 if __name__ == "__main__":
