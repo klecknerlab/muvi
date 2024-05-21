@@ -34,7 +34,8 @@ except ImportError:
 
 from OpenGL.GL import shaders
 import numpy as np
-import numba
+# import numba
+from .. import accel
 import re
 import ctypes
 import os
@@ -818,7 +819,7 @@ class TextRenderer:
     def write(self, va, anchor, text, flags=0, padding=1.0, lineSpacing=1.0,
             baseline=np.array([1, 0, 0], 'f'), up=np.array([0, 1, 0], 'f'),
             start=0):
-        end = _writeText(text, start, self.capHeight,
+        end = accel.writeText(text, start, self.capHeight,
             self.lineHeight*lineSpacing, va['_glyphRender'], self.atlas)
         va['flags'][start:end] = flags
         va['anchor'][start:end] = anchor
@@ -833,57 +834,6 @@ class TextRenderer:
             self.texture.delete()
             del self.texture
             del self.atlas
-
-@numba.njit(cache=True)
-def _writeText (s, start, cap_height, line_height, output, atlas):
-    x0 = 0.0
-    y0 = -cap_height
-    width = 0.0
-    height = cap_height
-    i = start
-
-    N = len(atlas)
-    M = len(output)
-
-    for c in s:
-        u = ord(c)
-
-        if u > N: # Outside the covered range of glyphs
-            continue
-
-        if u == 10: # line break
-            x0 = 0.0
-            y0 -= line_height
-            height += line_height
-            width = max(width, x0)
-            continue
-
-        advance = atlas[u, 0]
-        if advance < 0.0: # This is an undefined character!
-            continue
-
-        if atlas[u, 1] > -1000.0: # if this is whitespace, left = -2**16
-            output[i, 2] = atlas[u, 1] + x0
-            output[i, 3] = atlas[u, 2] + y0
-            output[i, 4] = atlas[u, 3]
-            output[i, 5] = atlas[u, 4]
-            output[i, 6] = atlas[u, 5]
-            output[i, 7] = atlas[u, 6]
-            i += 1
-
-        x0 += advance
-
-        if i >= M:
-            break
-
-    width = max(width, x0)
-
-    for j in range(start, i):
-        output[j, 0] = width
-        output[j, 1] = height
-        output[j, 3] += height
-
-    return i
 
 
 # A cube... used in various places

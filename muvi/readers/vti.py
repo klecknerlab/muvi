@@ -15,7 +15,8 @@
 # limitations under the License.
 
 import numpy as np
-import numba
+# import numba
+from .. import accel
 from .. import VolumetricMovie, VolumeProperties
 from xml.etree import ElementTree
 import re
@@ -23,62 +24,7 @@ import warnings
 import struct
 
 
-# A simple homegrown LZ4 decompresser, which uses JIT through numba.
-# It's really fast!  Typically performance is several times that of the LZ4
-#   library!  A few GB/s of decompression speed is easily acheivable on
-#   commodity hardware, primarily due to excuting in parallel.
-@numba.jit(nopython=True, parallel=True, cache=True)
-def numba_decompress_blocks(input, block_size, last_block_size, block_ends, output):
-    num_blocks = len(block_ends)
 
-    for p in numba.prange(num_blocks):
-        if p == 0:
-            i = numba.uint64(0)
-        else:
-            i = numba.uint64(block_ends[p - numba.uint(1)])
-
-        block_end = numba.uint64(block_ends[p])
-        j = numba.uint64(block_size * p)
-
-        if (p == (num_blocks - numba.uint8(1))):
-            end = j + numba.uint64(last_block_size)
-        else:
-            end = j + numba.uint64(block_size)
-
-        while ((j < end) and (i < block_end)):
-            t1 = numba.uint16((input[i] & 0xF0) >> 4)
-            t2 = numba.uint16((input[i] & 0x0F) + 4)
-            i += numba.uint8(1)
-
-            if (t1 == 15):
-                while input[i] == 255:
-                    t1 += numba.uint8(input[i])
-                    i += numba.uint8(1)
-
-                t1 += numba.uint8(input[i])
-                i += numba.uint8(1)
-
-            for n in range(t1):
-                output[j] = input[i]
-                i += numba.uint8(1)
-                j += numba.uint8(1)
-
-            if (j >= end): break
-
-            off = numba.uint16(input[i]) + (numba.uint16(input[i+1]) << 8)
-            i += numba.uint8(2)
-
-            if (t2 == 19):
-                while input[i] == 255:
-                    t2 += numba.uint8(input[i])
-                    i += numba.uint8(1)
-
-                t2 += numba.uint8(input[i])
-                i += numba.uint8(1)
-
-            for n in range(t2):
-                output[j] = output[j - off]
-                j += numba.uint8(1)
 
 
 class VTIMovie(VolumetricMovie):
@@ -279,7 +225,7 @@ class VTIMovie(VolumetricMovie):
 
         # Decompress output into numpy array
         output = np.empty((num_blocks - 1) * block_size + last_block_size, dtype='u1')
-        numba_decompress_blocks(np.frombuffer(self.f.read(block_ends[-1]), dtype='u1'), block_size, last_block_size, block_ends, output)
+        accel.decompress_blocks(np.frombuffer(self.f.read(block_ends[-1]), dtype='u1'), block_size, last_block_size, block_ends, output)
 
         # Reshape, retype, and return.
         return output.view(self.info['dtype']).reshape(self.shape)

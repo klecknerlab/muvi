@@ -15,7 +15,8 @@
 # limitations under the License.
 
 import numpy as np
-import numba
+# import numba
+from .. import accel
 import struct
 from threading import Lock
 
@@ -43,23 +44,6 @@ OLDMAXFILENAME = 65
 T64_F = lambda x: int(x) / 2.**32
 T64_F_ms = lambda x: '%.3f' % (float(x.rstrip('L')) / 2.**32)
 T64_S = lambda s: lambda t: time.strftime(s, time.localtime(float(t.rstrip('L'))/2.**32))
-
-@numba.jit(nopython=True, parallel=True, cache=True)
-def unpack_10b(input, tone_map, output, offset=0, stride=1):
-    # 10 bits data => 4 points packed into 5 bytes
-    for block in numba.prange(len(input) // 5):
-        i = block * 5
-        val0 = (numba.uint16(input[i+0] & 0xFF) << 2) + (numba.uint16(input[i+1]) >> 6)
-        val1 = (numba.uint16(input[i+1] & 0x3F) << 4) + (numba.uint16(input[i+2]) >> 4)
-        val2 = (numba.uint16(input[i+2] & 0x0F) << 6) + (numba.uint16(input[i+3]) >> 2)
-        val3 = (numba.uint16(input[i+3] & 0x03) << 8) + (numba.uint16(input[i+4]) >> 0)
-
-        j = offset + (block * 4 * stride)
-        output[j           ] = tone_map[val0]
-        output[j +   stride] = tone_map[val1]
-        output[j + 2*stride] = tone_map[val2]
-        output[j + 3*stride] = tone_map[val3]
-
 
 # #Processing the data in chunks keeps it in the L2 catch of the processor, increasing speed for large arrays by ~50%
 # CHUNK_SIZE = 6 * 10**5 #Should be divisible by 3, 4 and 5!  This seems to be near-optimal.
@@ -545,7 +529,7 @@ class Cine:
                 return raw_frame
             else:
                 frame = np.empty((self.height, self.width), dtype=self.output_type)
-                unpack_10b(raw_frame, self.tone_map, frame.reshape(-1))
+                accel.unpack_10b(raw_frame, self.tone_map, frame.reshape(-1))
                 return frame
 
         else:
@@ -584,7 +568,7 @@ class Cine:
 
             self.file_lock.release()
 
-            unpack_10b(raw_frame, self.tone_map, arr.reshape(-1), offset=offset, stride=stride)
+            accel.unpack_10b(raw_frame, self.tone_map, arr.reshape(-1), offset=offset, stride=stride)
 
         else:
             raise ValueError('this library only supports 10 bit packed files')
