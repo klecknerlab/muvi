@@ -45,13 +45,13 @@ import os
 #Developed modules
 from muvi.lcs import FTLEs
 from muvi.lcs.flow_models import double_gyre
-from muvi.lcs.visualization import plot_2D
+from muvi.lcs.visualization import plot_2D as plt2D
 
 #Initialize time, resolution and particle count parameters:
 T = 10
-delta_t = [0.01]
+delta_t = [0.001]
 N = [(128, 56), (256, 128), (512, 256), (1024, 512)]
-particles = [500, 1000, 1500, 2000, 2500, 5000, 75000, 10000, 15000, 20000, 25000, 50000]
+particles = [500, 1000, 1500, 2000, 2500, 5000]
 #Specify method for flow map computation:
 method = 'FMC'
 #Initialize interpolators:
@@ -80,7 +80,7 @@ class DoubleGyre:
         self.T = T
         self.method = method
     
-    def exact_solution(self, R, rk4_dt=10**-1):
+    def exact_solution(self, R, rk4_dt=10**-4):
         """
         Computes the exact FTLE field using particle trajectories and RK4 integration.
         
@@ -108,13 +108,13 @@ class DoubleGyre:
             traj = np.array([traj_first, traj_step.reshape(R.shape)])
             
             ofn = 'exact_flowmap'
-            plot_2D(R, traj[-1][...,0], ofn, self.plots_path)
+            plt2D(R, traj[-1][...,0], ofn, self.plots_path)
             
             G = ftle.grad_step(traj[0], traj[-1])
             LCS = ftle.ftle_field(G, self.T)
 
             ofn = ['exact_fwd_ftle', 'exact_bwd_ftle']
-            [plot_2D(R, LCS[i], ofn[i], self.plots_path) for i in range(len(ofn))]
+            [plt2D(R, LCS[i], ofn[i], self.plots_path) for i in range(len(ofn))]
 
             np.save(filename, LCS)
             print(f"Saved LCS to '{filename}'.")
@@ -163,7 +163,6 @@ class DoubleGyre:
                 X0 = p0
             
             F = np.array([R_init, f_step])
-            print(f"F.shape: {F.shape}")
             G = ftle.grad_step(F[0], F[-1])
             LCS = ftle.ftle_field(G, self.T)
 
@@ -177,7 +176,7 @@ class DoubleGyre:
             ofn = [self.interpolator + '_fwd_ftle_' + self.ext,
                     self.interpolator + '_bwd_ftle_' + self.ext]
             
-            [plot_2D(R_init, LCS[i], ofn[i], self.plots_path) for i in range(len(ofn))]
+            [plt2D(R_init, LCS[i], ofn[i], self.plots_path) for i in range(len(ofn))]
 
             np.save(filename, LCS)
             print(f"Saved LCS to '{filename}'.")
@@ -235,6 +234,7 @@ class DoubleGyre:
                     rms_ls.append(self.rms_step(R))
    
             else:
+                self.dt = delta_t[0]
                 x_label = 'particle count'
                 x_data = particles
 
