@@ -47,11 +47,24 @@ from muvi.lcs import FTLEs
 from muvi.lcs.flow_models import double_gyre
 from muvi.lcs.visualization import plot_2D as plt2D
 
+
+try:
+    from muvi.lcs.visualization import plot_2D as plt2D
+    print("Import successful")
+except ImportError as e:
+    print(f"Import failed: {e}")
+
+try:
+    from muvi.lcs import FTLEs
+    print(f"{FTLEs.grad_step}")
+except ImportError as e:
+    print(f"Import failed: {e}")
+
 #Initialize time, resolution and particle count parameters:
 T = 10
 delta_t = [0.001]
 N = [(128, 56), (256, 128), (512, 256), (1024, 512)]
-particles = [500, 1000, 1500, 2000, 2500, 5000]
+particles = [2500, 5000, 10000]
 #Specify method for flow map computation:
 method = 'FMC'
 #Initialize interpolators:
@@ -101,7 +114,8 @@ class DoubleGyre:
             t = np.arange(0, self.T + rk4_dt, rk4_dt)
             traj_first = R
             X = R.reshape(-1, 2)
-            for t_ in (t):
+            for i, t_ in enumerate(t):
+                print(f"Integrating trajectories: {i}/{(len(t) - 1)}")
                 traj_step = ftle.rk4_step(X, double_gyre, t_, rk4_dt)
                 X = traj_step
             
