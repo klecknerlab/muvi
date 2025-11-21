@@ -239,8 +239,9 @@ class ExportWindow(QWidget):
         # self.scaleHeight = self.scaleControl.value()
         # self.scaleControl.paramChanged.connect(self.updatescaleHeight)
         self.progress = QProgressBar()
-        self.pauseButton = QPushButton()
+        self.pauseButton = QPushButton("Cancel Export")
         self.pauseButton.setEnabled(False)
+        self.pauseButton.clicked.connect(self.cancelExport)
 
         self.transparentControl = BoolControl('Transparent export:', False, param='transparent_export')
         self.bgTransparentControl = BoolControl('Force transparent axis background:', False, param='bg_transparent')
@@ -397,6 +398,7 @@ class ExportWindow(QWidget):
         self.previewButton.setDisabled(True)
         self.movieButton.setDisabled(True)
         self.parent.display.disable()
+        self.pauseButton.setEnabled(True)
 
         self.exportTimer.start()
 
@@ -452,13 +454,24 @@ class ExportWindow(QWidget):
             self.progress.setValue(self.progress.value() + 1)
             self.progress.repaint()
         else:
-            self.exportButton.setEnabled(True)
-            self.previewButton.setEnabled(True)
-            self.movieButton.setEnabled(True)
-            self.exportTimer.stop()
-            self.progress.setRange(0, 1)
-            self.progress.reset()
-            self.parent.display.enable()
+            self._finishExport()
+
+    def cancelExport(self, event=None):
+        if not self.exportTimer.isActive():
+            return
+        self.queue = []
+        self._finishExport()
+
+    def _finishExport(self):
+        self.exportButton.setEnabled(True)
+        self.previewButton.setEnabled(True)
+        self.movieButton.setEnabled(True)
+        self.pauseButton.setEnabled(False)
+        self.exportTimer.stop()
+        self.progress.setRange(0, 1)
+        self.progress.reset()
+        self.queue = []
+        self.parent.display.enable()
 
     def saveFrame(self, event=None):
         dir = self.folderLabel.text()
