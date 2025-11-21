@@ -35,8 +35,9 @@ from .qtview_widgets import paramListToVBox, controlFromParam, ListControl, \
 import time
 import traceback
 import glob
+import numpy as np
 from PIL import Image
-from math import ceil
+from math import ceil, pi
 
 from .params import PARAM_CATEGORIES, PARAMS, THEMES
 # from .. import open_3D_movie, VolumetricMovie
@@ -646,6 +647,12 @@ class VolumetricViewer(QMainWindow):
             self.addMenuItem(self.orientMenu,
                 f'Look down -{axis}-axis', f2, 'Shift+'+axis.lower())
 
+        self.addMenuItem(self.orientMenu,
+            'Rotate view 90 deg clockwise', self.rotate_clockwise, 'Shift+r')
+        
+        self.addMenuItem(self.orientMenu,
+            'Rotate view 90 deg counterclockwise', self.rotate_counterclockwise, 'r')
+
         self.themeMenu = self.viewMenu.addMenu('Theme')
 
         for name in THEMES:
@@ -873,6 +880,30 @@ class VolumetricViewer(QMainWindow):
         else:
             event.ignore()
 
+    def rotate_clockwise(self, event=None):
+        """Rotate view around the line of sight by 90 degrees clockwise."""
+        view = self.display.view
+        direction = view['look_at'] - view['camera_pos']
+        mag = np.linalg.norm(direction)
+        if mag == 0:
+            return
+
+        rotvec = -(direction / mag) * (pi / 2)
+        view.rotateCamera(rotvec)
+        self.display.update()
+
+    def rotate_counterclockwise(self, event=None):
+        """Rotate view around the line of sight by 90 degrees counterclockwise."""
+        view = self.display.view
+        direction = view['look_at'] - view['camera_pos']
+        mag = np.linalg.norm(direction)
+        if mag == 0:
+            return
+
+        rotvec = (direction / mag) * (pi / 2)
+        view.rotateCamera(rotvec)
+        self.display.update()
+
     def orient_camera(self, axis):
         if axis == 0:
             self.display.view.resetView(direction=(1, 0, 0), up=(0, 1, 0))
@@ -984,7 +1015,18 @@ def _setup_trace_logging():
     except OSError:
         return
 
-    faulthandler.enable(file=log_file, all_threads=True)
+    # Keep reference so it isn't GC'd
+    global _TRACE_LOG_FILE
+    _TRACE_LOG_FILE = log_file
+
+    try:
+        faulthandler.enable(file=log_file, all_threads=True)
+    except Exception:
+        # Retry without all_threads (stricter on macOS/hardened envs)
+        try:
+            faulthandler.enable(file=log_file)
+        except Exception:
+            pass
 
     def _log_exception(exc_type, exc_value, exc_tb):
         traceback.print_exception(exc_type, exc_value, exc_tb, file=log_file)

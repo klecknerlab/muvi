@@ -48,6 +48,7 @@ class VTIMovie(VolumetricMovie):
         '''
 
         self.filename = fn
+        self.copy_on_read = kwargs.pop('copy_on_read', True)
         self.info = VolumeProperties()
 
         offsets = []
@@ -210,6 +211,12 @@ class VTIMovie(VolumetricMovie):
         else:
             self.shape = (self.info['Nz'], self.info['Ny'], self.info['Nx'])
 
+        # Preallocate buffers for decompression to avoid per-frame allocations
+        self.frame_bytes = int(np.prod(self.shape)) * np.dtype(self.info['dtype']).itemsize
+        self._decompress_buffer = np.empty(self.frame_bytes, dtype='u1')
+        self._volume_buffer = self._decompress_buffer.view(self.info['dtype']).reshape(self.shape)
+        self._compressed_buffer = bytearray(0)
+
         # Update info fields if the user directly specified anything
         self.info.update(kwargs)
         self.validate_info()
@@ -222,13 +229,29 @@ class VTIMovie(VolumetricMovie):
         # Find the compressed block sizes and ends
         block_sizes = np.frombuffer(self.f.read(num_blocks * self.header_size), dtype=self.header_numpy_type)
         block_ends = np.cumsum(block_sizes)
+        compressed_size = int(block_ends[-1])
 
         # Decompress output into numpy array
-        output = np.empty((num_blocks - 1) * block_size + last_block_size, dtype='u1')
-        accel.decompress_blocks(np.frombuffer(self.f.read(block_ends[-1]), dtype='u1'), block_size, last_block_size, block_ends, output)
+        required_size = (num_blocks - 1) * block_size + last_block_size
+        if required_size != self.frame_bytes:
+            raise ValueError(f"Unexpected decompressed frame size (expected {self.frame_bytes}, got {required_size})")
+
+        # Ensure a reusable compressed buffer
+        if len(self._compressed_buffer) < compressed_size:
+            self._compressed_buffer = bytearray(compressed_size)
+        view = memoryview(self._compressed_buffer)[:compressed_size]
+
+        # Read compressed payload into reusable buffer
+        read = self.f.readinto(view)
+        if read != compressed_size:
+            raise ValueError(f"Unexpected compressed read size (expected {compressed_size}, got {read})")
+
+        accel.decompress_blocks(np.frombuffer(view, dtype='u1'), block_size, last_block_size, block_ends, self._decompress_buffer)
 
         # Reshape, retype, and return.
-        return output.view(self.info['dtype']).reshape(self.shape)
+        if self.copy_on_read:
+            return self._volume_buffer.copy()
+        return self._volume_buffer
 
 
     def close(self):

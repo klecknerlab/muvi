@@ -271,7 +271,7 @@ class VolumeAsset(DisplayAsset):
 
     def _load(self, data):
         if isinstance(data, str):
-            data = open_3D_movie(data)
+            data = open_3D_movie(data, copy_on_read=False)
 
         if not isinstance(data, VolumetricMovie):
             raise TypeError('data must be VolumetricMovie')
@@ -300,7 +300,8 @@ class VolumeAsset(DisplayAsset):
         GL.glActiveTexture(GL.GL_TEXTURE1)
         self.volumeTexture = textureFromArray(vol, wrap=GL.GL_CLAMP_TO_EDGE)
         GL.glActiveTexture(GL.GL_TEXTURE0)
-
+        # Reusable upload buffer to avoid reallocation when frames are not contiguous
+        self._upload_buffer = None
         points = np.empty(len(CUBE_CORNERS), self._VERT_TYPE)
         points['position'] = CUBE_CORNERS
         self.vertexArray = VertexArray(points)
@@ -321,7 +322,15 @@ class VolumeAsset(DisplayAsset):
 
     def _set_frame(self, frame):
         GL.glActiveTexture(GL.GL_TEXTURE1)
-        self.volumeTexture.replace(self.volume[frame])
+        frame_data = self.volume[frame]
+        # Ensure contiguous data without allocating every frame
+        if not frame_data.flags['C_CONTIGUOUS']:
+            if (self._upload_buffer is None) or (self._upload_buffer.shape != frame_data.shape):
+                self._upload_buffer = np.empty_like(frame_data)
+            self._upload_buffer[...] = frame_data
+            frame_data = self._upload_buffer
+
+        self.volumeTexture.replace(frame_data)
 
 
 #----------------------------------------------------------------------------
