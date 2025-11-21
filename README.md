@@ -11,14 +11,16 @@ We also need to install the following Python packages:
   * pyopengl
   * lz4
   * numba
+  * juliacall (not in Conda base)
 
 We can do this from a command console.  To do this in Windows, open `Anconda
 Powershell Prompt` in **administrator mode**.  (Right click on the program
 in the start menu and select `Run as administrator`.)  To do this on Mac or
-Linux just open a terminal.  In either case, run the following command in
+Linux just open a terminal.  In either case, run the following commands in
 the shell/terminal.
 ```shell
 conda install numba lz4 pyopengl pyqt
+conda install conda-forge::pyjuliacall
 ```
 
 You can also install these packages from the `Anaconda Navigator Program`.
@@ -33,6 +35,11 @@ check out the repository using the following procedure in VS Code:
   * Type `"clone"` + `Enter`, and select `Github: Clone`
   * Enter the following URL into the box: https://github.com/klecknerlab/muvi
   * If you wish, change the target directory and click `Clone`
+
+Note: if you are on Mac you need to make sure you have a functional git 
+installation first.  You can check this by just running `git' from a command
+line.  On new installs you will need to accept the XCode license first.
+(After you do, restart VSCode and the clone command should be present now.)
 
 You have now downloaded the Python repository.  We need to install it, which
 is easiest to do from a console window.  If you are using Anaconda, open the

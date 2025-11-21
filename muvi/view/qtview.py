@@ -20,6 +20,7 @@ application.
 '''
 
 import sys, os
+import faulthandler
 # from PyQt5.QtCore import Qt
 from PyQt5 import QtCore, QtGui
 Qt = QtCore.Qt
@@ -43,6 +44,7 @@ from .params import PARAM_CATEGORIES, PARAMS, THEMES
 ORG_NAME = "MUVI Lab"
 APP_NAME = "MUVI Volumetric Movie Viewer"
 ICON_DIR = os.path.split(__file__)[0]
+TRACEBACK_LOG = os.path.expanduser("~/muvi_traceback.txt")
 
 PARAM_WIDTH = 250
 SCROLL_WIDTH = 15
@@ -958,6 +960,8 @@ def view_volume(vol=None, args=None, window_name=None):
 
 
 def qt_viewer(args=None, window_name=None):
+    _setup_trace_logging()
+
     if args is None:
         args = sys.argv
 
@@ -971,3 +975,18 @@ def qt_viewer(args=None, window_name=None):
 
 if __name__ == '__main__':
     qt_viewer()
+
+
+def _setup_trace_logging():
+    """Enable faulthandler and capture uncaught exceptions to a home-dir log."""
+    try:
+        log_file = open(TRACEBACK_LOG, "a", buffering=1)
+    except OSError:
+        return
+
+    faulthandler.enable(file=log_file, all_threads=True)
+
+    def _log_exception(exc_type, exc_value, exc_tb):
+        traceback.print_exception(exc_type, exc_value, exc_tb, file=log_file)
+
+    sys.excepthook = _log_exception

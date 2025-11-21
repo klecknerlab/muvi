@@ -1090,7 +1090,7 @@ class VolumetricMovieFrom2D(VolumetricMovie):
         channels = self.info.get('channels', 1)
 
         if 'offset' not in self.info and hasattr(self.frames, 'get_frame_times'):
-            t = self.frames.get_frame_times()
+            t = self.frames.get_frame_times()[:-1] # Ignore last frame time, a camera bug sometimes makes it corrupt!
             dt = t[1:] - t[:-1]
             t1 = np.median(dt)
             i, = np.where(dt > 2*t1)

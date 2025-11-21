@@ -67,7 +67,7 @@ class GridData:
         V[..., 1] = -R[..., 0] / r
 
         grid = volume.GridData(
-            R = R,
+            pos = R,
             vel = V,
             r = r
         )
@@ -169,7 +169,7 @@ class GridData:
 
         Keywords
         --------
-        filetype : string ('vtp' or 'csv')
+        filetype : string ('vts' or 'csv')
             The type of file to save.  If not specified, determined from the
             extension.
         force_floats : None or numpy data type (default: "f")
