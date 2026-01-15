@@ -837,7 +837,7 @@ _'''.format(**vol_info).encode('UTF-8'))
         if not hasattr(self, '_write_file'):
             raise ValueError("No file open for writing; call start_vti_write first.")
 
-        dat = np.ascontiguousarray(self[self._write_current]).tostring()
+        dat = np.ascontiguousarray(self[self._write_current]).tobytes()
         self._write_current += 1
 
         num_blocks = (len(dat) + self._write_block_size - 1) // self._write_block_size
