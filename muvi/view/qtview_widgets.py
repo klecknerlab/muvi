@@ -610,8 +610,14 @@ class VectorControl(QWidget):
         self.silent = silent
 
     def setRange(self, minVal, maxVal, delta=None):
+        # Block signals while reconfiguring the range: if a shrinking range
+        # clamps a child's spin box, we don't want that clamp to propagate back
+        # as a value change (which would silently move the view).  Mirrors the
+        # guard already used in setValue.
         for control, minv, maxv in zip(self.controls, minVal, maxVal):
+            control.blockSignals(True)
             control.setRange(minv, maxv)
+            control.blockSignals(False)
 
     def _paramChanged(self, p, v):
         self.value[int(p)] = v

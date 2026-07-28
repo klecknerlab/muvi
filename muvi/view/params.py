@@ -269,7 +269,7 @@ PARAM_CATEGORIES['View'] = [
         min=-500*one, max=500*one, range_update='camera_limits', extend=-1,
         tooltip='The position of the camera in volume physical units.'),
     ViewParam('look_at', 'Camera Target', 50*one, min=-100*one, max=100*one,
-        range_update='data_limits',
+        range_update='data_limits', extend=0.5,
         tooltip='The position which the camera is looking at.'),
     ViewParam('up', 'Camera Up Direction', np.array([0, 1, 0], dtype='f'), min=-one, max=one,
         tooltip='The normal which defines the up direction of the camera.  Length is ignored.'),

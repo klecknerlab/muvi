@@ -446,52 +446,25 @@ class View:
             self.visibleAssets[asset.shader].add(id)
 
     def resetRange(self):
-        X0 = []
-        X1 = []
-        frameRange = []
-        frames = 0
-        dt = None
-
-        for asset in self.assets.values():
-            if asset.visible:
-                X0.append(asset.X0)
-                X1.append(asset.X1)
-                if asset.frameRange is not None:
-                    frameRange.append(asset.frameRange)
-                if hasattr(asset, 'dt'):
-                    dt = asset.dt
-
-        if not len(X0):
+        # Slider *ranges* for the spatial controls (display limits, camera
+        # position, and camera target) span every asset in the list -- visible
+        # or not -- so the sliders always reach all loaded data and toggling an
+        # asset's visibility never shifts them.  The frame range and the
+        # auto-fit block below stay tied to the currently visible assets.
+        listBounds = self._assetBounds(visible_only=False)
+        if listBounds is None:
             return
+        X0, X1, _, _ = listBounds
 
-        X0 = np.min(X0, axis=0)
-        X1 = np.max(X1, axis=0)
-
-        if frameRange:
-            frameRange = np.array(frameRange)
-            frameRange = (frameRange[:, 0].min(), frameRange[:, 1].max())
+        visBounds = self._assetBounds(visible_only=True)
+        if visBounds is not None:
+            _, _, frameRange, dt = visBounds
         else:
-            frameRange = None
-
+            frameRange, dt = None, None
         self.frameRange = frameRange
         self.dt = dt
 
-        # Old version of tick spacing: use maximum axis
-        # D = max(X1 - X0) * np.ones(3, 'f')
-
-        # New version: use median length axis
-        # (Better for long skinny volumes!)
-        D = sorted(abs(X1 - X0))[1] * np.ones(3, 'f')
-
-        # Build the tick spacing, which is the nearest 125 increment that
-        #  has less than the specified number of (major) ticks
-        majorTick = ceil125(D / self['axis_max_ticks'])
-        # print(X0, X1, D, majorTick)
-        lc = log125(majorTick)
-        # Minor ticks: 5 if the first digit is 1 or 5, or 4 if the first digit is 2
-        #  ... or just go down two "powers" of the 125 sequence
-        minorTicks = int(np.round(pow125(lc) / pow125(lc-2)))
-        minorTick = majorTick / minorTicks
+        D, majorTick, _, _ = self._tickSpacing(X0, X1)
 
         co = self['camera_pos']
         la = self['look_at']
@@ -506,16 +479,71 @@ class View:
         if frameRange is not None:
             self.updateRange('frame', frameRange[0], frameRange[1], dt)
 
-        if self['_autoupdate_limits']:
+        if self['_autoupdate_limits'] and visBounds is not None:
+            # Auto-fit the displayed volume to the *visible* data only.
+            X0v, X1v, _, _ = visBounds
+            _, majorTickV, minorTickV, minorTicksV = self._tickSpacing(X0v, X1v)
             self.update({
                 # Default limits expanded to nearest *minor* tick
-                "disp_X0": np.floor(X0 / minorTick) * minorTick,
-                "disp_X1": np.ceil(X1 / minorTick) * minorTick,
-                "axis_major_tick_spacing": majorTick,
-                "axis_minor_ticks": minorTicks,
+                "disp_X0": np.floor(X0v / minorTickV) * minorTickV,
+                "disp_X1": np.ceil(X1v / minorTickV) * minorTickV,
+                "axis_major_tick_spacing": majorTickV,
+                "axis_minor_ticks": minorTicksV,
             }, callback=True)
 
-            self.resetView(co-la)
+            self.resetView(co - la)
+
+    def _assetBounds(self, visible_only):
+        '''Bounding box (and frame range) over the assets.  If visible_only is
+        True, only visible assets are considered; otherwise every asset in the
+        list contributes.  Returns (X0, X1, frameRange, dt), or None if no
+        asset qualifies.'''
+        X0 = []
+        X1 = []
+        frameRange = []
+        dt = None
+
+        for asset in self.assets.values():
+            if visible_only and not asset.visible:
+                continue
+            X0.append(asset.X0)
+            X1.append(asset.X1)
+            if asset.frameRange is not None:
+                frameRange.append(asset.frameRange)
+            if hasattr(asset, 'dt'):
+                dt = asset.dt
+
+        if not len(X0):
+            return None
+
+        X0 = np.min(X0, axis=0)
+        X1 = np.max(X1, axis=0)
+
+        if frameRange:
+            frameRange = np.array(frameRange)
+            frameRange = (frameRange[:, 0].min(), frameRange[:, 1].max())
+        else:
+            frameRange = None
+
+        return X0, X1, frameRange, dt
+
+    def _tickSpacing(self, X0, X1):
+        '''Axis tick spacing for a bounding box.  Returns (D, majorTick,
+        minorTick, minorTicks).'''
+        # Use the median length axis (better for long skinny volumes than the
+        # maximum axis).
+        D = sorted(abs(X1 - X0))[1] * np.ones(3, 'f')
+
+        # Build the tick spacing, which is the nearest 125 increment that
+        #  has less than the specified number of (major) ticks
+        majorTick = ceil125(D / self['axis_max_ticks'])
+        lc = log125(majorTick)
+        # Minor ticks: 5 if the first digit is 1 or 5, or 4 if the first digit is 2
+        #  ... or just go down two "powers" of the 125 sequence
+        minorTicks = int(np.round(pow125(lc) / pow125(lc-2)))
+        minorTick = majorTick / minorTicks
+
+        return D, majorTick, minorTick, minorTicks
 
     #--------------------------------------------------------
     # Methods for manipulating the viewport
