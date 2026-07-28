@@ -947,6 +947,7 @@ class AssetList(QListWidget):
         self.openAction.triggered.connect(self.mainWindow.openFile)
         self.removeAction = QAction('Remove Item')
         self.limitsAction = QAction('Set Display Limits to Object Extent')
+        self.removeAllAction = QAction('Remove All')
 
         self.assets = {}
 
@@ -974,11 +975,16 @@ class AssetList(QListWidget):
                     'Loop connects points in file order into a closed curve; '
                     'only meaningful when the points are ordered along a path.')
                 menu.addAction(renderAction)
+        elif len(self.assets):
+            # Right-clicking empty space with data loaded offers a bulk clear.
+            menu.addAction(self.removeAllAction)
 
         action = menu.exec_(QtGui.QCursor.pos())
 
         if action == self.removeAction:
             self.removeAsset(item)
+        elif action == self.removeAllAction:
+            self.removeAllAssets()
         elif action == self.limitsAction:
             item.asset.X0
             item.asset.X1
@@ -1038,6 +1044,11 @@ class AssetList(QListWidget):
         self.takeItem(self.indexFromItem(item).row())
         del self.assets[id]
         self.mainWindow.display.update()
+
+    def removeAllAssets(self):
+        # Snapshot the items first: removeAsset mutates the list as it goes.
+        for item in [self.item(i) for i in range(self.count())]:
+            self.removeAsset(item)
 
     def addItem(self, assetItem):
         self.assets[assetItem.id] = assetItem
