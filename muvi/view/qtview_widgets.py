@@ -875,6 +875,20 @@ class ViewWidget(StaticViewWidget):
         self.update()
 
 
+def _equalize_title_widths(container):
+    '''Give every ParamControl title label in `container` the same width, so the
+    control column lines up and the tab looks identical regardless of the
+    individual label lengths.  Used for the point/loop asset tabs, whose labels
+    are all short; each title only ever grows to the longest label's width, so
+    nothing is truncated.'''
+    controls = container.findChildren(ParamControl)
+    if not controls:
+        return
+    width = max(c.title.sizeHint().width() for c in controls)
+    for c in controls:
+        c.title.setFixedWidth(width)
+
+
 class AssetItem(QListWidgetItem):
     def __init__(self, asset, mainWindow, parent=None):
         super().__init__(asset.label, parent)
@@ -889,7 +903,27 @@ class AssetItem(QListWidgetItem):
         pl = asset.paramList()
         # self.tab = mainWindow.buildParamTab(pl, prefix=self.prefix, defaults=asset.allParams())
         self.tab = mainWindow.buildParamTab(pl, prefix=self.prefix)
+        _equalize_title_widths(self.tab)
         self.label = asset.shader.capitalize()
+
+    def rebuildTab(self, mainWindow):
+        '''Rebuild this item's parameter tab after the asset's render mode
+        changed, so the panel shows the new mode's controls (and the item and
+        tab labels track the new mode).
+
+        The tab is built from the asset's *current* values (paramList(apply=
+        False) + the asset's live params as widget defaults) so switching modes
+        preserves settings such as the color variable, colormap, and limits
+        rather than resetting them to their computed defaults.'''
+        self.shader = self.asset.shader
+        self.tab = mainWindow.buildParamTab(
+            self.asset.paramList(apply=False),
+            prefix=self.prefix,
+            defaults=self.asset.allParams(),
+        )
+        _equalize_title_widths(self.tab)
+        self.label = self.asset.shader.capitalize()
+        self.setText(self.asset.label)
 
 
 class AssetList(QListWidget):
@@ -917,11 +951,23 @@ class AssetList(QListWidget):
         item = self.itemAt(point)
 
         menu = QMenu()
+        menu.setToolTipsVisible(True)
         menu.addAction(self.openAction)
 
+        renderAction = None
+        renderMode = None
         if item is not None:
             menu.addAction(self.removeAction)
             menu.addAction(self.limitsAction)
+
+            # Point/loop assets can be re-rendered in the other mode on the fly.
+            if getattr(item.asset, 'shader', None) in ('points', 'loop'):
+                renderMode = 'loop' if item.asset.shader == 'points' else 'points'
+                renderAction = QAction(f'Render as {renderMode.capitalize()}')
+                renderAction.setToolTip(
+                    'Loop connects points in file order into a closed curve; '
+                    'only meaningful when the points are ordered along a path.')
+                menu.addAction(renderAction)
 
         action = menu.exec_(QtGui.QCursor.pos())
 
@@ -934,6 +980,26 @@ class AssetList(QListWidget):
                 'disp_X0': item.asset.X0,
                 'disp_X1': item.asset.X1,
             }, callback=True)
+        elif renderAction is not None and action == renderAction:
+            self.setRenderMode(item, renderMode)
+
+    def setRenderMode(self, item, mode):
+        mainWindow = self.mainWindow
+        item.asset.set_render_mode(mode)
+
+        # Drop stale control references before rebuilding this asset's tab, so
+        # value/range callbacks never reach widgets that no longer exist.
+        prefix = item.prefix
+        for key in [k for k in mainWindow.paramControls if k.startswith(prefix)]:
+            del mainWindow.paramControls[key]
+
+        item.rebuildTab(mainWindow)
+
+        # If this asset's tab is the one on screen, swap in the rebuilt version.
+        if self.currentItem() is item:
+            mainWindow.selectAssetTab(item)
+
+        mainWindow.display.update()
 
     def assetChanged(self, asset):
         checked = asset.checkState() == Qt.Checked

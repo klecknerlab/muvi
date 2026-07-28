@@ -306,7 +306,7 @@ class VTKReader:
             end = self.f.tell()
             self.f.seek(0)
             header = self.f.read(end + 256)
-            m = re.search(b'<\s*AppendedData.*?>.*?_', header, flags=re.DOTALL)
+            m = re.search(rb'<\s*AppendedData.*?>.*?_', header, flags=re.DOTALL)
             if not m:
                 self.has_data = False
             else:

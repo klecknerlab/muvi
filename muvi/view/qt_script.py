@@ -49,8 +49,8 @@ class JSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-_assetRe = re.compile('\#([0-9]+)_(.*)')
-_copyRe = re.compile('(.*)\s+Copy(\s+[0-9]+)?')
+_assetRe = re.compile(r'\#([0-9]+)_(.*)')
+_copyRe = re.compile(r'(.*)\s+Copy(\s+[0-9]+)?')
 
 
 def smoothStep(x):

@@ -435,7 +435,7 @@ class MeshAsset(DisplayAsset):
 # Display class and misc. functions for glyph data
 #----------------------------------------------------------------------------
 
-_COMPONENT_RE = re.compile('(.*)\.(x|y|z|mag)')
+_COMPONENT_RE = re.compile(r'(.*)\.(x|y|z|mag)')
 X, Y, Z = np.eye(3)
 CONST_VARS = {
     '+x': X,
@@ -524,6 +524,13 @@ class GeometryAsset(DisplayAsset):
             elif arr.ndim == 2 and arr.shape[1] == 3:
                 self.vector_options.append(key)
                 self.scalar_options += [f'{key}.{c}' for c in ('x', 'y', 'z', 'mag')]
+
+        # Present the dropdowns (Color Variable, Thickness/Size, Direction) in
+        # alphanumeric order.  Sorting is case-insensitive; the fixed entries
+        # ('1', '+x', '-y', ...) start with '1'/'+'/'-' and so sort ahead of any
+        # letter-named variable.  Order here is purely presentational.
+        self.scalar_options.sort(key=str.lower)
+        self.vector_options.sort(key=str.lower)
 
         # Get limits from the check frames
         self.scalar_range = {}
@@ -645,7 +652,7 @@ class GeometryAsset(DisplayAsset):
                 self.vertexArray.draw()
                 # Arrays(GL.GL_LINE_STRIP_ADJACENCY)
 
-    def modify_param(self, name, **kwargs):
+    def modify_param(self, name, apply=True, **kwargs):
         if name in self.param_order:
             i = self.param_order[name]
             p = copy(self.params[i])
@@ -676,7 +683,7 @@ class GeometryAsset(DisplayAsset):
 
             self.params[i] = p
 
-            if default is not None:
+            if default is not None and apply:
                 try:
                     self[name] = default
                     p.default = default
@@ -684,11 +691,19 @@ class GeometryAsset(DisplayAsset):
                     warnings.warn(f"Unable to set display parameter '{p.name}' to '{default}'; invalid value.")
                     self[name] = old_default
                     p.default = old_default
+            elif default is not None:
+                # Rebuild-only: refresh the param's default for display without
+                # pushing the value onto the already-configured asset, so a
+                # render-mode switch preserves the current settings.
+                p.default = default
 
 
 
-    def paramList(self):
-        # The parameter list needs to be updated based on the available data
+    def paramList(self, apply=True):
+        # The parameter list needs to be updated based on the available data.
+        # When `apply` is False (a render-mode-switch rebuild), options and
+        # value ranges are still refreshed, but computed defaults are NOT pushed
+        # onto the asset -- the caller supplies the asset's current values.
         self.params = ASSET_PARAMS[self.shader].copy()
         self.param_order = {p.name:i
             for i, p in enumerate(self.params) if hasattr(p, 'name')}
@@ -702,8 +717,8 @@ class GeometryAsset(DisplayAsset):
                 normal_mod['default'] = f
                 break
 
-        self.modify_param('geometry_color', **color_mod)
-        self.modify_param('geometry_normal', **normal_mod)
+        self.modify_param('geometry_color', apply=apply, **color_mod)
+        self.modify_param('geometry_normal', apply=apply, **normal_mod)
 
         # This is now handled separately...
         # c = self.get_var(color_mod['default'])
@@ -713,16 +728,20 @@ class GeometryAsset(DisplayAsset):
         #     max=self.scalar_max, default=c.max())
         # c = self.get_var(color_mod['default'])
 
-        m, M = self.scalar_range[color_mod['default']]
+        # Range the colour limits over the field that will actually be shown -- the file's display
+        # `color` if it set one, otherwise the default.  (An explicit c0/c1 in the display still
+        # wins: the display dict is applied after this, below.)
+        active_color = self.display.get('color', color_mod['default'])
+        m, M = self.scalar_range.get(active_color, self.scalar_range[color_mod['default']])
         self.modify_param('geometry_c0', min=m,
-            max=M, default=m)
+            max=M, default=m, apply=apply)
         self.modify_param('geometry_c1', min=m,
-            max=M, default=M)
+            max=M, default=M, apply=apply)
 
         self.modify_param('geometry_size', options=self.scalar_options)
         L = mag(self.X1 - self.X0)
         if L >= 0:
-            self.modify_param('geometry_scale', default = L / np.sqrt(self._N))
+            self.modify_param('geometry_scale', default=L / np.sqrt(self._N), apply=apply)
 
         for k, v in self.display.items():
             if k not in self.param_order:
@@ -735,9 +754,49 @@ class GeometryAsset(DisplayAsset):
                 else:
                     warnings.warn(f'Unknown display parameter "k"; ignoring.')
                     continue
-            self.modify_param(k, default=v)
+            self.modify_param(k, default=v, apply=apply)
 
         return self.params
+
+    def set_render_mode(self, mode):
+        '''Switch this asset between 'points' and 'loop' rendering at runtime.
+
+        The underlying point data is untouched -- only the render mode changes.
+        ('loop' connects the points, in file order, into a closed curve, so it
+        is only meaningful when the points are ordered along a path.)  Shared
+        geometry_* settings such as the color variable and colormap are kept;
+        parameters unique to the new mode fall back to their defaults.  The
+        parent view's per-shader draw groups and this asset's vertex arrays are
+        updated to match.  Does nothing if the asset is already in `mode`.
+        '''
+        if mode not in ('points', 'loop'):
+            raise ValueError(
+                "Render mode should be 'points' or 'loop', not '%s'." % mode)
+
+        if mode == self.shader:
+            return
+
+        old_shader = self.shader
+        self.shader = mode
+        self._LABEL = mode.capitalize()
+        self.label = f'{self._LABEL}: {self.filename}'
+
+        # Fill in defaults for parameters unique to the new mode (e.g. loop_angle
+        # or points_skip); shared geometry_* values carry over untouched.
+        for key, val in ASSET_DEFAULTS[mode].items():
+            if key not in self.uniforms and key not in self.globalUniforms:
+                self[key] = val
+
+        # Refresh the global-uniform set (points and loop currently share the
+        # same dependencies, but this keeps the switch self-consistent).
+        self.globalUniformNames.update(self.parent._shaderDep[mode])
+
+        # Move the asset into the parent's draw group for the new shader.
+        self.parent.reassign_asset_shader(self.id, old_shader)
+
+        # Defer the vertex-array rebuild (which adds or drops the loop element
+        # buffer) to the next draw, matching how parameter changes are handled.
+        self._frame = None
 
     def __setitem__(self, key, val):
         # Handle changes that require us to

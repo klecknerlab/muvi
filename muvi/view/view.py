@@ -264,7 +264,7 @@ class View:
     # UI Interaction methods
     #--------------------------------------------------------
 
-    _assetRe = re.compile('\#([0-9]+)_(.*)')
+    _assetRe = re.compile(r'\#([0-9]+)_(.*)')
 
     def __setitem__(self, key, val, callback=False):
         self._params[key] = val
@@ -433,6 +433,17 @@ class View:
         self[f'#{asset.id}_visible'] = False
         asset.delete()
         del self.assets[id]
+
+    def reassign_asset_shader(self, id, old_shader):
+        '''Move an asset between the per-shader draw groups after its render
+        mode changed (see GeometryAsset.set_render_mode).  Only visible assets
+        belong to a draw group, so an invisible asset is simply removed from its
+        old group and re-added when it is next made visible.'''
+        asset = self.assets[id]
+        if old_shader in self.visibleAssets:
+            self.visibleAssets[old_shader].discard(id)
+        if asset.visible and asset.shader in self.visibleAssets:
+            self.visibleAssets[asset.shader].add(id)
 
     def resetRange(self):
         X0 = []

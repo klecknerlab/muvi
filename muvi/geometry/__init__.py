@@ -36,7 +36,7 @@ def load_geometry(fn):
     elif ext == '.py':
         with open(fn, 'rt') as f:
             preamble = f.readline()
-            m = re.match('\s*#\s*MUVI\s+GEOMETRY:(.+)', preamble)
+            m = re.match(r'\s*#\s*MUVI\s+GEOMETRY:(.+)', preamble)
             if not m:
                 raise RuntimeError(f'Failed to load dynamic geometry from "{fn}"; first line should be "# MUVI GEOMETRY: [geometry type]"')
             else:

@@ -449,7 +449,7 @@ class Mesh(object):
         return m
 
     def euler_char(self):
-        '''Return the *total* Euler Characteristic of a mesh: :math:`\chi = V - E + F`.
+        '''Return the *total* Euler Characteristic of a mesh: :math:`\\chi = V - E + F`.
 
         Note that orphaned points (not connected to triangles) are automatically
         excluded.

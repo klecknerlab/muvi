@@ -366,7 +366,7 @@ LINE_TYPES = {0:'Round', 1:'Ribbon', 2:'Thick Ribbon', 3:'Ellipse', 4:'Triangle'
 
 _ASSET = "loop"
 ASSET_PARAMS['loop'] = [
-    ViewParam('geometry_color', 'Color Variable', '1', options=SCALAR_OPTIONS,
+    ViewParam('geometry_color', 'Color', '1', options=SCALAR_OPTIONS,
         tooltip='Parameter used to color loop'),
     ViewParam('geometry_colormap', 'Colormap', 'RdBu', options=_colormap_names,
         tooltip='Select the color map used to color loop'),
@@ -380,7 +380,7 @@ ASSET_PARAMS['loop'] = [
         tooltip='If 0, use colormap to color the geometry; if 1, use the shade color.'),
     ViewParam('geometry_normal', 'Direction', '+y', options=VECTOR_OPTIONS,
         tooltip='Orientation vector of the loop'),
-    ViewParam('geometry_size', 'Thickness', '1', options=SCALAR_OPTIONS,
+    ViewParam('geometry_size', 'Size', '1', options=SCALAR_OPTIONS,
         tooltip='Parameter used to determine thickness of loop'),
     ViewParam('geometry_scale', 'Scale factor', 1.0, 1E-3, 1000, logstep=2,
         tooltip='Scale factor for loop thickness'),

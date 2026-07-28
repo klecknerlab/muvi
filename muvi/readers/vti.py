@@ -199,7 +199,7 @@ class VTIMovie(VolumetricMovie):
 
         self.f.seek(0)
         header = self.f.read(end + 256)
-        m = re.search(b'<\s*AppendedData.*?>.*?_', header, flags=re.DOTALL)
+        m = re.search(rb'<\s*AppendedData.*?>.*?_', header, flags=re.DOTALL)
         if not m:
             raise ValueError('Failed to find AppendedData section in "%s".  Is this a valid file?' % self.filename)
         self.binary_start = m.end()

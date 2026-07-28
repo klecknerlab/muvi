@@ -18,7 +18,7 @@
 from muvi.calibration import TargetCalibrationModel
 import time
 
-pickle = ".\sphere\channel1\muvi_track.pickle"
+pickle = r".\sphere\channel1\muvi_track.pickle"
 cal_json = "calibration_setup.json"
 muvi_xml = "muvi_setup.xml"
 

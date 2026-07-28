@@ -183,6 +183,16 @@ for determining the properties of Cine files:
     is obsolete in practice; if you don't specify `Ns` or `Nz`, this analysis 
     is automatic!)
 
+The `util` directory also holds two utilities for the viewer's colormaps:
+
+* `add_colormaps.py`: bakes matplotlib colormaps into `muvi/view/shaders/colormaps.xml` so they 
+    become available in the viewer (and as `colormap` values in geometry `.vtp` files).  With no 
+    arguments it adds matplotlib's Perceptually Uniform Sequential, Sequential, and Diverging 
+    groups; pass names (e.g. `python util/add_colormaps.py cool turbo`) to add specific ones.  Run 
+    with `--help` for options.
+* `reset_colormaps.py`: restores `colormaps.xml` to the original set, from the snapshot that 
+    `add_colormaps.py` saves on its first change.
+
 To convert your video file, use the installed `muvi_convert` shell command to 
 generate the `.vti` file, and `muvi` to view it:
 

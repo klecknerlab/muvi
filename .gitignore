@@ -7,6 +7,9 @@ __pycache__/
 **/muvi_screenshot*.png
 .swp
 
+# Colormap reset snapshot (written by util/add_colormaps.py; restored by util/reset_colormaps.py)
+colormaps.original.xml
+
 # Volume files
 util/*.vti
 *.muv
