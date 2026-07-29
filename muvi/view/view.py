@@ -486,11 +486,10 @@ class View:
         if self['_autoupdate_limits'] and visBounds is not None:
             # Auto-fit the displayed volume to the *visible* data only.
             X0v, X1v, _, _ = visBounds
-            _, majorTickV, minorTickV, minorTicksV = self._tickSpacing(X0v, X1v)
+            dispX0, dispX1, majorTickV, minorTicksV = self.fittedDisplayLimits(X0v, X1v)
             self.update({
-                # Default limits expanded to nearest *minor* tick
-                "disp_X0": np.floor(X0v / minorTickV) * minorTickV,
-                "disp_X1": np.ceil(X1v / minorTickV) * minorTickV,
+                "disp_X0": dispX0,
+                "disp_X1": dispX1,
                 "axis_major_tick_spacing": majorTickV,
                 "axis_minor_ticks": minorTicksV,
             }, callback=True)
@@ -557,6 +556,21 @@ class View:
         minorTick = majorTick / minorTicks
 
         return D, majorTick, minorTick, minorTicks
+
+    def fittedDisplayLimits(self, X0, X1):
+        '''Display limits that snugly contain the box [X0, X1], expanded out to
+        the nearest minor tick.  The outward rounding gives even a zero-thickness
+        (line or point) extent a visible, tick-aligned box, instead of a razor-
+        thin box that clips the geometry away.  Returns (disp_X0, disp_X1,
+        majorTick, minorTicks); the trailing two match the fitted box so callers
+        can keep the axis ticks consistent.'''
+        _, majorTick, minorTick, minorTicks = self._tickSpacing(X0, X1)
+        return (
+            np.floor(X0 / minorTick) * minorTick,
+            np.ceil(X1 / minorTick) * minorTick,
+            majorTick,
+            minorTicks,
+        )
 
     #--------------------------------------------------------
     # Methods for manipulating the viewport

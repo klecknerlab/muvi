@@ -986,11 +986,17 @@ class AssetList(QListWidget):
         elif action == self.removeAllAction:
             self.removeAllAssets()
         elif action == self.limitsAction:
-            item.asset.X0
-            item.asset.X1
+            # Fit to the object's extent the same way a freshly dropped asset
+            # does -- rounded out to the nearest minor tick -- so a line/point
+            # gets a visible box instead of a razor-thin one that clips it away.
+            view = self.mainWindow.display.view
+            dispX0, dispX1, majorTick, minorTicks = view.fittedDisplayLimits(
+                item.asset.X0, item.asset.X1)
             self.mainWindow.display.updateParams({
-                'disp_X0': item.asset.X0,
-                'disp_X1': item.asset.X1,
+                'disp_X0': dispX0,
+                'disp_X1': dispX1,
+                'axis_major_tick_spacing': majorTick,
+                'axis_minor_ticks': minorTicks,
             }, callback=True)
         elif renderAction is not None and action == renderAction:
             self.setRenderMode(item, renderMode)
