@@ -40,6 +40,10 @@ def copyArray(x):
 
 _OTF = np.array([1, 2, 5], 'd')
 
+# When the median axis extent falls below this fraction of the largest extent,
+# the object is treated as effectively a line/point for tick-spacing purposes.
+_DEGENERATE_EXTENT_FRAC = 1e-3
+
 def ceil125(x):
     round_up = 10**np.ceil(np.log10(x / _OTF)) * _OTF
     return round_up[np.argmin(round_up - x)]
@@ -530,9 +534,18 @@ class View:
     def _tickSpacing(self, X0, X1):
         '''Axis tick spacing for a bounding box.  Returns (D, majorTick,
         minorTick, minorTicks).'''
-        # Use the median length axis (better for long skinny volumes than the
-        # maximum axis).
-        D = sorted(abs(X1 - X0))[1] * np.ones(3, 'f')
+        # The median-length axis normally sets the scale (nicer than the
+        # maximum axis for long skinny volumes).  For a line or point, though,
+        # the median extent collapses to ~0 and would drive the spacing to
+        # zero, so fall back to the largest extent -- or a unit if the object
+        # is a single point.
+        extent = np.sort(np.abs(X1 - X0))
+        scale = extent[1]
+        if scale <= _DEGENERATE_EXTENT_FRAC * extent[2]:
+            scale = extent[2]
+        if scale <= 0:
+            scale = 1.0
+        D = scale * np.ones(3, 'f')
 
         # Build the tick spacing, which is the nearest 125 increment that
         #  has less than the specified number of (major) ticks
@@ -717,13 +730,6 @@ class View:
         tick_padding = self['axis_tick_padding']
         label_padding = self['axis_label_padding']
 
-        digits = -int(np.floor(np.log10(self['axis_major_tick_spacing'])))
-        if digits > 0:
-            label_fmt = f'%.{digits}f'
-        else:
-            label_fmt = '%i'
-
-
         label_type = float if (spacing % 1) else int
         # Let's make sure the axes have actually changed...
         key = (tuple(X0), tuple(X1), spacing, labels, orient, tick_padding, label_padding)
@@ -731,6 +737,28 @@ class View:
             return
         else:
             self._lastaxisLabel = key
+
+        # A near-degenerate object extent (e.g. a straight line) can drive the
+        # tick spacing to ~0, which would generate an unbounded number of tick
+        # labels and overflow the fixed-size axisLabel buffer.  Estimate the
+        # tick count in float (to dodge integer overflow) and skip the labels
+        # rather than crash if it is unreasonable.
+        n_ticks = np.maximum(np.floor(X1 / spacing) - np.ceil(X0 / spacing) + 1, 0).sum()
+        if 16 * (4 * n_ticks + 12) > self.AXIS_LABEL_MAX_CHARS:
+            print(
+                'muvi: skipping axis labels -- tick spacing too fine for the '
+                'display range (near-degenerate object extent?)',
+                file=sys.stderr,
+            )
+            self.axisLabelChars = 0
+            self.axisLabelVertexArray.update(self.axisLabel[:0])
+            return
+
+        digits = -int(np.floor(np.log10(spacing)))
+        if digits > 0:
+            label_fmt = f'%.{digits}f'
+        else:
+            label_fmt = '%i'
 
         i0 = np.ceil(X0 / spacing).astype('i4')
         i1 = np.floor(X1 / spacing).astype('i4')
