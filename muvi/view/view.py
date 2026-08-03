@@ -451,22 +451,23 @@ class View:
 
     def resetRange(self):
         # Slider *ranges* for the spatial controls (display limits, camera
-        # position, and camera target) span every asset in the list -- visible
-        # or not -- so the sliders always reach all loaded data and toggling an
-        # asset's visibility never shifts them.  The frame range and the
-        # auto-fit block below stay tied to the currently visible assets.
+        # position, and camera target) and the frame range span every asset in
+        # the list -- visible or not -- so the sliders always reach all loaded
+        # data and toggling an asset's visibility never shifts them.  Only the
+        # spatial auto-fit block below stays tied to the currently visible
+        # assets.
         listBounds = self._assetBounds(visible_only=False)
         if listBounds is None:
             return
-        X0, X1, _, _ = listBounds
+        X0, X1, frameRange, dt = listBounds
 
-        visBounds = self._assetBounds(visible_only=True)
-        if visBounds is not None:
-            _, _, frameRange, dt = visBounds
-        else:
-            frameRange, dt = None, None
+        # Frame range and playback wrapping span every loaded dataset, so
+        # unchecking a longer dataset doesn't shrink the scrub bar -- you can
+        # still play past where the shorter ones end (they simply disappear).
         self.frameRange = frameRange
         self.dt = dt
+
+        visBounds = self._assetBounds(visible_only=True)
 
         D, majorTick, _, _ = self._tickSpacing(X0, X1)
 

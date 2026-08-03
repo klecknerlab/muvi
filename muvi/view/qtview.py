@@ -887,9 +887,11 @@ class VolumetricViewer(QMainWindow):
         if event.mimeData().hasUrls:
             event.setDropAction(Qt.CopyAction)
             event.accept()
-            l = []
-            if len(event.mimeData().urls()):
-                self.openData(event.mimeData().urls()[0].toLocalFile())
+            # Open every dropped file, not just the first.  openData handles one
+            # file at a time and reports its own errors, so a bad file in the
+            # batch won't stop the rest from loading.
+            for url in event.mimeData().urls():
+                self.openData(url.toLocalFile())
         else:
             event.ignore()
 
